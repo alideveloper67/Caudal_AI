@@ -21,7 +21,7 @@ import urllib.request
 VERSION = "2.0.0"
 
 # usuario/repositorio de GitHub donde publicas las versiones
-ORIGEN = "alideveloper67/caudal"
+ORIGEN = "alideveloper67/Caudal_AI"
 
 API = f"https://api.github.com/repos/{ORIGEN}/releases/latest"
 CABECERAS = {
