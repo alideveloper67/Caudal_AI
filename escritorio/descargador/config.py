@@ -85,6 +85,35 @@ DEFECTOS = {
     "notificar_al_terminar": True,
     "abrir_al_terminar": False,
     "geometria": "",
+    # --- descargas: calidad fina
+    "codec_descarga": "maxima",      # maxima (AV1/VP9, hasta 8K) | compatible (H.264)
+    "bitrate_mp3": "320",            # 128 | 192 | 256 | 320 | V0
+    # --- reproduccion
+    "region": "PE",
+    "calidad_audio": "maxima",       # maxima | normal | ahorro
+    "calidad_video": "maxima",       # maxima | 4320 | 2160 | 1440 | 1080 | 720 | 480 | 360
+    "codec_video": "auto",           # auto | sin_av1 | compatible
+    "aceleracion": True,             # decodificar con la tarjeta grafica si se puede
+    "calidad_adaptable": True,       # bajar un escalon si el equipo pierde cuadros
+    "crossfade": 0,                  # segundos de fundido entre canciones (0 = sin fundido)
+    "normalizar": True,              # mismo volumen percibido entre canciones
+    "autoplay": True,                # al acabarse la cola, seguir con canciones parecidas
+    "sponsorblock": True,            # saltar lo que no es musica en videos musicales
+    "sponsorblock_videos": False,    # y patrocinios / autopromocion en videos normales
+    "preferir_descargado": True,     # si ya esta en el disco, sonar desde el disco
+    "volumen": 80,
+    "velocidad": 1.0,
+    "aleatorio": False,
+    "repetir": "no",                 # no | todo | una
+    "ecualizador": False,
+    "eq_bandas": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    "eq_preset": "Plano",
+    "segundo_plano": True,           # al cerrar la ventana sigue sonando en la bandeja
+    "mini_encima": True,             # el mini reproductor queda por encima de todo
+    "letras_auto": False,            # abrir las letras al reproducir
+    "panel_derecho": "sonando",      # sonando | cola | letras | oculto
+    "subtitulos_video": False,
+    "teclas_multimedia": True,
 }
 
 
@@ -117,6 +146,9 @@ class Ajustes:
 
     def __setitem__(self, clave, valor):
         self.datos[clave] = valor
+
+    def __contains__(self, clave):
+        return clave in self.datos or clave in DEFECTOS
 
     def get(self, clave, defecto=None):
         return self.datos.get(clave, defecto if defecto is not None else DEFECTOS.get(clave))

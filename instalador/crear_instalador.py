@@ -41,9 +41,7 @@ def comprimir():
             f"No encuentro la app compilada en:\n  {APP}\n\n"
             "Compilala antes con:\n"
             "  cd escritorio\n"
-            '  python -m PyInstaller --noconfirm --windowed --onedir '
-            '--name "Caudal Escritorio" --icon icono.ico --distpath salida '
-            '--add-data "bin;bin" --collect-all yt_dlp ejecutar.py'
+            '  python -m PyInstaller --noconfirm --distpath salida "Caudal Escritorio.spec"'
         )
 
     if os.path.exists(ZIP):

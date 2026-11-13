@@ -18,10 +18,10 @@ import tempfile
 import urllib.error
 import urllib.request
 
-VERSION = "1.3.0"
+VERSION = "2.0.0"
 
 # usuario/repositorio de GitHub donde publicas las versiones
-ORIGEN = "Aliprogramator/caudal"
+ORIGEN = "alideveloper67/caudal"
 
 API = f"https://api.github.com/repos/{ORIGEN}/releases/latest"
 CABECERAS = {

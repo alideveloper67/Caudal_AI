@@ -6,7 +6,7 @@ Con su propio navegador, su biblioteca y su reproductor.
 </p>
 
 <p align="center">
-  <a href="https://github.com/Aliprogramator/caudal/releases/latest">
+  <a href="https://github.com/alideveloper67/caudal/releases/latest">
     <b>Descargar la última versión</b>
   </a>
 </p>
@@ -38,7 +38,7 @@ Con su propio navegador, su biblioteca y su reproductor.
 ## Instalar
 
 **Windows** — baja `CaudalInstalador.exe` de la
-[última versión](https://github.com/Aliprogramator/caudal/releases/latest) y ábrelo.
+[última versión](https://github.com/alideveloper67/caudal/releases/latest) y ábrelo.
 Si ya tenías Caudal, se actualiza encima y conserva tus descargas y ajustes.
 
 **Android** — baja el APK y ábrelo desde el teléfono. `Caudal.apk` es el ligero;

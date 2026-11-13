@@ -50,3 +50,6 @@ caratulas/
 *.iml
 .DS_Store
 Thumbs.db
+
+# la receta de compilacion del escritorio si se sube
+!escritorio/Caudal Escritorio.spec

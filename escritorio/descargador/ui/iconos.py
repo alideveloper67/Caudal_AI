@@ -242,13 +242,283 @@ def pixmap(nombre, tam=20, color=None):
         p.drawLine(QPointF(12 * e, 5 * e), QPointF(12 * e, 19 * e))
         p.drawLine(QPointF(5 * e, 12 * e), QPointF(19 * e, 12 * e))
 
+    else:
+        _dibujar_extra(p, nombre, e, color)
+
     p.end()
     _CACHE[clave] = pm
     return pm
 
 
+def _corazon(e):
+    ruta = QPainterPath()
+    ruta.moveTo(12 * e, 20 * e)
+    ruta.cubicTo(5 * e, 15 * e, 2.5 * e, 11.5 * e, 3 * e, 8 * e)
+    ruta.cubicTo(3.5 * e, 4.5 * e, 8.5 * e, 3 * e, 12 * e, 7 * e)
+    ruta.cubicTo(15.5 * e, 3 * e, 20.5 * e, 4.5 * e, 21 * e, 8 * e)
+    ruta.cubicTo(21.5 * e, 11.5 * e, 19 * e, 15 * e, 12 * e, 20 * e)
+    ruta.closeSubpath()
+    return ruta
+
+
+def _dibujar_extra(p, nombre, e, color):
+    """Iconos de la version reproductor (mismo trazo que los de arriba)."""
+    import math
+
+    relleno = QColor(color)
+
+    def lleno():
+        p.setBrush(relleno)
+        p.setPen(Qt.NoPen)
+
+    def flecha(x, y, hacia):
+        lleno()
+        ruta = QPainterPath()
+        if hacia == "der":
+            ruta.moveTo((x - 3) * e, (y - 3) * e)
+            ruta.lineTo((x + 1) * e, y * e)
+            ruta.lineTo((x - 3) * e, (y + 3) * e)
+        else:
+            ruta.moveTo((x + 3) * e, (y - 3) * e)
+            ruta.lineTo((x - 1) * e, y * e)
+            ruta.lineTo((x + 3) * e, (y + 3) * e)
+        ruta.closeSubpath()
+        p.drawPath(ruta)
+        _pluma(p, color)
+
+    if nombre == "corazon":
+        p.drawPath(_corazon(e))
+    elif nombre == "corazon_lleno":
+        lleno()
+        p.drawPath(_corazon(e))
+    elif nombre in ("repetir", "repetir_una"):
+        p.drawPolyline([QPointF(4 * e, 13 * e), QPointF(4 * e, 8 * e), QPointF(18 * e, 8 * e)])
+        p.drawPolyline([QPointF(20 * e, 11 * e), QPointF(20 * e, 16 * e), QPointF(6 * e, 16 * e)])
+        flecha(19, 8, "der")
+        flecha(5, 16, "izq")
+        if nombre == "repetir_una":
+            lleno()
+            p.drawEllipse(QPointF(12 * e, 12 * e), 3.6 * e, 3.6 * e)
+            p.setPen(QColor("#0B0D12"))
+            f = p.font()
+            f.setPixelSize(max(6, int(5.5 * e)))
+            f.setBold(True)
+            p.setFont(f)
+            p.drawText(QRectF(8.4 * e, 8.4 * e, 7.2 * e, 7.2 * e), Qt.AlignCenter, "1")
+    elif nombre == "cola":
+        p.drawLine(QPointF(4 * e, 6 * e), QPointF(15 * e, 6 * e))
+        p.drawLine(QPointF(4 * e, 11 * e), QPointF(15 * e, 11 * e))
+        p.drawLine(QPointF(4 * e, 16 * e), QPointF(10 * e, 16 * e))
+        lleno()
+        ruta = QPainterPath()
+        ruta.moveTo(14 * e, 13.5 * e)
+        ruta.lineTo(20.5 * e, 17 * e)
+        ruta.lineTo(14 * e, 20.5 * e)
+        ruta.closeSubpath()
+        p.drawPath(ruta)
+    elif nombre == "letras":
+        p.drawRoundedRect(QRectF(9 * e, 2.5 * e, 6 * e, 11 * e), 3 * e, 3 * e)
+        p.drawArc(QRectF(6 * e, 6 * e, 12 * e, 11 * e), 200 * 16, 140 * 16)
+        p.drawLine(QPointF(12 * e, 17 * e), QPointF(12 * e, 21 * e))
+        p.drawLine(QPointF(8.5 * e, 21 * e), QPointF(15.5 * e, 21 * e))
+    elif nombre == "mini":
+        p.drawRoundedRect(QRectF(2.5 * e, 4.5 * e, 19 * e, 15 * e), 2.2 * e, 2.2 * e)
+        lleno()
+        p.drawRoundedRect(QRectF(12 * e, 11.5 * e, 7.5 * e, 6 * e), 1.2 * e, 1.2 * e)
+    elif nombre == "pantalla_completa":
+        for (x, y, dx, dy) in ((3, 3, 1, 1), (21, 3, -1, 1), (3, 21, 1, -1), (21, 21, -1, -1)):
+            p.drawPolyline([QPointF(x * e, (y + 5 * dy) * e), QPointF(x * e, y * e),
+                            QPointF((x + 5 * dx) * e, y * e)])
+    elif nombre == "salir_pantalla":
+        for (x, y, dx, dy) in ((9, 9, -1, -1), (15, 9, 1, -1), (9, 15, -1, 1), (15, 15, 1, 1)):
+            p.drawPolyline([QPointF((x + 5 * dx) * e, y * e), QPointF(x * e, y * e),
+                            QPointF(x * e, (y + 5 * dy) * e)])
+    elif nombre == "ecualizador":
+        for x, y in ((6, 9), (12, 15), (18, 7)):
+            p.drawLine(QPointF(x * e, 3.5 * e), QPointF(x * e, 20.5 * e))
+            lleno()
+            p.drawEllipse(QPointF(x * e, y * e), 2.4 * e, 2.4 * e)
+            _pluma(p, color)
+    elif nombre == "temporizador":
+        ruta = QPainterPath()
+        ruta.moveTo(14 * e, 3.5 * e)
+        ruta.arcTo(QRectF(3 * e, 3.5 * e, 17.5 * e, 17.5 * e), 70, 270)
+        ruta.cubicTo(13 * e, 21 * e, 21 * e, 14 * e, 19.5 * e, 9 * e)
+        ruta.cubicTo(15.5 * e, 12.5 * e, 10 * e, 9.5 * e, 14 * e, 3.5 * e)
+        p.drawPath(ruta)
+    elif nombre == "altavoz_mute":
+        lleno()
+        cuerpo = QPainterPath()
+        cuerpo.moveTo(3 * e, 9 * e)
+        cuerpo.lineTo(7 * e, 9 * e)
+        cuerpo.lineTo(12 * e, 4.5 * e)
+        cuerpo.lineTo(12 * e, 19.5 * e)
+        cuerpo.lineTo(7 * e, 15 * e)
+        cuerpo.lineTo(3 * e, 15 * e)
+        cuerpo.closeSubpath()
+        p.drawPath(cuerpo)
+        _pluma(p, color)
+        p.drawLine(QPointF(15 * e, 9 * e), QPointF(21 * e, 15 * e))
+        p.drawLine(QPointF(21 * e, 9 * e), QPointF(15 * e, 15 * e))
+    elif nombre == "puntos":
+        lleno()
+        for x in (5.5, 12, 18.5):
+            p.drawEllipse(QPointF(x * e, 12 * e), 1.7 * e, 1.7 * e)
+    elif nombre == "enlace":
+        p.drawRoundedRect(QRectF(2.5 * e, 8 * e, 10 * e, 8 * e), 4 * e, 4 * e)
+        p.drawRoundedRect(QRectF(11.5 * e, 8 * e, 10 * e, 8 * e), 4 * e, 4 * e)
+    elif nombre == "radio":
+        lleno()
+        p.drawEllipse(QPointF(12 * e, 12 * e), 2.3 * e, 2.3 * e)
+        _pluma(p, color)
+        p.drawArc(QRectF(7 * e, 7 * e, 10 * e, 10 * e), 45 * 16, 90 * 16)
+        p.drawArc(QRectF(7 * e, 7 * e, 10 * e, 10 * e), 225 * 16, 90 * 16)
+        p.drawArc(QRectF(3 * e, 3 * e, 18 * e, 18 * e), 45 * 16, 90 * 16)
+        p.drawArc(QRectF(3 * e, 3 * e, 18 * e, 18 * e), 225 * 16, 90 * 16)
+        p.drawArc(QRectF(7 * e, 7 * e, 10 * e, 10 * e), -45 * 16, 90 * 16)
+        p.drawArc(QRectF(7 * e, 7 * e, 10 * e, 10 * e), 135 * 16, 90 * 16)
+    elif nombre == "biblioteca":
+        p.drawLine(QPointF(5 * e, 3.5 * e), QPointF(5 * e, 20.5 * e))
+        p.drawLine(QPointF(10 * e, 3.5 * e), QPointF(10 * e, 20.5 * e))
+        p.drawLine(QPointF(14.5 * e, 4.5 * e), QPointF(20 * e, 20 * e))
+    elif nombre == "brujula":
+        p.drawEllipse(QPointF(12 * e, 12 * e), 9 * e, 9 * e)
+        lleno()
+        ruta = QPainterPath()
+        ruta.moveTo(15.5 * e, 8.5 * e)
+        ruta.lineTo(13.4 * e, 13.4 * e)
+        ruta.lineTo(8.5 * e, 15.5 * e)
+        ruta.lineTo(10.6 * e, 10.6 * e)
+        ruta.closeSubpath()
+        p.drawPath(ruta)
+    elif nombre == "descargado":
+        lleno()
+        p.drawEllipse(QPointF(12 * e, 12 * e), 9.5 * e, 9.5 * e)
+        _pluma(p, "#0B0D12", 2.1 * e * 0.9)
+        p.drawLine(QPointF(12 * e, 7 * e), QPointF(12 * e, 16 * e))
+        p.drawPolyline([QPointF(8.5 * e, 12.8 * e), QPointF(12 * e, 16.3 * e),
+                        QPointF(15.5 * e, 12.8 * e)])
+    elif nombre == "descarga_circulo":
+        p.drawEllipse(QPointF(12 * e, 12 * e), 9 * e, 9 * e)
+        p.drawLine(QPointF(12 * e, 7 * e), QPointF(12 * e, 16 * e))
+        p.drawPolyline([QPointF(8.5 * e, 12.8 * e), QPointF(12 * e, 16.3 * e),
+                        QPointF(15.5 * e, 12.8 * e)])
+    elif nombre == "subtitulos":
+        p.drawRoundedRect(QRectF(2.5 * e, 5 * e, 19 * e, 14 * e), 2.5 * e, 2.5 * e)
+        p.drawLine(QPointF(6 * e, 12 * e), QPointF(9 * e, 12 * e))
+        p.drawLine(QPointF(11 * e, 12 * e), QPointF(18 * e, 12 * e))
+        p.drawLine(QPointF(6 * e, 15.5 * e), QPointF(13 * e, 15.5 * e))
+        p.drawLine(QPointF(15 * e, 15.5 * e), QPointF(18 * e, 15.5 * e))
+    elif nombre == "velocidad":
+        p.drawArc(QRectF(3 * e, 4 * e, 18 * e, 18 * e), 0, 180 * 16)
+        p.drawLine(QPointF(12 * e, 13 * e), QPointF(16.5 * e, 8 * e))
+        lleno()
+        p.drawEllipse(QPointF(12 * e, 13 * e), 1.8 * e, 1.8 * e)
+    elif nombre == "fijar":
+        ruta = QPainterPath()
+        ruta.moveTo(9 * e, 3.5 * e)
+        ruta.lineTo(15 * e, 3.5 * e)
+        ruta.lineTo(14 * e, 9.5 * e)
+        ruta.lineTo(17.5 * e, 13.5 * e)
+        ruta.lineTo(6.5 * e, 13.5 * e)
+        ruta.lineTo(10 * e, 9.5 * e)
+        ruta.closeSubpath()
+        lleno()
+        p.drawPath(ruta)
+        _pluma(p, color)
+        p.drawLine(QPointF(12 * e, 13.5 * e), QPointF(12 * e, 21 * e))
+    elif nombre == "lista":
+        for y in (6, 12, 18):
+            p.drawLine(QPointF(8.5 * e, y * e), QPointF(20.5 * e, y * e))
+            lleno()
+            p.drawEllipse(QPointF(4.5 * e, y * e), 1.3 * e, 1.3 * e)
+            _pluma(p, color)
+    elif nombre == "anadir_lista":
+        p.drawLine(QPointF(3.5 * e, 6 * e), QPointF(15 * e, 6 * e))
+        p.drawLine(QPointF(3.5 * e, 11 * e), QPointF(15 * e, 11 * e))
+        p.drawLine(QPointF(3.5 * e, 16 * e), QPointF(10 * e, 16 * e))
+        p.drawLine(QPointF(17.5 * e, 12.5 * e), QPointF(17.5 * e, 20.5 * e))
+        p.drawLine(QPointF(13.5 * e, 16.5 * e), QPointF(21.5 * e, 16.5 * e))
+    elif nombre == "usuario":
+        p.drawEllipse(QPointF(12 * e, 8.5 * e), 4.2 * e, 4.2 * e)
+        p.drawArc(QRectF(4 * e, 13.5 * e, 16 * e, 14 * e), 20 * 16, 140 * 16)
+    elif nombre == "editar":
+        p.drawPolyline([QPointF(4 * e, 20 * e), QPointF(4.5 * e, 15.5 * e),
+                        QPointF(15.5 * e, 4.5 * e), QPointF(19.5 * e, 8.5 * e),
+                        QPointF(8.5 * e, 19.5 * e), QPointF(4 * e, 20 * e)])
+        p.drawLine(QPointF(13 * e, 7 * e), QPointF(17 * e, 11 * e))
+    elif nombre == "chevron_abajo":
+        p.drawPolyline([QPointF(6 * e, 9.5 * e), QPointF(12 * e, 15.5 * e),
+                        QPointF(18 * e, 9.5 * e)])
+    elif nombre == "chevron_arriba":
+        p.drawPolyline([QPointF(6 * e, 14.5 * e), QPointF(12 * e, 8.5 * e),
+                        QPointF(18 * e, 14.5 * e)])
+    elif nombre == "sonando":
+        lleno()
+        for x, h in ((5, 9), (10, 15), (15, 6), (20, 12)):
+            p.drawRoundedRect(QRectF((x - 1.4) * e, (20 - h) * e, 2.8 * e, h * e), 1 * e, 1 * e)
+    elif nombre == "panel":
+        p.drawRoundedRect(QRectF(3 * e, 4.5 * e, 18 * e, 15 * e), 2.2 * e, 2.2 * e)
+        p.drawLine(QPointF(14.5 * e, 4.5 * e), QPointF(14.5 * e, 19.5 * e))
+    elif nombre == "check_circulo":
+        lleno()
+        p.drawEllipse(QPointF(12 * e, 12 * e), 9.5 * e, 9.5 * e)
+        _pluma(p, "#0B0D12", 2.0 * e * 0.9)
+        p.drawPolyline([QPointF(7.5 * e, 12.3 * e), QPointF(10.6 * e, 15.4 * e),
+                        QPointF(16.5 * e, 9 * e)])
+    elif nombre == "mas_circulo":
+        p.drawEllipse(QPointF(12 * e, 12 * e), 9 * e, 9 * e)
+        p.drawLine(QPointF(12 * e, 7.5 * e), QPointF(12 * e, 16.5 * e))
+        p.drawLine(QPointF(7.5 * e, 12 * e), QPointF(16.5 * e, 12 * e))
+    elif nombre == "album":
+        p.drawEllipse(QPointF(12 * e, 12 * e), 9 * e, 9 * e)
+        p.drawEllipse(QPointF(12 * e, 12 * e), 2.5 * e, 2.5 * e)
+    elif nombre == "calidad":
+        p.drawRoundedRect(QRectF(2.5 * e, 6 * e, 19 * e, 12 * e), 2.4 * e, 2.4 * e)
+        f = p.font()
+        f.setPixelSize(max(6, int(7.4 * e)))
+        f.setBold(True)
+        p.setFont(f)
+        p.drawText(QRectF(2.5 * e, 6 * e, 19 * e, 12 * e), Qt.AlignCenter, "HD")
+    elif nombre == "adelantar10":
+        p.drawArc(QRectF(4 * e, 4 * e, 16 * e, 16 * e), -60 * 16, 300 * 16)
+        flecha(18.5, 6.5, "der")
+        f = p.font()
+        f.setPixelSize(max(6, int(6.5 * e)))
+        f.setBold(True)
+        p.setFont(f)
+        p.drawText(QRectF(4 * e, 4 * e, 16 * e, 16 * e), Qt.AlignCenter, "10")
+    elif nombre == "retroceder10":
+        p.drawArc(QRectF(4 * e, 4 * e, 16 * e, 16 * e), -120 * 16, -300 * 16)
+        flecha(5.5, 6.5, "izq")
+        f = p.font()
+        f.setPixelSize(max(6, int(6.5 * e)))
+        f.setBold(True)
+        p.setFont(f)
+        p.drawText(QRectF(4 * e, 4 * e, 16 * e, 16 * e), Qt.AlignCenter, "10")
+    elif nombre == "compartir":
+        p.drawPolyline([QPointF(12 * e, 15 * e), QPointF(12 * e, 3.5 * e)])
+        p.drawPolyline([QPointF(7.5 * e, 8 * e), QPointF(12 * e, 3.5 * e), QPointF(16.5 * e, 8 * e)])
+        p.drawPolyline([QPointF(7 * e, 11 * e), QPointF(4.5 * e, 11 * e), QPointF(4.5 * e, 20.5 * e),
+                        QPointF(19.5 * e, 20.5 * e), QPointF(19.5 * e, 11 * e), QPointF(17 * e, 11 * e)])
+    else:
+        # desconocido: un punto, para no romper nada
+        lleno()
+        p.drawEllipse(QPointF(12 * e, 12 * e), 2 * e, 2 * e)
+    _ = math
+
+
 def icono(nombre, tam=20, color=None):
     return QIcon(pixmap(nombre, tam, color))
+
+
+def icono_estados(nombre, tam=20, normal=None, activo=None):
+    """Icono que cambia de color al pasar el raton (modo Active de QIcon)."""
+    ic = QIcon()
+    ic.addPixmap(pixmap(nombre, tam, normal or C["texto2"]), QIcon.Normal, QIcon.Off)
+    ic.addPixmap(pixmap(nombre, tam, activo or C["texto"]), QIcon.Active, QIcon.Off)
+    ic.addPixmap(pixmap(nombre, tam, C["texto3"]), QIcon.Disabled, QIcon.Off)
+    return ic
 
 
 def chip_plataforma(plataforma, tam=34):
@@ -347,25 +617,63 @@ def flechas_qss():
         p.end()
         pm.save(str(archivo))
         rutas[nombre] = str(archivo).replace("\\", "/")
+
+    # interruptores de las casillas (la bola blanca a un lado u otro)
+    for nombre, encendido in (("interruptor_off", False), ("interruptor_on", True)):
+        archivo = destino / f"{nombre}.png"
+        pm = QPixmap(72, 40)
+        pm.fill(Qt.transparent)
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor("#0A0B0E") if encendido else QColor(C["texto2"]))
+        x = 52 if encendido else 20
+        p.drawEllipse(QPointF(x, 20), 14, 14)
+        p.end()
+        pm.save(str(archivo))
+        rutas[nombre] = str(archivo).replace("\\", "/")
     return rutas
 
 
 def icono_app(tam=64):
-    """Icono de la aplicacion: flecha de descarga sobre fondo indigo."""
+    """Icono de Caudal: un boton de reproducir del que sale una corriente."""
+    from PySide6.QtGui import QLinearGradient
+
+    clave = ("app", tam)
+    if clave in _CACHE:
+        return _CACHE[clave]
     pm, p = _lienzo(tam)
     e = tam / 64.0
+    degradado = QLinearGradient(0, 0, tam, tam)
+    degradado.setColorAt(0.0, QColor("#3BE3F7"))
+    degradado.setColorAt(1.0, QColor("#2563EB"))
     p.setPen(Qt.NoPen)
-    p.setBrush(QColor(C["acento"]))
+    p.setBrush(degradado)
     p.drawRoundedRect(QRectF(0, 0, tam, tam), 15 * e, 15 * e)
 
-    lapiz = QPen(QColor("#FFFFFF"))
-    lapiz.setWidthF(5.4 * e)
+    # triangulo de reproducir
+    p.setBrush(QColor("#FFFFFF"))
+    ruta = QPainterPath()
+    ruta.moveTo(22 * e, 14 * e)
+    ruta.lineTo(46 * e, 28.5 * e)
+    ruta.lineTo(22 * e, 43 * e)
+    ruta.closeSubpath()
+    p.drawPath(ruta)
+
+    # la corriente: dos ondas bajo el triangulo
+    lapiz = QPen(QColor(255, 255, 255, 235))
+    lapiz.setWidthF(3.6 * e)
     lapiz.setCapStyle(Qt.RoundCap)
-    lapiz.setJoinStyle(Qt.RoundJoin)
     p.setPen(lapiz)
     p.setBrush(Qt.NoBrush)
-    p.drawLine(QPointF(32 * e, 14 * e), QPointF(32 * e, 38 * e))
-    p.drawPolyline([QPointF(21 * e, 28 * e), QPointF(32 * e, 39.5 * e), QPointF(43 * e, 28 * e)])
-    p.drawLine(QPointF(18 * e, 48 * e), QPointF(46 * e, 48 * e))
+    for dy, alfa in ((49, 235), (55.5, 150)):
+        lapiz.setColor(QColor(255, 255, 255, alfa))
+        p.setPen(lapiz)
+        onda = QPainterPath()
+        onda.moveTo(13 * e, dy * e)
+        onda.cubicTo(20 * e, (dy - 5) * e, 26 * e, (dy + 5) * e, 32 * e, dy * e)
+        onda.cubicTo(38 * e, (dy - 5) * e, 44 * e, (dy + 5) * e, 51 * e, dy * e)
+        p.drawPath(onda)
     p.end()
+    _CACHE[clave] = pm
     return pm

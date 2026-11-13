@@ -1,170 +1,170 @@
-# Descargador de Videos
+# Caudal Escritorio 2.0
 
-Aplicación de escritorio para descargar videos y audio de YouTube, Instagram,
-TikTok, X (Twitter), Facebook, Telegram y más de mil sitios web.
+Reproductor de música y video para Windows con todo YouTube Music y YouTube
+dentro, sin anuncios, en máxima calidad, y con descargas en el formato que
+quieras. Lo que descargas queda en tu biblioteca y suena sin internet.
 
 ---
 
-## Cómo se usa
+## Lo que hace
 
-1. Abre la aplicación (acceso directo del escritorio, `Descargador de Videos.bat`
-   o el `.exe` de la carpeta `dist`).
-2. Pega el enlace en el campo de arriba y pulsa **Descargar**.
-3. Los videos se guardan en la carpeta que aparece indicada bajo los desplegables.
+### Como Spotify
 
-Puedes pegar **varios enlaces de golpe** (separados por espacios o saltos de
-línea) o **arrastrarlos** hasta la ventana.
+- **Inicio** con saludo, atajos a lo último que escuchaste, *Volver a
+  escuchar*, *Tus mixes* (hechos con tus artistas más escuchados) y las
+  secciones de YouTube Music de tu país: Selección rápida, novedades,
+  tendencias, géneros.
+- **Buscar** con resultado principal, canciones, artistas, álbumes, listas y
+  videos; filtros por tipo y búsquedas recientes. Si pegas un **enlace** de
+  cualquiera de ~1800 sitios, ofrece escucharlo, verlo o descargarlo.
+- **Artistas** (foto a todo lo ancho, oyentes, populares, discografía,
+  *Seguir*, radio), **álbumes** y **listas** con cabecera del color de la
+  portada.
+- **Tu biblioteca**: Tus me gusta, tus listas (con mosaico de portadas,
+  fijadas arriba), álbumes y listas guardados, artistas que sigues, y lo
+  descargado. Arrastra una canción encima de una lista para añadirla.
+- **Cola** como la de Spotify: *Siguiente en tu cola* (lo que añades a mano va
+  primero), *Siguiente de…* y **reproducción automática** con canciones
+  parecidas cuando se acaba.
+- **Letra sincronizada** que avanza sola sobre el color de la portada; clic en
+  una línea para saltar ahí.
+- Aleatorio, repetir (todo / una), **fundido entre canciones** (0–12 s),
+  **normalizar volumen** (-14 LUFS), **ecualizador de 10 bandas** con 14
+  ajustes listos, velocidad sin cambiar el tono, **temporizador para dormir**.
+- Al abrir, **retoma** la cola donde la dejaste.
 
-### Atajos
+### Como YouTube Premium
+
+- **Sin anuncios** y **en segundo plano**: al cerrar la ventana sigue sonando
+  junto al reloj (bandeja). Para salir del todo: clic derecho → Salir.
+- **Mini reproductor** flotante, siempre encima, con el video o la portada.
+- Video en **máxima calidad**: hasta 8K y HDR, imagen y sonido por separado
+  como los sirve YouTube. Calidad, códec, subtítulos, velocidad y capítulos
+  se cambian mientras ves. **Pantalla completa** con controles que se
+  esconden.
+- **Calidad adaptable**: si el equipo pierde cuadros, baja un escalón y avisa.
+- **Solo audio**: deja de ver el video y sigue escuchándolo.
+- **Saltar lo que no es música** (intros habladas, finales) y, si quieres,
+  patrocinios, con la base pública de SponsorBlock.
+- Las **teclas multimedia** del teclado y la ventanita de volumen de Windows
+  controlan Caudal.
+
+### Descargas
+
+Cualquier canción, álbum, lista o video se descarga desde su menú
+(**Descargar ›**) o desde la página **Descargas** pegando enlaces:
+
+| Formato | Qué obtienes |
+|---|---|
+| MP3 320 kbps (o 256/192/128/V0) | Lo abre todo |
+| M4A / AAC | El AAC de YouTube, sin recomprimir |
+| OPUS | El Opus original (~160 kbps), la mejor calidad de YouTube |
+| FLAC / WAV | Para editar o equipos que lo piden |
+| Video máxima calidad | Hasta 8K y HDR (AV1/VP9) en MP4, MKV o WEBM |
+| Video compatible | H.264 + AAC hasta 1080p, para TV y móviles antiguos |
+| Solo video | La imagen sin sonido |
+
+*Más opciones y formatos exactos…* muestra todos los formatos que ofrece el
+enlace (resolución, códec, bitrate, tamaño) para elegir uno concreto. Lo
+descargado lleva título, artista y portada, y aparece en *Música descargada* /
+*Videos descargados*. Una canción ya descargada suena desde el disco.
+
+---
+
+## Atajos
 
 | Atajo | Qué hace |
 |---|---|
-| `Ctrl+V` | Pega el enlace del portapapeles y lo encola |
-| `Ctrl+L` | Pone el cursor en el campo del enlace |
-| `Ctrl+O` | Abre la carpeta de descargas |
-| `Ctrl+Q` | Cierra la aplicación |
+| Espacio | Reproducir / pausar |
+| Ctrl+→ / Ctrl+← | Siguiente / anterior |
+| Shift+→ / Shift+← | Adelantar / atrasar 10 s |
+| Ctrl+↑ / Ctrl+↓ | Volumen |
+| Ctrl+K o Ctrl+L | Buscar |
+| Alt+← / Alt+→ | Atrás / adelante |
+| Ctrl+S / Ctrl+R | Aleatorio / repetir |
+| Ctrl+M | Mini reproductor |
+| Ctrl+Shift+L / Ctrl+Shift+Q | Letra / cola |
+| Ctrl+D / Ctrl+, | Descargas / Ajustes |
+| F11 | Pantalla completa (en un video) |
+| En el video: F, K, J, L, ←, →, M, I | Como en YouTube |
+| Ctrl+V | Pega un enlace y lo abre |
 
-Clic derecho sobre cualquier descarga para reproducirla, verla en la carpeta,
-copiar su enlace o reintentarla.
-
----
-
-## Qué puede descargar
-
-**Con extractor dedicado y probado:** YouTube, YouTube Music, Instagram, TikTok,
-X (Twitter), Facebook, Telegram, Reddit, Twitch, Vimeo, Dailymotion, Pinterest,
-Bluesky, Snapchat, Tumblr, Kick, Rumble, Bilibili, Douyin, VK, OK.ru, SoundCloud,
-Bandcamp, Mixcloud, Imgur, Streamable, 9GAG, Niconico, Odysee, Weibo, LinkedIn,
-Google Drive, Dropbox, Archive.org, TED, Coub, Newgrounds, Patreon, Likee,
-Xiaohongshu, Substack.
-
-**Sin extractor dedicado** (se intenta de forma genérica y puede no funcionar):
-Threads y Triller.
-
-Además funciona con cualquiera de los ~1750 sitios que soporta el motor yt-dlp.
-
-### Qué descargar
-
-El primer desplegable decide **qué** se baja:
-
-| Opción | Qué obtienes |
-|---|---|
-| **Video con audio** | El video completo, como siempre |
-| **Solo video (sin audio)** | Únicamente la imagen, sin pista de sonido (archivo más pequeño) |
-| **Solo audio** | Únicamente el sonido, convertido a MP3, M4A, OPUS, FLAC o WAV |
-
-Al elegir *Solo audio* se apagan los desplegables de resolución y contenedor,
-porque no aplican, y se enciende el de formato de audio.
-
-### Calidades
-
-Mejor disponible, 4K, 2K, 1080p, 720p, 480p y 360p.
-
-Con **MP4** se prefieren H.264 y AAC, que reproduce cualquier móvil o equipo con
-Windows. Si eliges MKV se toma la mejor pista disponible aunque use códecs más
-nuevos (AV1, Opus), que dan archivos más pequeños pero no los abre todo el mundo.
+También puedes **arrastrar** enlaces o archivos de audio/video a la ventana.
 
 ---
 
-## Contenido que pide iniciar sesión
+## Cuenta de YouTube (opcional)
 
-Instagram, X, Facebook y algunos videos de YouTube (con restricción de edad)
-sólo se dejan descargar si la petición va acompañada de una sesión iniciada.
-
-Para esos casos, en **Ajustes → Contenido que pide iniciar sesión**:
-
-1. Elige el navegador donde ya tienes la sesión abierta (Chrome, Edge, Firefox…).
-2. **Cierra por completo ese navegador** antes de descargar. Windows bloquea el
-   archivo de cookies mientras el navegador está abierto y la lectura falla.
-3. Vuelve a intentar la descarga.
-
-Alternativa: exportar un `cookies.txt` con una extensión de navegador y
-seleccionarlo en el mismo panel.
+Sin cuenta funciona todo. Con tu sesión (si tienes Premium) llega el audio de
+256 kbps y los videos con restricción de edad: **Ajustes → Tu cuenta de
+YouTube** y elige el navegador donde la tienes abierta (ciérralo antes de
+reproducir para que Windows deje leer la sesión).
 
 ---
 
-## Telegram
-
-Funciona con publicaciones **públicas** de canales, con el formato
-`https://t.me/canal/1234` (el enlace de una publicación concreta, no el del canal).
-
-La app trae su propio extractor de Telegram, porque el motor yt-dlp no lo cubre
-del todo; si ese extractor falla, se reintenta automáticamente con yt-dlp.
-
-No puede descargar de chats privados ni de canales cerrados: ese contenido no es
-accesible sin la cuenta.
-
----
-
-## Ajustes que conviene conocer
-
-| Ajuste | Para qué sirve |
-|---|---|
-| Descargas simultáneas | Cuántos videos se bajan a la vez (1–8) |
-| Límite de velocidad | Deja ancho de banda libre para lo demás |
-| Listas y perfiles completos | Al pegar una playlist, la expande en videos sueltos |
-| Tope por lista | Evita encolar listas gigantes sin querer |
-| Incrustar miniatura | Deja la portada dentro del archivo |
-| Subtítulos | Los descarga y los mete dentro del video |
-| Subcarpeta por red social | Ordena las descargas por plataforma |
-| Nombre del archivo | Plantilla de yt-dlp: `%(title)s`, `%(id)s`, `%(uploader)s`, `%(ext)s` |
-| Detectar enlaces copiados | Al copiar un enlace, lo pone en el campo listo para descargar |
-
-Los ajustes y el historial se guardan en
-`%APPDATA%\DescargadorVideos` (ajustes.json e historial.db).
-
----
-
-## Pausar y reanudar
-
-El botón de pausa detiene la descarga conservando lo bajado. Al reanudar,
-continúa desde donde iba en lugar de empezar de cero. Lo mismo pasa si cierras
-la aplicación a mitad de una descarga: al volver, pulsa reintentar.
-
----
-
-## Si algo falla
-
-| Mensaje | Qué hacer |
-|---|---|
-| «pide iniciar sesión» | Activa las cookies del navegador en Ajustes (y ciérralo antes) |
-| «ya no está disponible» | El video fue borrado o es privado |
-| «bloqueado en tu país» | Prueba con un proxy en Ajustes |
-| «falta ffmpeg» | Comprueba que existe la carpeta `bin` junto a la aplicación |
-| Un sitio deja de funcionar de golpe | **Ajustes → Actualizar motor yt-dlp**. Las webs cambian a menudo y el motor se actualiza cada pocos días |
-
----
-
-## Estructura del proyecto
+## Cómo está hecho
 
 ```
-DescargadorVideos/
-├── ejecutar.py              arranque
+escritorio/
+├── ejecutar.py                 arranque
 ├── descargador/
-│   ├── main.py              punto de entrada
-│   ├── redes.py             detección de la red social por la URL
-│   ├── motor.py             cola, hilos y descarga (yt-dlp)
-│   ├── telegram_dl.py       extractor propio de Telegram
-│   ├── config.py            ajustes persistentes
-│   ├── historial.py         historial en SQLite
+│   ├── main.py                 crea todo; una sola instancia abierta
+│   ├── catalogo.py             YouTube Music (buscar, inicio, artistas, álbumes,
+│   │                           listas, radio), letras (LRCLIB), SponsorBlock y
+│   │                           resolución de streams con yt-dlp
+│   ├── reproduccion.py         motor libmpv: cola, fundido, ecualizador, video
+│   ├── mpv_carga.py            encuentra y carga libmpv-2.dll
+│   ├── coleccion.py            me gusta, listas, escuchas, guardados (SQLite)
+│   ├── motor.py                cola de descargas (yt-dlp + ffmpeg)
+│   ├── historial.py            registro de descargas
+│   ├── hilos.py                trabajo en segundo plano sin congelar la ventana
 │   └── ui/
-│       ├── ventana.py       ventana principal y pestañas
-│       ├── tarjeta.py       tarjeta de cada descarga
-│       ├── iconos.py        iconos dibujados a mano (sin archivos externos)
-│       └── estilos.py       paleta y hoja de estilos
-└── bin/                     ffmpeg y ffprobe
+│       ├── ventana.py          paneles, navegación, bandeja, atajos
+│       ├── contexto.py         acciones compartidas y menús de clic derecho
+│       ├── componentes.py      filas, tarjetas, carruseles, cabeceras
+│       ├── barra_reproduccion.py, panel_lateral.py, panel_derecho.py
+│       ├── video.py            vista de video y mini reproductor
+│       ├── ecualizador.py, dialogo_descarga.py, imagenes.py
+│       └── paginas/            inicio, buscar, explorar, artista, colección,
+│                               biblioteca, descargas, ajustes
+├── pruebas/test_logica.py      python -m pytest pruebas -q
+└── bin/                        ffmpeg, ffprobe y mpv/libmpv-2.dll
 ```
 
-Para ejecutar desde el código fuente:
+**Por qué libmpv:** es el motor del reproductor mpv. Reproduce las dos pistas
+separadas de YouTube (imagen + sonido) que hacen falta para pasar de 1080p,
+decodifica por hardware cuando la tarjeta puede, y trae los filtros de sonido
+(ecualizador, normalización, velocidad sin cambiar el tono). La DLL viene de
+las compilaciones públicas de shinchiro (github.com/shinchiro/mpv-winbuild-cmake).
+
+**Por qué los datos se piden en inglés a YouTube Music:** el analizador de
+ytmusicapi solo reconoce bien las secciones en inglés; los títulos se
+traducen en `catalogo.py`. Las páginas (inicio, artista, géneros) usan un
+analizador propio que aguanta mejor los cambios de YouTube.
+
+Para ejecutar desde el código:
 
 ```
 pip install -r requirements.txt
 python ejecutar.py
 ```
 
+Los datos viven en `%APPDATA%\DescargadorVideos` (ajustes.json, historial.db,
+portadas en caché).
+
 ---
 
-## Nota de uso
+## Si algo falla
 
-Descarga contenido del que tengas los derechos o cuyo uso permita la licencia y
-los términos del sitio. Respeta el trabajo de quien lo publicó.
+| Síntoma | Qué hacer |
+|---|---|
+| «No se encontró el motor de reproducción» | Falta `bin\mpv\libmpv-2.dll` junto a la app |
+| Un video se ve a tirones | En el video: ⚙ → baja la calidad o elige «Evitar AV1» |
+| «YouTube pide iniciar sesión» | Ajustes → Tu cuenta de YouTube |
+| Un sitio deja de funcionar | Ajustes → Motor y versión → Actualizar yt-dlp |
+| No aparece la letra | Esa canción no tiene letra pública sincronizada |
+
+---
+
+Descarga solo contenido del que tengas los derechos o cuyo uso permitan la
+licencia y los términos del sitio.

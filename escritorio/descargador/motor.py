@@ -49,6 +49,8 @@ class Tarea:
     calidad: str = ""
     tipo_pedido: str = ""      # si viene, manda sobre el ajuste general
     calidad_pedida: str = ""
+    opciones: dict = field(default_factory=dict)   # formato, codec, bitrate... de esta descarga
+    meta: dict = field(default_factory=dict)       # datos del catalogo (artista, portada)
     analizada: bool = False
     cancelar: bool = False
     pausar: bool = False
@@ -85,7 +87,8 @@ def formato_tiempo(s):
     return f"{h}:{m:02d}:{seg:02d}" if h else f"{m:02d}:{seg:02d}"
 
 
-def selector_formato(calidad, contenedor="mp4", tipo="completo"):
+def selector_formato(calidad, contenedor="mp4", tipo="completo", codec="maxima",
+                     formato_audio="mp3"):
     """Arma el selector de formatos de yt-dlp.
 
     tipo:
@@ -93,32 +96,39 @@ def selector_formato(calidad, contenedor="mp4", tipo="completo"):
       "video"    -> solo la pista de imagen, sin sonido
       "audio"    -> solo la pista de sonido
 
-    Con MP4 se prefieren H.264 y AAC: son los que reproduce cualquier movil o
-    reproductor de Windows. AV1 u Opus dan archivos mas pequenos, pero muchos
-    equipos no los abren. Si no existe esa combinacion, se cae a la mejor opcion.
+    codec:
+      "maxima"     -> la mejor imagen que haya (AV1/VP9, hasta 8K y HDR)
+      "compatible" -> H.264 + AAC, que abre cualquier movil o Windows sin extras
+                      (YouTube no da H.264 por encima de 1080p)
     """
     if tipo == "audio" or calidad == "audio":
+        # sin recomprimir cuando se puede: M4A sale del AAC original y OPUS del Opus
+        if formato_audio == "m4a":
+            return "ba[ext=m4a]/ba/b"
+        if formato_audio in ("opus", "original"):
+            return "ba[acodec=opus]/ba/b"
         return "ba/b"
 
     limite = ""
-    if calidad != "mejor":
+    if calidad not in ("mejor", "", None):
         try:
             limite = f"[height<={int(calidad)}]"
         except (TypeError, ValueError):
             limite = ""
 
+    compatible = codec == "compatible"
     if tipo == "video":
         # bv* ya es una pista sin sonido; el respaldo evita quedarse sin nada
         generico = f"bv*{limite}/bv*" if limite else "bv*"
-        if contenedor != "mp4":
+        if not compatible:
             return generico
         return f"bv*{limite}[vcodec^=avc1]/{generico}"
 
     generico = f"bv*{limite}+ba/b{limite}/bv*+ba/b" if limite else "bv*+ba/b"
-    if contenedor != "mp4":
+    if not compatible:
         return generico
-    compatible = f"bv*{limite}[vcodec^=avc1]+ba[acodec^=mp4a]"
-    return f"{compatible}/{generico}"
+    preferido = f"bv*{limite}[vcodec^=avc1]+ba[acodec^=mp4a]"
+    return f"{preferido}/{generico}"
 
 
 # Modo musica: nivela a -9 LUFS y limita los picos, que es lo que de verdad
@@ -219,7 +229,7 @@ class TrabajoAnalisis(QRunnable):
                         "autor": info["autor"],
                         "duracion": info.get("duracion", 0),
                         "miniatura_url": info.get("miniatura", ""),
-                        "miniatura_bytes": bajar_miniatura(info.get("miniatura", "")),
+                        "miniatura_bytes": bajar_miniatura((t.meta or {}).get("miniatura") or info.get("miniatura", "")),
                     })
                     return
                 # si falla, seguimos con yt-dlp (tiene extractor de publicaciones incrustadas)
@@ -269,7 +279,7 @@ class TrabajoAnalisis(QRunnable):
                 "autor": info.get("uploader") or info.get("channel") or info.get("uploader_id") or "",
                 "duracion": int(info.get("duration") or 0),
                 "miniatura_url": mini,
-                "miniatura_bytes": bajar_miniatura(mini),
+                "miniatura_bytes": bajar_miniatura((t.meta or {}).get("miniatura") or mini),
             })
 
         except telegram_dl.ErrorTelegram as e:
@@ -332,6 +342,13 @@ class TrabajoDescarga(QRunnable):
         self.senales = SenalesDescarga()
         self.registro = _Silencio()
 
+    def _valor(self, clave):
+        """Lo pedido para esta descarga, o el ajuste general."""
+        o = self.tarea.opciones or {}
+        if clave in o and o[clave] not in (None, ""):
+            return o[clave]
+        return self.ajustes[clave]
+
     def _opciones(self, carpeta):
         a = self.ajustes
         # lo que se pidio para ESTA descarga manda sobre la preferencia general:
@@ -339,12 +356,23 @@ class TrabajoDescarga(QRunnable):
         # de empezar hacia que se bajara el video entero
         tipo = self.tarea.tipo_pedido or a["tipo_descarga"]
         calidad = self.tarea.calidad_pedida or a["calidad"]
+        formato_audio = self._valor("formato_audio")
+        contenedor = self._valor("formato_salida")
+        codec = self._valor("codec_descarga")
         if a["subcarpeta_por_red"]:
             carpeta = os.path.join(carpeta, self.tarea.plataforma.nombre.replace(" / ", "-"))
+        if (self.tarea.opciones or {}).get("subcarpeta"):
+            carpeta = os.path.join(carpeta, self.tarea.opciones["subcarpeta"])
+
+        formato = selector_formato(calidad, contenedor, tipo, codec, formato_audio)
+        exacto = (self.tarea.opciones or {}).get("formato_exacto")
+        if exacto:
+            # un formato elegido de la lista: si es solo imagen se le une el mejor sonido
+            formato = exacto if tipo != "completo" else f"{exacto}+ba/{exacto}"
 
         opciones = {
             "outtmpl": os.path.join(carpeta, a["plantilla_nombre"]),
-            "format": selector_formato(calidad, a["formato_salida"], tipo),
+            "format": formato,
             "quiet": True, "no_warnings": True, "no_color": True,
             "logger": self.registro,
             "progress_hooks": [self._hook],
@@ -368,17 +396,21 @@ class TrabajoDescarga(QRunnable):
 
         solo_audio = tipo == "audio" or calidad == "audio"
         if solo_audio:
+            if formato_audio == "mp3":
+                bitrate = str(self._valor("bitrate_mp3") or "320")
+                calidad_mp3 = "0" if bitrate.upper() == "V0" else bitrate
+            else:
+                calidad_mp3 = "0"
             opciones["postprocessors"].append({
                 "key": "FFmpegExtractAudio",
-                "preferredcodec": a["formato_audio"],
-                "preferredquality": "0" if a["formato_audio"] in ("flac", "wav", "opus") else "192",
+                "preferredcodec": "best" if formato_audio == "original" else formato_audio,
+                "preferredquality": calidad_mp3,
             })
             if a["modo_musica"]:
                 opciones["postprocessor_args"] = {
                     "extractaudio": ["-af", FILTRO_SONORIDAD]}
         else:
-            contenedor = a["formato_salida"]
-            if contenedor in ("mp4", "mkv"):
+            if contenedor in ("mp4", "mkv", "webm"):
                 opciones["merge_output_format"] = contenedor
                 opciones["postprocessors"].append({
                     "key": "FFmpegVideoRemuxer", "preferedformat": contenedor,
@@ -495,7 +527,12 @@ class TrabajoDescarga(QRunnable):
         t.duracion = int(info.get("duration") or t.duracion or 0)
         tipo = t.tipo_pedido or self.ajustes["tipo_descarga"]
         if tipo == "audio":
-            t.calidad = self.ajustes["formato_audio"].upper()
+            fa = self._valor("formato_audio")
+            if fa == "original":
+                fa = os.path.splitext(archivo)[1].lstrip(".") or "audio"
+            t.calidad = fa.upper()
+            if fa == "mp3":
+                t.calidad += f" {self._valor('bitrate_mp3')}"
         elif info.get("height"):
             t.calidad = f"{info['height']}p"
             if tipo == "video":
@@ -558,15 +595,21 @@ class Gestor(QObject):
         self._analisis = {}
 
     def agregar(self, url, iniciar=True, datos_previos=None, tipo=None, calidad=None,
-                titulo=""):
+                titulo="", opciones=None, meta=None):
         # "ytsearch1:algo" no es una direccion: es una busqueda para yt-dlp
         if not str(url).startswith("ytsearch"):
             url = redes.normalizar(url)
         if not url:
             return None
-        tarea = Tarea(url=url, tipo_pedido=tipo or "", calidad_pedida=calidad or "")
+        tarea = Tarea(url=url, tipo_pedido=tipo or "", calidad_pedida=calidad or "",
+                      opciones=dict(opciones or {}), meta=dict(meta or {}))
         if titulo:
             tarea.titulo = titulo
+        if meta:
+            tarea.titulo = meta.get("titulo") or tarea.titulo
+            tarea.autor = meta.get("artista") or ""
+            tarea.duracion = int(meta.get("duracion") or 0)
+            tarea.miniatura_url = meta.get("miniatura") or ""
         if datos_previos:
             tarea.titulo = datos_previos.get("titulo") or url
             tarea.duracion = datos_previos.get("duracion", 0)
@@ -677,11 +720,21 @@ class Gestor(QObject):
         t = self.tareas.get(ident)
         if not t:
             return
-        t.titulo = datos.get("titulo") or t.titulo
-        t.autor = datos.get("autor") or ""
-        t.duracion = datos.get("duracion") or 0
-        t.miniatura_url = datos.get("miniatura_url") or ""
-        t.miniatura_bytes = datos.get("miniatura_bytes") or b""
+        if t.meta:
+            # lo que trae el catalogo (titulo limpio, artistas, portada cuadrada)
+            # es mejor que lo que dice la pagina del video
+            t.titulo = t.meta.get("titulo") or datos.get("titulo") or t.titulo
+            t.autor = t.meta.get("artista") or datos.get("autor") or ""
+            t.duracion = t.meta.get("duracion") or datos.get("duracion") or 0
+            # el analisis ya bajo la portada del catalogo (en su hilo)
+            t.miniatura_bytes = datos.get("miniatura_bytes") or b""
+            t.miniatura_url = t.meta.get("miniatura") or datos.get("miniatura_url") or ""
+        else:
+            t.titulo = datos.get("titulo") or t.titulo
+            t.autor = datos.get("autor") or ""
+            t.duracion = datos.get("duracion") or 0
+            t.miniatura_url = datos.get("miniatura_url") or ""
+            t.miniatura_bytes = datos.get("miniatura_bytes") or b""
         t.analizada = True
         if t.estado == ANALIZANDO:
             t.estado = EN_COLA
