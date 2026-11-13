@@ -194,12 +194,13 @@ class PaginaAjustes(Pagina):
 
         # ---------------- ventana
         s = Seccion("Ventana y segundo plano")
-        self.bandeja = _interruptor(a["segundo_plano"])
-        self._conectar(self.bandeja, "segundo_plano")
-        s.fila("Seguir sonando al cerrar la ventana", "Caudal queda junto al reloj de Windows "
-                                                      "y la música sigue. Para salir del todo: "
-                                                      "clic derecho en el icono → Salir.",
-               self.bandeja)
+        self.bandeja = _combo([("Preguntarme", "preguntar"),
+                               ("Seguir sonando en segundo plano", "bandeja"),
+                               ("Cerrar Caudal del todo", "salir")], a["al_cerrar"], 280)
+        self._conectar(self.bandeja, "al_cerrar")
+        s.fila("Al cerrar la ventana con música sonando",
+               "«Seguir sonando» deja Caudal junto al reloj de Windows; para salir del todo: "
+               "clic derecho en su icono → Salir, o Ctrl+Q.", self.bandeja)
         self.mini_encima = _interruptor(a["mini_encima"])
         self._conectar(self.mini_encima, "mini_encima")
         s.fila("Mini reproductor siempre encima", "La ventanita de video o música flota sobre "

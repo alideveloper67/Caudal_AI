@@ -1,144 +1,207 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:just_audio_background/just_audio_background.dart';
+import 'package:media_kit/media_kit.dart';
+import 'package:media_kit_video/media_kit_video.dart';
 
 import 'nucleo/ajustes.dart';
-import 'nucleo/almacen.dart';
 import 'nucleo/capturador_oculto.dart';
+import 'nucleo/catalogo.dart';
+import 'nucleo/coleccion.dart';
+import 'nucleo/cuentas.dart';
 import 'nucleo/descargas.dart';
-import 'nucleo/navegador_caudal.dart';
-import 'nucleo/tema.dart';
-import 'pantallas/inicio.dart';
-import 'reproduccion/reproductor_audio.dart';
+import 'nucleo/motor_local.dart';
+import 'nucleo/red.dart';
+import 'nucleo/sincronizacion.dart';
+import 'nucleo/streams.dart';
+import 'nucleo/version.dart';
+import 'reproduccion/pip.dart';
+import 'reproduccion/reproductor.dart';
+import 'reproduccion/servicio_audio.dart';
+import 'ui/armazon.dart';
+import 'ui/comunes.dart';
+import 'ui/paginas/acceso.dart';
+import 'ui/paginas/ajustes_pagina.dart';
+import 'ui/servicios.dart';
+import 'ui/tema.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
-  // deja que la musica siga sonando con la pantalla apagada
-  await JustAudioBackground.init(
-    androidNotificationChannelId: 'com.kevinrr.caudal.audio',
-    androidNotificationChannelName: 'Reproduccion',
-    androidNotificationOngoing: true,
-    androidStopForegroundOnPause: true,
-  );
-
-  await SystemChrome.setPreferredOrientations(
-      [DeviceOrientation.portraitUp, DeviceOrientation.portraitDown]);
+  MediaKit.ensureInitialized();
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
     statusBarIconBrightness: Brightness.light,
-    systemNavigationBarColor: Tono.superficie,
+    // iOS no mira statusBarIconBrightness: con fondo "oscuro" pone la hora y la
+    // bateria en blanco, sobre el notch y la Dynamic Island
+    statusBarBrightness: Brightness.dark,
+    systemNavigationBarColor: C.fondo,
     systemNavigationBarIconBrightness: Brightness.light,
   ));
-
-  final ajustes = await Ajustes.abrir();
-
-  final almacen = await Almacen.abrir();
-  final capturador = CapturadorOculto();
-  final navegador = NavegadorCaudal();
-  await navegador.preparar();
-  final descargas = GestorDescargas(
-      almacen: almacen, ajustes: ajustes, capturador: capturador);
-  final audio = ReproductorAudio();
-  await audio.definirModoMusica(ajustes.modoMusica,
-      refuerzo: ajustes.refuerzoReproductor);
-
-  runApp(CaudalApp(
-    ajustes: ajustes,
-    almacen: almacen,
-    descargas: descargas,
-    audio: audio,
-    capturador: capturador,
-    navegador: navegador,
-  ));
+  await SystemChrome.setPreferredOrientations([DeviceOrientation.portraitUp]);
+  final vista = WidgetsBinding.instance.platformDispatcher.views.first;
+  final lados = vista.physicalSize;
+  Streams.altoPantalla = (lados.width < lados.height ? lados.width : lados.height).round();
+  unawaited(Red.iniciar());
+  portadaGeneroAsync = (el) => Catalogo.portadaGenero('${el['id']}', el['params'] as String?);
+  runApp(const CaudalApp());
 }
 
-/// Contenedor de servicios: cualquier pantalla los alcanza con `Servicios.de(context)`.
-class Servicios extends InheritedWidget {
-  const Servicios({
-    super.key,
-    required this.ajustes,
-    required this.almacen,
-    required this.descargas,
-    required this.audio,
-    required this.capturador,
-    required this.navegador,
-    required super.child,
-  });
+class CaudalApp extends StatefulWidget {
+  const CaudalApp({super.key});
 
-  final Ajustes ajustes;
-  final Almacen almacen;
-  final GestorDescargas descargas;
-  final CapturadorOculto capturador;
-  final NavegadorCaudal navegador;
-  final ReproductorAudio audio;
+  @override
+  State<CaudalApp> createState() => _CaudalAppState();
+}
 
-  static Servicios de(BuildContext context) {
-    final s = context.dependOnInheritedWidgetOfExactType<Servicios>();
-    assert(s != null, 'No hay Servicios en este arbol de widgets');
-    return s!;
+class _CaudalAppState extends State<CaudalApp> {
+  Servicios? _s;
+  bool _comprobando = true;
+  final _navegador = GlobalKey<NavigatorState>();
+  CapturadorOculto? _capturador;
+
+  @override
+  void initState() {
+    super.initState();
+    _arrancar();
   }
 
-  @override
-  bool updateShouldNotify(Servicios anterior) => false;
-}
+  Future<void> _arrancar() async {
+    Cuenta? c;
+    try {
+      c = await Cuentas.recordada().timeout(const Duration(seconds: 20));
+    } catch (_) {
+      c = null;
+    }
+    if (c != null) {
+      await _abrir(c, true);
+    } else if (mounted) {
+      setState(() => _comprobando = false);
+    }
+  }
 
-/// Al abrir se entra directo a la app.
-///
-/// No hay cuenta que crear ni nada que conectar: Caudal descarga dentro del
-/// propio telefono, asi que no tiene sentido pedirle nada al usuario antes de
-/// dejarle usarlo.
-class _Puerta extends StatelessWidget {
-  const _Puerta();
+  /// Monta todo lo de una cuenta: su biblioteca, sus ajustes y el reproductor.
+  Future<void> _abrir(Cuenta c, bool recordar) async {
+    await Cuentas.anotarUltimo(c.usuario);
+    if (recordar) {
+      await Cuentas.recordar(c);
+    } else {
+      await Cuentas.olvidar();
+    }
+    final ajustes = await Ajustes.cargar(c.id);
+    Catalogo.fijarRegion(ajustes.texto('region'));
+    MotorLocal.bitrateMp3 = ajustes.texto('bitrate_mp3');
+    ajustes.addListener(() => MotorLocal.bitrateMp3 = ajustes.texto('bitrate_mp3'));
+    final coleccion = await Coleccion.abrir(c.id);
+    final streams = Streams(MotorLocal());
+    final reproductor = Reproductor(ajustes, coleccion, streams);
+    await reproductor.restaurarSesion();
+    await ServicioAudio.para(reproductor);
+    Pip.iniciar(reproductor);
+    _capturador ??= CapturadorOculto();
+    unawaited(_capturador!.preparar().catchError((_) {}));
+    final descargas = GestorDescargas(coleccion: coleccion, ajustes: ajustes, capturador: _capturador!);
+    Sincronizador? sinc;
+    if (c.sesion != null) {
+      sinc = Sincronizador(coleccion, c.sesion!, alRenovar: () => Cuentas.actualizarRecordada(c))..iniciar();
+    }
+    late final Servicios s;
+    s = Servicios(
+      cuenta: c, ajustes: ajustes, coleccion: coleccion, reproductor: reproductor, streams: streams,
+      descargas: descargas, sincronizador: sinc,
+      cerrarSesion: () => _cerrarSesion(s),
+    );
+    if (!mounted) return;
+    setState(() {
+      _s = s;
+      _comprobando = false;
+    });
+    unawaited(_buscarVersion());
+  }
 
-  @override
-  Widget build(BuildContext context) => const PantallaInicio();
-}
+  Future<void> _cerrarSesion(Servicios s) async {
+    _navegador.currentState?.popUntil((r) => r.isFirst);
+    await s.reproductor.detener();
+    s.sincronizador?.detener();
+    await Cuentas.olvidar(s.cuenta);
+    setState(() => _s = null);
+    // se libera despues de que la pantalla ya no lo use
+    Future.delayed(const Duration(seconds: 1), () {
+      s.reproductor.dispose();
+      s.descargas.dispose();
+    });
+  }
 
-class CaudalApp extends StatelessWidget {
-  const CaudalApp({
-    super.key,
-    required this.ajustes,
-    required this.almacen,
-    required this.descargas,
-    required this.audio,
-    required this.capturador,
-    required this.navegador,
-  });
-
-  final Ajustes ajustes;
-  final Almacen almacen;
-  final GestorDescargas descargas;
-  final ReproductorAudio audio;
-  final CapturadorOculto capturador;
-  final NavegadorCaudal navegador;
+  Future<void> _buscarVersion() async {
+    await Future.delayed(const Duration(seconds: 6));
+    final n = await buscarActualizacion().catchError((_) => null);
+    final ctx = _navegador.currentContext;
+    if (n != null && ctx != null && ctx.mounted) await mostrarActualizacion(ctx, n);
+  }
 
   @override
   Widget build(BuildContext context) {
-    return Servicios(
-      ajustes: ajustes,
-      almacen: almacen,
-      descargas: descargas,
-      audio: audio,
-      capturador: capturador,
-      navegador: navegador,
-      child: MaterialApp(
-        title: 'Caudal',
-        debugShowCheckedModeBanner: false,
-        theme: construirTema(),
-        home: const _Puerta(),
-        builder: (context, hijo) {
-          // el tamano de letra del sistema no debe romper el diseno
-          final escala = MediaQuery.of(context).textScaler.clamp(
-                minScaleFactor: 0.85,
-                maxScaleFactor: 1.25,
-              );
-          return MediaQuery(
-            data: MediaQuery.of(context).copyWith(textScaler: escala),
-            child: hijo!,
-          );
-        },
+    final s = _s;
+    final Widget inicio = _comprobando
+        ? const _Arranque()
+        : s == null
+            ? AccesoPagina(alEntrar: _abrir)
+            : const Armazon();
+    final app = MaterialApp(
+      title: 'Caudal',
+      debugShowCheckedModeBanner: false,
+      theme: temaCaudal(),
+      navigatorKey: _navegador,
+      scaffoldMessengerKey: s?.mensajero,
+      home: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 380),
+        switchInCurve: Curves.easeOutCubic,
+        child: KeyedSubtree(key: ValueKey(s?.cuenta.id ?? (_comprobando ? 'arranque' : 'acceso')), child: inicio),
       ),
+      builder: (context, hijo) {
+        // que la letra grande del sistema no rompa el diseno
+        final mq = MediaQuery.of(context);
+        final contenido = MediaQuery(
+          data: mq.copyWith(textScaler: mq.textScaler.clamp(minScaleFactor: 0.85, maxScaleFactor: 1.2)),
+          child: hijo!,
+        );
+        if (s == null) return contenido;
+        // en la ventanita flotante solo se ve el video (la app sigue debajo intacta)
+        return ValueListenableBuilder<bool>(
+          valueListenable: Pip.enVentana,
+          builder: (_, enVentana, __) => Stack(children: [
+            contenido,
+            if (enVentana)
+              Positioned.fill(
+                child: ColoredBox(
+                  color: Colors.black,
+                  child: Video(controller: s.reproductor.pantalla, controls: NoVideoControls, fill: Colors.black),
+                ),
+              ),
+          ]),
+        );
+      },
     );
+    return s == null ? app : Caudal(s: s, child: app);
   }
+}
+
+class _Arranque extends StatelessWidget {
+  const _Arranque();
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        backgroundColor: C.fondo,
+        body: Center(
+          child: Container(
+            width: 74, height: 74,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(22),
+              gradient: const LinearGradient(colors: [C.acento, C.violeta],
+                  begin: Alignment.topLeft, end: Alignment.bottomRight),
+            ),
+            child: const Icon(Icons.waves_rounded, size: 40, color: Colors.white),
+          ),
+        ),
+      );
 }

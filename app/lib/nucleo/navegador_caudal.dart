@@ -21,13 +21,13 @@ import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 import 'captura.dart';
 import 'formato.dart';
 import 'modelos.dart';
+import 'plataforma.dart';
 
 /// Con que navegador nos presentamos.
 ///
 /// Sin un agente creible muchas webs sirven una version recortada, sin video.
-const String agenteCaudal =
-    'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) '
-    'Chrome/124.0.0.0 Mobile Safari/537.36';
+/// En iPhone, Safari; en Android, Chrome (ver [agenteDelTelefono]).
+String get agenteCaudal => agenteDelTelefono;
 
 /// Como se comporta el navegador.
 ///

@@ -8,6 +8,7 @@ import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
 import 'formato.dart';
 import 'modelos.dart';
+import 'plataforma.dart';
 
 /// Descarga dentro del teléfono. Todo lo que baja Caudal pasa por aquí.
 ///
@@ -38,6 +39,11 @@ class MotorLocal {
   ///
   /// Se dan dos vueltas: como los fallos son intermitentes, insistir sale
   /// mucho mas barato que dejar al usuario sin su video.
+  /// Las pistas de un video (lo usa tambien el reproductor para sonar en vivo).
+  Future<StreamManifest> manifiesto(String videoId) => _manifiesto(VideoId(videoId));
+
+  YoutubeExplode get cliente => _yt;
+
   Future<StreamManifest> _manifiesto(VideoId id) async {
     Object? ultimoFallo;
     for (var vuelta = 0; vuelta < 2; vuelta++) {
@@ -553,8 +559,8 @@ class MotorLocal {
     final lineas = <String>[
       if (referente.isNotEmpty) 'Referer: $referente',
       if (cookies.isNotEmpty) 'Cookie: $cookies',
-      'User-Agent: Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 '
-          '(KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
+      // el mismo navegador con el que se vio pasar el video
+      'User-Agent: $agenteDelTelefono',
     ];
 
     List<String> ordenCon({required bool conCabeceras}) => <String>[
@@ -628,9 +634,7 @@ class MotorLocal {
       final peticion = await cliente
           .getUrl(Uri.parse(url))
           .timeout(const Duration(seconds: 30));
-      peticion.headers.set('User-Agent',
-          'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) '
-          'Chrome/124.0.0.0 Mobile Safari/537.36');
+      peticion.headers.set('User-Agent', agenteDelTelefono);
       if (referente.isNotEmpty) peticion.headers.set('Referer', referente);
       // sin las cookies de la sesion, muchos sitios devuelven 403
       if (cookies.isNotEmpty) peticion.headers.set('Cookie', cookies);
@@ -718,8 +722,14 @@ class MotorLocal {
     return 'mp4';
   }
 
+  /// Calidad de los MP3 (kbps, o 'V0' para VBR maxima). La fija la app.
+  static String bitrateMp3 = '320';
+
   static List<String> _codecDe(String formato, {bool reforzar = false}) {
     switch (formato) {
+      case 'opus':
+        // el Opus original de YouTube, sin recomprimir (si se nivela, se rehace)
+        return reforzar ? ['-c:a', 'libopus', '-b:a', '192k'] : ['-c:a', 'copy'];
       case 'm4a':
         // copiar la pista es instantáneo, pero nivelar el volumen exige rehacerla
         return reforzar ? ['-c:a', 'aac', '-b:a', '192k'] : ['-c:a', 'copy'];
@@ -728,7 +738,9 @@ class MotorLocal {
       case 'wav':
         return ['-c:a', 'pcm_s16le'];
       default:
-        return ['-c:a', 'libmp3lame', '-b:a', '192k'];
+        return bitrateMp3.toUpperCase() == 'V0'
+            ? ['-c:a', 'libmp3lame', '-q:a', '0']
+            : ['-c:a', 'libmp3lame', '-b:a', '${bitrateMp3}k'];
     }
   }
 

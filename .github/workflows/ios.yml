@@ -1,0 +1,139 @@
+# Caudal para iPhone: compila un .ipa SIN firmar y lo adjunta a la release
+# del movil (etiqueta movil-vX.Y.Z), junto a los APK que ya tenga.
+#
+# No hace falta Mac ni cuenta de Apple de pago: el .ipa se instala con
+# Sideloadly o AltStore, que lo firman con una Apple ID gratis (ver app/IOS.md).
+#
+# Se lanza:
+#   - solo, al publicar una release cuya etiqueta empiece por "movil-v";
+#   - a mano, desde la pestana Actions > "iPhone (IPA sin firmar)" > Run workflow.
+
+name: iPhone (IPA sin firmar)
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      etiqueta:
+        description: 'Release a la que adjuntar el .ipa (ej. movil-v2.0.1). Vacio = solo compilar.'
+        required: false
+        default: ''
+
+permissions:
+  contents: write   # para subir el .ipa a la release
+
+concurrency:
+  group: ios-${{ github.event.release.tag_name || inputs.etiqueta || github.ref }}
+  cancel-in-progress: true
+
+env:
+  FLUTTER_VERSION: '3.47.1'   # la misma que usa el proyecto (FlutterSDK local)
+
+jobs:
+  ipa:
+    # Las releases del escritorio (escritorio-v*) no lanzan este flujo.
+    if: github.event_name == 'workflow_dispatch' || startsWith(github.event.release.tag_name, 'movil-v')
+    runs-on: macos-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - name: Etiqueta
+        id: v
+        working-directory: .
+        env:
+          ETIQUETA: ${{ github.event.release.tag_name || inputs.etiqueta }}
+          REF_ACTUAL: ${{ github.ref }}
+        run: |
+          echo "etiqueta=$ETIQUETA" >> "$GITHUB_OUTPUT"
+          if [ -n "$ETIQUETA" ]; then
+            case "$ETIQUETA" in
+              movil-v*) ;;
+              *) echo "::error::La etiqueta debe empezar por movil-v (llego: $ETIQUETA)"; exit 1 ;;
+            esac
+            echo "ref=refs/tags/$ETIQUETA" >> "$GITHUB_OUTPUT"
+          else
+            echo "ref=$REF_ACTUAL" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.v.outputs.ref }}
+
+      - name: Version del .ipa
+        id: nombre
+        env:
+          ETIQUETA: ${{ steps.v.outputs.etiqueta }}
+        run: |
+          if [ -n "$ETIQUETA" ]; then
+            VERSION="${ETIQUETA#movil-v}"
+          else
+            VERSION="$(grep -E '^version:' pubspec.yaml | sed -E 's/version:[[:space:]]*//; s/\+.*//')"
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "Version: $VERSION"
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: stable
+          cache: true
+
+      - name: Dependencias de Dart
+        run: flutter pub get
+
+      # Flutter genera el Podfile al compilar si no esta en el repo; la cache
+      # se guarda igual y se renueva cuando cambian los paquetes de Dart.
+      - name: Cache de CocoaPods
+        uses: actions/cache@v4
+        with:
+          path: |
+            app/ios/Pods
+            ~/Library/Caches/CocoaPods
+            ~/.cocoapods/repos
+          key: pods-${{ runner.os }}-${{ env.FLUTTER_VERSION }}-${{ hashFiles('app/pubspec.lock', 'app/ios/Podfile.lock') }}
+          restore-keys: |
+            pods-${{ runner.os }}-${{ env.FLUTTER_VERSION }}-
+
+      - name: Compilar sin firma
+        run: flutter build ios --release --no-codesign
+
+      - name: Empaquetar Payload/Runner.app en .ipa
+        id: ipa
+        env:
+          VERSION: ${{ steps.nombre.outputs.version }}
+        run: |
+          APP=build/ios/iphoneos/Runner.app
+          test -d "$APP" || { echo "::error::No se encontro $APP"; exit 1; }
+          rm -rf build/ipa-sin-firma && mkdir -p build/ipa-sin-firma/Payload
+          cp -R "$APP" build/ipa-sin-firma/Payload/
+          IPA="Caudal-$VERSION.ipa"
+          # -y conserva los enlaces simbolicos de los frameworks
+          (cd build/ipa-sin-firma && zip -qry "$IPA" Payload)
+          echo "ruta=app/build/ipa-sin-firma/$IPA" >> "$GITHUB_OUTPUT"
+          echo "nombre=$IPA" >> "$GITHUB_OUTPUT"
+          ls -lh "build/ipa-sin-firma/$IPA"
+
+      - name: Guardar el .ipa en la ejecucion
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.ipa.outputs.nombre }}
+          path: ${{ steps.ipa.outputs.ruta }}
+          retention-days: 30
+
+      # Solo anade (o reemplaza) el .ipa: los APK de la release no se tocan.
+      - name: Adjuntar a la release
+        if: steps.v.outputs.etiqueta != ''
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ETIQUETA: ${{ steps.v.outputs.etiqueta }}
+          RUTA: ${{ steps.ipa.outputs.ruta }}
+        run: |
+          if ! gh release view "$ETIQUETA" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::warning::No existe la release $ETIQUETA; el .ipa queda solo como artefacto de esta ejecucion."
+            exit 0
+          fi
+          gh release upload "$ETIQUETA" "$RUTA" --repo "$GITHUB_REPOSITORY" --clobber

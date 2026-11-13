@@ -791,10 +791,13 @@ def artista(browse_id):
     suscriptores = _texto(_nav(cab, "subscriptionButton", "subscribeButtonRenderer",
                                "subscriberCountText"))
     oyentes = _texto(cab.get("monthlyListenerCount"))
-    radio = _nav(cab, "startRadioButton", "buttonRenderer", "navigationEndpoint",
-                 "watchPlaylistEndpoint", "playlistId") or ""
-    aleatorio = _nav(cab, "playButton", "buttonRenderer", "navigationEndpoint",
-                     "watchPlaylistEndpoint", "playlistId") or ""
+    def id_boton(boton):
+        # el boton trae watchPlaylistEndpoint o (ahora) watchEndpoint con playlistId
+        fin = _nav(cab, boton, "buttonRenderer", "navigationEndpoint") or {}
+        return (_nav(fin, "watchPlaylistEndpoint", "playlistId")
+                or _nav(fin, "watchEndpoint", "playlistId") or "")
+    radio = id_boton("startRadioButton")
+    aleatorio = id_boton("playButton")
     contenido, _ = _secciones_de(respuesta)
     secciones = [x for x in (_analizar_seccion(s) for s in contenido) if x]
     for s in secciones:

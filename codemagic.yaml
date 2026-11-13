@@ -1,0 +1,88 @@
+# Caudal en codemagic.io: alternativa a .github/workflows/ios.yml.
+#
+# Codemagic solo lee el codemagic.yaml de la RAIZ del repositorio; la app
+# Flutter esta en app/, por eso cada paso entra ahi.
+#
+# Compila Caudal para iPhone SIN firma (no hace falta cuenta de Apple de pago)
+# y, si la compilacion viene de una etiqueta movil-vX.Y.Z, adjunta
+# Caudal-X.Y.Z.ipa a esa release de GitHub sin tocar los APK.
+#
+# Preparacion (una sola vez, en codemagic.io):
+#   1. Add application > GitHub > alideveloper67/Caudal_AI > "codemagic.yaml".
+#   2. Teams > Global variables and secrets: crear el grupo "github" con la
+#      variable secreta GITHUB_TOKEN (un token de GitHub con permiso
+#      "Contents: Read and write" sobre el repositorio).
+#   3. Codemagic crea el webhook al conectar el repo: cada etiqueta movil-v*
+#      lanza la compilacion. Tambien se lanza a mano con "Start new build".
+#
+# Importante: si la release se publica a la vez en GitHub Actions y aqui,
+# los dos suben el mismo Caudal-X.Y.Z.ipa (el ultimo reemplaza al primero).
+
+workflows:
+  ios-sin-firma:
+    name: Caudal - iPhone (IPA sin firmar)
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    environment:
+      flutter: 3.47.1
+      xcode: latest
+      cocoapods: default
+      groups:
+        - github
+    triggering:
+      events:
+        - tag
+      tag_patterns:
+        - pattern: 'movil-v*'
+          include: true
+      cancel_previous_builds: true
+    cache:
+      cache_paths:
+        - $HOME/Library/Caches/CocoaPods
+        - $HOME/.cocoapods/repos
+        - $CM_BUILD_DIR/app/ios/Pods
+    scripts:
+      - name: Dependencias de Dart
+        script: |
+          cd app
+          flutter pub get
+      - name: Compilar sin firma
+        # Flutter genera el Podfile e instala los pods durante la compilacion.
+        script: |
+          cd app
+          flutter build ios --release --no-codesign
+      - name: Empaquetar Payload/Runner.app en .ipa
+        script: |
+          cd app
+          if [ -n "$CM_TAG" ]; then
+            VERSION="${CM_TAG#movil-v}"
+          else
+            VERSION="$(grep -E '^version:' pubspec.yaml | sed -E 's/version:[[:space:]]*//; s/\+.*//')"
+          fi
+          rm -rf build/ipa-sin-firma && mkdir -p build/ipa-sin-firma/Payload
+          cp -R build/ios/iphoneos/Runner.app build/ipa-sin-firma/Payload/
+          cd build/ipa-sin-firma
+          zip -qry "Caudal-$VERSION.ipa" Payload
+          ls -lh "Caudal-$VERSION.ipa"
+    artifacts:
+      - app/build/ipa-sin-firma/*.ipa
+    publishing:
+      scripts:
+        - name: Adjuntar a la release de GitHub
+          # Solo anade (o reemplaza) el .ipa: los APK de la release no se tocan.
+          script: |
+            if [ -z "$CM_TAG" ]; then
+              echo "Compilacion sin etiqueta: el .ipa queda solo en Codemagic."
+              exit 0
+            fi
+            case "$CM_TAG" in movil-v*) ;; *) echo "Etiqueta ajena: $CM_TAG"; exit 0 ;; esac
+            if [ -z "$GITHUB_TOKEN" ]; then
+              echo "Falta GITHUB_TOKEN en el grupo github."
+              exit 1
+            fi
+            IPA="$(ls "$CM_BUILD_DIR"/app/build/ipa-sin-firma/*.ipa | head -n 1)"
+            if ! gh release view "$CM_TAG" --repo alideveloper67/Caudal_AI >/dev/null 2>&1; then
+              echo "Aun no existe la release $CM_TAG; el .ipa queda en Codemagic."
+              exit 0
+            fi
+            gh release upload "$CM_TAG" "$IPA" --repo alideveloper67/Caudal_AI --clobber

@@ -249,34 +249,58 @@ def test_repetir_todo_vuelve_al_principio():
 
 # ---------------------------------------------------------------- cuentas
 
-def test_cuentas_crear_entrar_y_recordar(datos_aislados):
-    from descargador.cuentas import Cuentas, ErrorCuenta, activar
-    from descargador import config
-    c = Cuentas()
-    assert not c.hay_cuentas()
-    primera = c.crear("kevin", "secreta1", "Kevin")
-    assert primera["carpeta"] == ""             # hereda los datos que ya habia
-    with pytest.raises(ErrorCuenta):
-        c.crear("Kevin", "otra123")             # sin distinguir mayusculas
-    with pytest.raises(ErrorCuenta):
-        c.crear("a b", "secreta1")
-    with pytest.raises(ErrorCuenta):
-        c.crear("ana", "123")
-    segunda = c.crear("ana", "clave99")
-    assert segunda["carpeta"] == "perfiles/ana"
-    with pytest.raises(ErrorCuenta):
-        c.entrar("kevin", "mal")
-    assert c.entrar("KEVIN", "secreta1")["usuario"] == "kevin"
-    texto = (config.carpeta_datos() / "cuentas.json").read_text(encoding="utf-8")
-    assert "secreta1" not in texto              # nunca en claro
-    c.recordar("ana")
-    assert Cuentas().recordada()["usuario"] == "ana"
-    Cuentas().olvidar()
-    assert Cuentas().recordada() is None
-    c.cambiar_contrasena("ana", "clave99", "nueva77")
-    assert Cuentas().entrar("ana", "nueva77")
-    # cada cuenta con su biblioteca
-    activar(segunda)
-    assert config.carpeta_perfil().name == "ana"
-    activar(primera)
+def test_carpetas_por_cuenta_y_datos_que_se_comparten(datos_aislados):
+    from descargador import cuentas, config
+    from descargador.coleccion import para_nube
+    # la primera cuenta que entra en el equipo hereda lo que ya habia
+    assert cuentas._carpeta_para("uuid-1") == ""
+    assert cuentas._carpeta_para("uuid-2") == "perfiles/uuid-2"
+    assert cuentas._carpeta_para("uuid-1") == ""        # y no cambia al volver
+    cuentas.activar({"carpeta": "perfiles/uuid-2"})
+    assert config.carpeta_perfil().name == "uuid-2"
+    cuentas.activar({"carpeta": ""})
     assert config.carpeta_perfil() == config.carpeta_datos()
+    # a la nube no viajan rutas de este equipo
+    p = {"clave": "yt:x", "titulo": "T", "archivo": "C:/a.mp3", "descarga_id": 3, "_auto": True}
+    assert para_nube(p) == {"clave": "yt:x", "titulo": "T"}
+
+
+def test_sesion_guardada_sin_internet_entra_igual(datos_aislados, monkeypatch):
+    from descargador import cuentas, nube
+    c = cuentas.Cuentas()
+    assert c.recordada() is None
+    sesion = nube.Sesion("uuid-9", "acceso", "renovar-1", 0)
+    c.recordar({"id": "uuid-9", "usuario": "kevin", "nombre": "Kevin", "sesion": sesion})
+
+    def sin_red(_t):
+        raise nube.SinConexion("sin red")
+    monkeypatch.setattr(nube, "renovar", sin_red)
+    cuenta = c.recordada()
+    assert cuenta["usuario"] == "kevin" and cuenta["sin_conexion"] is True
+
+    def caducada(_t):
+        raise nube.ErrorNube("caduco")
+    monkeypatch.setattr(nube, "renovar", caducada)
+    assert c.recordada() is None                      # sesion caducada: se olvida
+
+
+def test_usuario_invalido_no_llega_a_la_nube(datos_aislados):
+    from descargador.cuentas import Cuentas, ErrorCuenta
+    with pytest.raises(ErrorCuenta):
+        Cuentas().crear("a b", "secreta1")
+    with pytest.raises(ErrorCuenta):
+        Cuentas().crear("ana", "123")
+
+
+def test_cada_app_solo_ve_sus_versiones():
+    from descargador import version
+    publicadas = [
+        {"tag_name": "movil-v9.0.0", "assets": []},
+        {"tag_name": "escritorio-v2.1.0", "assets": [], "draft": True},
+        {"tag_name": "escritorio-v2.0.5", "assets": []},
+        {"tag_name": "escritorio-v2.0.10", "assets": []},
+        {"tag_name": "escritorio-v3.0.0", "prerelease": True, "assets": []},
+    ]
+    assert version.elegir_release(publicadas)["tag_name"] == "escritorio-v2.0.10"
+    assert version.elegir_release([{"tag_name": "movil-v1.0.0"}]) is None
+    assert version.hay_novedad("2.0.0", "2.0.10") and not version.hay_novedad("2.0.10", "2.0.9")

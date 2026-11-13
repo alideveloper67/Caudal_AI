@@ -1,119 +1,147 @@
 # -*- coding: utf-8 -*-
-"""Cuentas de Caudal en este equipo.
+"""Cuentas de Caudal: las mismas en Windows, Android y iPhone (Supabase).
 
-Cada cuenta tiene su propia biblioteca (me gusta, listas, escuchas, ajustes).
-La primera cuenta que se crea hereda los datos que ya habia en el equipo.
-Las contrasenas se guardan derivadas con PBKDF2 (nunca en texto).
+La biblioteca de cada cuenta vive en este equipo (rapida y sin internet) y se
+sincroniza con la nube en segundo plano (sincronizacion.py).
+
+En el equipo solo se guarda:
+  - sesion.json   el token de renovacion si marcaste «Mantener la sesion»
+                  (nunca la contrasena)
+  - perfiles.json que carpeta local usa cada cuenta
 """
 
-import hashlib
-import hmac
 import json
 import os
 import re
-import secrets
-import time
 
-from . import config
-
-ITERACIONES = 240_000
+from . import config, nube
+from .nube import ErrorNube, SinConexion
 
 
 class ErrorCuenta(Exception):
     pass
 
 
-def _derivar(contrasena, sal, iteraciones=ITERACIONES):
-    return hashlib.pbkdf2_hmac("sha256", contrasena.encode("utf-8"), bytes.fromhex(sal),
-                               iteraciones).hex()
+def _leer(nombre, defecto):
+    try:
+        return json.loads((config.carpeta_datos() / nombre).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return defecto
+
+
+def _escribir(nombre, datos):
+    ruta = config.carpeta_datos() / nombre
+    tmp = ruta.with_suffix(".tmp")
+    tmp.write_text(json.dumps(datos, indent=2, ensure_ascii=False), encoding="utf-8")
+    os.replace(tmp, ruta)
+
+
+def _carpeta_para(user_id):
+    """La primera cuenta que entra en este equipo se queda con lo que ya habia."""
+    mapa = _leer("perfiles.json", {})
+    if user_id in mapa:
+        return mapa[user_id]
+    raiz_ocupada = "" in mapa.values()
+    carpeta = "" if not raiz_ocupada else f"perfiles/{user_id}"
+    mapa[user_id] = carpeta
+    _escribir("perfiles.json", mapa)
+    return carpeta
+
+
+def _cuenta(sesion, usuario, nombre, sin_conexion=False):
+    return {"id": sesion.user_id if sesion else None, "usuario": usuario,
+            "nombre": nombre or usuario, "carpeta": _carpeta_para(sesion.user_id) if sesion else "",
+            "sesion": sesion, "sin_conexion": sin_conexion}
 
 
 class Cuentas:
-    def __init__(self):
-        self.archivo = config.carpeta_datos() / "cuentas.json"
-        self.datos = {"usuarios": [], "recordado": ""}
-        try:
-            if self.archivo.exists():
-                self.datos.update(json.loads(self.archivo.read_text(encoding="utf-8")))
-        except (OSError, ValueError):
-            pass
-
-    def _guardar(self):
-        tmp = self.archivo.with_suffix(".tmp")
-        tmp.write_text(json.dumps(self.datos, indent=2, ensure_ascii=False), encoding="utf-8")
-        os.replace(tmp, self.archivo)
-
     def hay_cuentas(self):
-        return bool(self.datos["usuarios"])
-
-    def _buscar(self, usuario):
-        u = (usuario or "").strip().lower()
-        return next((c for c in self.datos["usuarios"] if c["usuario"].lower() == u), None)
+        return bool(_leer("perfiles.json", {})) or bool(self.ultimo_usuario())
 
     def crear(self, usuario, contrasena, nombre=""):
-        usuario = (usuario or "").strip()
-        if not re.fullmatch(r"[A-Za-z0-9._-]{3,30}", usuario):
+        usuario = (usuario or "").strip().lower()
+        if not re.fullmatch(r"[a-z0-9._-]{3,30}", usuario):
             raise ErrorCuenta("El usuario debe tener de 3 a 30 letras o números "
-                              "(también . _ -), sin espacios.")
+                              "(también . _ -), sin espacios ni tildes.")
         if len(contrasena or "") < 6:
             raise ErrorCuenta("La contraseña necesita al menos 6 caracteres.")
-        if self._buscar(usuario):
-            raise ErrorCuenta("Ese usuario ya existe en este equipo. Inicia sesión.")
-        primera = not self.datos["usuarios"]
-        sal = secrets.token_hex(16)
-        cuenta = {
-            "usuario": usuario,
-            "nombre": (nombre or "").strip() or usuario,
-            "sal": sal,
-            "hash": _derivar(contrasena, sal),
-            "iteraciones": ITERACIONES,
-            "creada": time.time(),
-            # la primera cuenta se queda con lo que ya habia en el equipo
-            "carpeta": "" if primera else f"perfiles/{usuario.lower()}",
-        }
-        self.datos["usuarios"].append(cuenta)
-        self._guardar()
-        return dict(cuenta)
+        try:
+            if not nube.usuario_libre(usuario):
+                raise ErrorCuenta("Ese usuario ya existe. Inicia sesión o elige otro.")
+            sesion = nube.registrar(usuario, contrasena, (nombre or "").strip() or usuario)
+        except ErrorNube as e:
+            raise ErrorCuenta(str(e)) from e
+        return _cuenta(sesion, usuario, (nombre or "").strip() or usuario)
 
     def entrar(self, usuario, contrasena):
-        c = self._buscar(usuario)
-        if not c:
-            raise ErrorCuenta("No hay ninguna cuenta con ese usuario en este equipo.")
-        calculado = _derivar(contrasena or "", c["sal"], c.get("iteraciones", ITERACIONES))
-        if not hmac.compare_digest(calculado, c["hash"]):
-            raise ErrorCuenta("La contraseña no es correcta.")
-        return dict(c)
+        usuario = (usuario or "").strip().lower()
+        if not usuario:
+            raise ErrorCuenta("Escribe tu usuario.")
+        try:
+            sesion = nube.entrar(usuario, contrasena or "")
+            perfil = sesion.perfil()
+        except ErrorNube as e:
+            raise ErrorCuenta(str(e)) from e
+        return _cuenta(sesion, perfil.get("usuario") or usuario, perfil.get("nombre") or usuario)
 
-    def cambiar_contrasena(self, usuario, actual, nueva):
-        c = self._buscar(usuario)
-        self.entrar(usuario, actual)
+    def cambiar_contrasena(self, cuenta, actual, nueva):
         if len(nueva or "") < 6:
             raise ErrorCuenta("La contraseña nueva necesita al menos 6 caracteres.")
-        c["sal"] = secrets.token_hex(16)
-        c["hash"] = _derivar(nueva, c["sal"])
-        c["iteraciones"] = ITERACIONES
-        self._guardar()
+        try:
+            nube.entrar(cuenta["usuario"], actual)
+        except ErrorNube as e:
+            raise ErrorCuenta("La contraseña actual no es correcta.") from e
+        try:
+            cuenta["sesion"].cambiar_contrasena(nueva)
+        except ErrorNube as e:
+            raise ErrorCuenta(str(e)) from e
 
-    def recordar(self, usuario):
-        self.datos["recordado"] = usuario or ""
-        self._guardar()
+    # ------------------------------------------------------------ sesion guardada
 
-    def olvidar(self):
-        self.datos["recordado"] = ""
-        self._guardar()
+    def recordar(self, cuenta):
+        s = cuenta.get("sesion")
+        if not s:
+            return
+        _escribir("sesion.json", {"id": cuenta["id"], "usuario": cuenta["usuario"],
+                                  "nombre": cuenta["nombre"], "refresh": s.refresh})
+
+    def actualizar_recordada(self, cuenta):
+        """El token de renovacion cambia al usarse: se guarda el nuevo."""
+        if (config.carpeta_datos() / "sesion.json").exists():
+            self.recordar(cuenta)
+
+    def olvidar(self, cuenta=None):
+        try:
+            (config.carpeta_datos() / "sesion.json").unlink()
+        except OSError:
+            pass
+        if cuenta and cuenta.get("sesion"):
+            cuenta["sesion"].salir()
 
     def recordada(self):
-        """La cuenta con la sesion guardada, o None."""
-        u = self.datos.get("recordado") or ""
-        c = self._buscar(u) if u else None
-        return dict(c) if c else None
+        """La sesion guardada, renovada. Sin internet se entra igual con la
+        biblioteca local (y se sincroniza cuando vuelva la conexion)."""
+        guardada = _leer("sesion.json", None)
+        if not guardada or not guardada.get("refresh"):
+            return None
+        try:
+            sesion = nube.renovar(guardada["refresh"])
+        except SinConexion:
+            sesion = nube.Sesion(guardada["id"], "", guardada["refresh"], 0)
+            cuenta = _cuenta(sesion, guardada["usuario"], guardada["nombre"], sin_conexion=True)
+            return cuenta
+        except ErrorNube:
+            self.olvidar()
+            return None
+        cuenta = _cuenta(sesion, guardada["usuario"], guardada["nombre"])
+        self.recordar(cuenta)
+        return cuenta
 
     def ultimo_usuario(self):
-        return self.datos.get("ultimo") or ""
+        return _leer("ultimo.json", {}).get("usuario", "")
 
     def anotar_ultimo(self, usuario):
-        self.datos["ultimo"] = usuario
-        self._guardar()
+        _escribir("ultimo.json", {"usuario": usuario})
 
 
 def activar(cuenta):

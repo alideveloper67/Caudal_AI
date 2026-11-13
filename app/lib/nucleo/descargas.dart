@@ -8,12 +8,14 @@ import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 
 import 'ajustes.dart';
-import 'almacen.dart';
+import 'coleccion.dart';
 import 'capturador_oculto.dart';
 import 'extractores.dart';
 import 'formato.dart';
 import 'modelos.dart';
 import 'motor_local.dart';
+import 'plataforma.dart';
+import 'red.dart';
 
 /// Una descarga vista desde el teléfono.
 ///
@@ -35,7 +37,11 @@ class Descarga {
     this.cookies = '',
     this.esArchivo = false,
     this.nombreArchivo = '',
+    this.meta,
   });
+
+  /// Datos de la cancion segun el catalogo, si vino de el.
+  final Map<String, dynamic>? meta;
 
   final String id;
   final String url;
@@ -101,11 +107,20 @@ class Descarga {
 /// Cola de descargas del teléfono.
 class GestorDescargas extends ChangeNotifier {
   GestorDescargas({
-    required this.almacen,
+    required this.coleccion,
     required this.ajustes,
     required this.capturador,
-  });
-  final Almacen almacen;
+  }) {
+    Red.cambios.addListener(_alCambiarRed);
+  }
+
+  /// Al volver el wifi arrancan las que esperaban.
+  void _alCambiarRed() => _bombear();
+
+  bool get _esperarWifi => ajustes.sino('solo_wifi_descargas') && Red.conDatos;
+
+  /// Lo descargado entra en la biblioteca de la cuenta (y suena sin internet).
+  final Coleccion coleccion;
   final Ajustes ajustes;
 
   /// Para abrir la pagina a escondidas cuando el enlace no viene del navegador.
@@ -138,9 +153,12 @@ class GestorDescargas extends ChangeNotifier {
     String urlMedia = '',
     List<String> candidatas = const [],
     String cookies = '',
+    Map<String, dynamic>? meta,
+    String bitrateMp3 = '',
   }) {
     final d = Descarga(
       id: 'd${++_contador}_${DateTime.now().millisecondsSinceEpoch}',
+      meta: meta,
       url: url,
       urlMedia: urlMedia,
       candidatas: candidatas,
@@ -226,6 +244,10 @@ class GestorDescargas extends ChangeNotifier {
       final motivo = e.osError?.message ?? '';
       if (motivo.toLowerCase().contains('permission') ||
           motivo.toLowerCase().contains('denied')) {
+        if (Plataforma.esIOS) {
+          return 'El iPhone no deja guardar ahí. Comprueba que queda espacio '
+              'libre y vuelve a intentarlo.';
+        }
         return 'Android no deja guardar ahí. En Ajustes, cambia dónde se '
             'guardan las descargas o dale permiso de almacenamiento.';
       }
@@ -246,6 +268,17 @@ class GestorDescargas extends ChangeNotifier {
   }
 
   void _bombear() {
+    if (_esperarWifi) {
+      var hubo = false;
+      for (final d in _cola) {
+        if (d.estado == EstadoDescarga.enCola && !d.pausada && d.detalle != 'Esperando el wifi') {
+          d.detalle = 'Esperando el wifi';
+          hubo = true;
+        }
+      }
+      if (hubo) notifyListeners();
+      return;
+    }
     if (_enMarcha >= _maxSimultaneas) return;
     for (final d in _cola.reversed) {
       if (_enMarcha >= _maxSimultaneas) break;
@@ -342,18 +375,7 @@ class GestorDescargas extends ChangeNotifier {
       d.estado = EstadoDescarga.completada;
       d.detalle = 'Guardado en el telefono';
 
-      await almacen.guardar(Pista(
-        id: 0,
-        titulo: d.titulo,
-        autor: d.autor,
-        archivo: archivo,
-        miniatura: d.miniatura,
-        duracion: d.duracion,
-        tamano: tamano,
-        origen: d.url,
-        esAudio: d.esAudio,
-        fecha: DateTime.now().millisecondsSinceEpoch,
-      ));
+      await _aLaBiblioteca(d, archivo, tamano);
 
       notifyListeners();
       if (!_terminadas.isClosed) _terminadas.add(d);
@@ -518,18 +540,7 @@ class GestorDescargas extends ChangeNotifier {
       d.estado = EstadoDescarga.completada;
       d.detalle = 'Guardado en el telefono';
 
-      await almacen.guardar(Pista(
-        id: 0,
-        titulo: d.titulo,
-        autor: d.autor,
-        archivo: archivo,
-        miniatura: d.miniatura,
-        duracion: d.duracion,
-        tamano: tamano,
-        origen: d.url,
-        esAudio: d.esAudio,
-        fecha: DateTime.now().millisecondsSinceEpoch,
-      ));
+      await _aLaBiblioteca(d, archivo, tamano);
 
       notifyListeners();
       if (!_terminadas.isClosed) _terminadas.add(d);
@@ -588,18 +599,7 @@ class GestorDescargas extends ChangeNotifier {
 
       // en la biblioteca solo entra lo que se puede reproducir
       if (esMedia) {
-        await almacen.guardar(Pista(
-          id: 0,
-          titulo: d.titulo,
-          autor: d.autor,
-          archivo: archivo,
-          miniatura: d.miniatura,
-          duracion: d.duracion,
-          tamano: tamano,
-          origen: d.url,
-          esAudio: d.esAudio,
-          fecha: DateTime.now().millisecondsSinceEpoch,
-        ));
+        await _aLaBiblioteca(d, archivo, tamano);
       }
 
       notifyListeners();
@@ -711,7 +711,11 @@ class GestorDescargas extends ChangeNotifier {
   // ---------------------------------------------------------------- archivos
 
   /// Dónde se guarda: en la carpeta pública si se puede, si no en la de la app.
-
+  ///
+  /// En iPhone no hay carpeta pública ni música del teléfono a la que escribir:
+  /// todo va a Documentos de la app, que es lo que se ve en la app Archivos
+  /// ("En mi iPhone > Caudal"). Ahí ya va separado, sin otra carpeta Caudal
+  /// dentro, porque la que se ve ya lleva el nombre de la app.
   static Future<Directory> carpetaDeGuardado(
     bool audio,
     bool preferirPublico, {
@@ -719,7 +723,12 @@ class GestorDescargas extends ChangeNotifier {
   }) async {
     final sub = subcarpeta ?? (audio ? 'Musica' : 'Videos');
 
-    if (preferirPublico && Platform.isAndroid) {
+    if (Plataforma.esIOS) {
+      final documentos = await getApplicationDocumentsDirectory();
+      return _crear(Directory(p.join(documentos.path, sub)));
+    }
+
+    if (preferirPublico && Plataforma.esAndroid) {
       for (final base in ['/storage/emulated/0/Download', '/sdcard/Download']) {
         try {
           final carpeta = Directory(p.join(base, 'Caudal', sub));
@@ -737,17 +746,28 @@ class GestorDescargas extends ChangeNotifier {
       }
     }
 
-    final base = Platform.isAndroid
+    final base = Plataforma.esAndroid
         ? (await getExternalStorageDirectory() ?? await getApplicationDocumentsDirectory())
         : await getApplicationDocumentsDirectory();
-    final carpeta = Directory(p.join(base.path, 'Caudal', sub));
+    return _crear(Directory(p.join(base.path, 'Caudal', sub)));
+  }
+
+  static Future<Directory> _crear(Directory carpeta) async {
     if (!await carpeta.exists()) await carpeta.create(recursive: true);
     return carpeta;
   }
 
+  /// Si tiene sentido ofrecer "guardar en la música del teléfono".
+  ///
+  /// Solo en Android: en iPhone una app no puede escribir en la biblioteca de
+  /// Música, y todo se guarda en Documentos de la app sí o sí.
+  static bool get hayCarpetaPublica => Plataforma.esAndroid;
+
   /// Pide el permiso necesario para escribir en la carpeta pública.
+  ///
+  /// En iPhone no hay nada que pedir: Documentos de la app es suyo.
   static Future<bool> pedirPermisoAlmacenamiento() async {
-    if (!Platform.isAndroid) return true;
+    if (!Plataforma.esAndroid) return true;
     if (await Permission.manageExternalStorage.isGranted) return true;
 
     final storage = await Permission.storage.request();
@@ -770,8 +790,34 @@ class GestorDescargas extends ChangeNotifier {
     }
   }
 
+  Future<void> _aLaBiblioteca(Descarga d, String archivo, int tamano) async {
+    final meta = d.meta ?? {};
+    final vid = '${meta['video_id'] ?? ''}'.isNotEmpty
+        ? '${meta['video_id']}'
+        : (MotorLocal.puedeSolo(d.url) ? _videoId(d.url) : '');
+    await coleccion.agregarDescarga(
+      videoId: vid,
+      url: d.url,
+      titulo: '${meta['titulo'] ?? d.titulo}',
+      artista: '${meta['artista'] ?? d.autor}',
+      archivo: archivo,
+      esAudio: d.esAudio,
+      tamano: tamano,
+      duracion: (meta['duracion'] as num?)?.toInt() ?? d.duracion,
+      calidad: d.esAudio ? d.formatoAudio.toUpperCase() : d.calidad,
+      caratula: '${meta['miniatura'] ?? d.miniatura}',
+      datos: meta.isEmpty ? null : Coleccion.paraNube(meta),
+    );
+  }
+
+  static String _videoId(String url) {
+    final m = RegExp(r'(?:v=|youtu\.be/|/shorts/|/live/|/embed/)([A-Za-z0-9_-]{11})').firstMatch(url);
+    return m?.group(1) ?? '';
+  }
+
   @override
   void dispose() {
+    Red.cambios.removeListener(_alCambiarRed);
     _local.cerrar();
     _terminadas.close();
     super.dispose();

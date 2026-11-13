@@ -8,12 +8,13 @@ quieras. Lo que descargas queda en tu biblioteca y suena sin internet.
 
 ## Cuenta
 
-Al abrir Caudal la primera vez creas tu cuenta (usuario y contraseña). Cada
-cuenta tiene su propia biblioteca, listas, me gusta y ajustes. La primera que
-se crea se queda con lo que ya había en el equipo. Con **Mantener la sesión
-iniciada** entra directo la próxima vez; para salir: círculo con tu inicial
-(arriba a la derecha) → Cerrar sesión. Las cuentas viven en este equipo y la
-contraseña se guarda cifrada (PBKDF2).
+Al abrir Caudal entras con tu **usuario y contraseña** o creas una cuenta. Es
+la misma cuenta que en el teléfono: me gusta, listas, álbumes y artistas
+guardados, escuchas y ajustes se sincronizan en la nube (Supabase) en segundo
+plano; lo descargado se queda en este equipo. Con **Mantener la sesión
+iniciada** entra directo la próxima vez (se guarda la sesión, nunca la
+contraseña). Para salir de la cuenta: círculo con tu inicial (arriba a la
+derecha) → Cerrar sesión.
 
 ## Lo que hace
 
@@ -51,8 +52,13 @@ contraseña se guarda cifrada (PBKDF2).
 
 ### Como YouTube Premium
 
-- **Sin anuncios** y **en segundo plano**: al cerrar la ventana sigue sonando
-  junto al reloj (bandeja). Para salir del todo: clic derecho → Salir.
+- **Sin anuncios** y **en segundo plano**: si cierras la ventana con música
+  sonando, la primera vez pregunta si quieres seguir en la bandeja (junto al
+  reloj) o salir, y puedes recordar la respuesta.
+- **Cierre limpio**: al salir guarda la cola y la sesión, avisa si hay
+  descargas en marcha (se retoman al volver) y termina el proceso de verdad,
+  sin dejar nada abierto en segundo plano. Desde la bandeja: clic derecho →
+  Salir.
 - **Mini reproductor** flotante, siempre encima, con el video o la portada.
 - Pasar de canción a video, a la ventanita y de vuelta **sin cortes**: lo que
   suena sigue hasta que la otra pantalla tiene la imagen en el mismo punto.
@@ -71,9 +77,12 @@ contraseña se guarda cifrada (PBKDF2).
 ### Descargas
 
 Cualquier canción, álbum, lista o video se descarga desde su menú
-(**Descargar ›**) o desde **Descargar videos**: pegas el enlace de cualquier
-sitio (YouTube, TikTok, Instagram, Facebook, X, Telegram… ~1800) y aparece una
-vista previa con su portada y calidad para escucharlo, verlo o bajarlo:
+(**Descargar ›**) o desde la pestaña **Descargar videos** del panel izquierdo:
+pegas el enlace de cualquier sitio (YouTube, TikTok, Instagram, Facebook, X,
+Telegram… ~1800) y aparece una vista previa con su portada y calidad para
+escucharlo, verlo o bajarlo. Ya no hay navegador web dentro de la app ni
+«Conectar con el teléfono»: el teléfono descarga por su cuenta y lo que se
+comparte entre los dos es la cuenta.
 
 | Formato | Qué obtienes |
 |---|---|
@@ -114,6 +123,16 @@ También puedes **arrastrar** enlaces o archivos de audio/video a la ventana.
 
 ---
 
+## Actualizaciones
+
+Al abrirse (o en **Ajustes → Buscar actualizaciones**) mira las *Releases* de
+GitHub y solo hace caso a las etiquetas `escritorio-vX.Y.Z` (las `movil-v…` son
+del teléfono). Si hay una versión mayor que la instalada, baja
+`CaudalInstalador.exe`, se cierra y el instalador la sustituye conservando
+descargas y ajustes. La versión instalada está en `descargador/version.py`.
+
+---
+
 ## Cuenta de YouTube (opcional)
 
 Sin cuenta funciona todo. Con tu sesión (si tienes Premium) llega el audio de
@@ -136,7 +155,9 @@ escritorio/
 │   ├── reproduccion.py         motor libmpv: cola, fundido, ecualizador, video
 │   ├── mpv_carga.py            encuentra y carga libmpv-2.dll
 │   ├── coleccion.py            me gusta, listas, escuchas, guardados (SQLite)
-│   ├── cuentas.py              cuentas locales y perfil activo
+│   ├── cuentas.py              entrar, crear cuenta, mantener la sesión
+│   ├── nube.py, sincronizacion.py  Supabase y sincronización en segundo plano
+│   ├── version.py              versión y actualizaciones (escritorio-v…)
 │   ├── motor.py                cola de descargas (yt-dlp + ffmpeg)
 │   ├── historial.py            registro de descargas
 │   ├── hilos.py                trabajo en segundo plano sin congelar la ventana
@@ -172,9 +193,11 @@ pip install -r requirements.txt
 python ejecutar.py
 ```
 
-Los datos viven en `%APPDATA%\DescargadorVideos`: `cuentas.json`, la caché de
-portadas y, por cuenta, `ajustes.json` e `historial.db` (la primera cuenta en
-la carpeta raíz, las demás en `perfiles\<usuario>`).
+Para compilar el `.exe` y el instalador, ver [../LEEME.md](../LEEME.md).
+
+Los datos viven en `%APPDATA%\DescargadorVideos`: la sesión guardada
+(`sesion.json`), qué carpeta usa cada cuenta (`perfiles.json`), la caché de
+portadas y, por cuenta, `ajustes.json` e `historial.db`.
 
 ---
 

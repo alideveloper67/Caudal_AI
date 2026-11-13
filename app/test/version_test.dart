@@ -46,8 +46,34 @@ void main() {
     });
   });
 
-  test('la version de la app es la esperada', () {
-    expect(versionApp, '1.7.0');
-    expect(origen, 'Aliprogramator/caudal');
+  test('la version y el origen son los de Caudal_AI', () {
+    expect(versionApp, '2.0.0');
+    expect(origen, 'alideveloper67/Caudal_AI');
+  });
+
+  test('solo ve las versiones del movil, la mas alta', () {
+    final r = elegirRelease([
+      {'tag_name': 'escritorio-v9.0.0'},
+      {'tag_name': 'movil-v2.0.5'},
+      {'tag_name': 'movil-v2.0.10'},
+      {'tag_name': 'movil-v3.0.0', 'draft': true},
+      {'tag_name': 'movil-v4.0.0', 'prerelease': true},
+    ]);
+    expect(r?['tag_name'], 'movil-v2.0.10');
+    expect(elegirRelease([{'tag_name': 'escritorio-v1.0.0'}]), isNull);
+  });
+
+  test('elige el APK de la arquitectura del telefono', () {
+    final adjuntos = [
+      {'name': 'Caudal-armeabi-v7a.apk', 'browser_download_url': 'v7'},
+      {'name': 'Caudal-arm64-v8a.apk', 'browser_download_url': 'v8'},
+      {'name': 'notas.txt'},
+    ];
+    expect(elegirApk(adjuntos, 'arm64')?['browser_download_url'], 'v8');
+    expect(elegirApk(adjuntos, 'arm')?['browser_download_url'], 'v7');
+    expect(elegirApk([{'name': 'Caudal.apk', 'browser_download_url': 'u'}, ...adjuntos], 'x64')
+        ?['browser_download_url'], 'u');
+    expect(elegirApk([{'name': 'notas.txt'}], 'arm64'), isNull);
+    expect(abiDelTelefono(), isNotEmpty);
   });
 }

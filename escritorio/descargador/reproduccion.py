@@ -122,18 +122,19 @@ class Motor(QObject):
             opciones.pop("media_controls", None)
             self.mpv = mpv.MPV(**opciones)
 
+        self._cerrado = False
         self._ignorar_fin = 0
         self._cargando = False
         self.fuente = None
 
-        self.mpv.observe_property("time-pos", lambda _n, v: self.posicion.emit(v))
-        self.mpv.observe_property("duration", lambda _n, v: self.duracion.emit(v))
-        self.mpv.observe_property("pause", lambda _n, v: self.pausa.emit(bool(v)))
+        self.mpv.observe_property("time-pos", lambda _n, v: self._emitir(self.posicion, v))
+        self.mpv.observe_property("duration", lambda _n, v: self._emitir(self.duracion, v))
+        self.mpv.observe_property("pause", lambda _n, v: self._emitir(self.pausa, bool(v)))
         self.mpv.observe_property("paused-for-cache",
-                                  lambda _n, v: self.esperando.emit(bool(v)))
+                                  lambda _n, v: self._emitir(self.esperando, bool(v)))
         if self.es_video:
             self.mpv.observe_property("video-params",
-                                      lambda _n, v: self.params_video.emit(v or {}))
+                                      lambda _n, v: self._emitir(self.params_video, v or {}))
 
         @self.mpv.event_callback("end-file")
         def _fin(evento):
@@ -141,15 +142,15 @@ class Motor(QObject):
             razon = datos.get("reason", b"")
             razon = razon.decode() if isinstance(razon, bytes) else str(razon)
             if razon == "eof":
-                self.termino.emit("eof", "")
+                self._emitir(self.termino, "eof", "")
             elif razon == "error":
                 detalle = datos.get("file_error", b"")
                 detalle = detalle.decode() if isinstance(detalle, bytes) else str(detalle)
-                self.termino.emit("error", detalle)
+                self._emitir(self.termino, "error", detalle)
 
         @self.mpv.event_callback("file-loaded")
         def _cargado(_evento):
-            self.cargado.emit()
+            self._emitir(self.cargado)
 
         # teclas multimedia que llegan por los controles de Windows (SMTC) y
         # clics sobre el video
@@ -161,11 +162,21 @@ class Motor(QObject):
             except Exception:
                 pass
 
+    def _emitir(self, senal, *args):
+        """Los avisos de mpv llegan desde su hilo; si Caudal ya se esta
+        cerrando y el objeto no existe, se descartan en silencio."""
+        if self._cerrado:
+            return
+        try:
+            senal.emit(*args)
+        except RuntimeError:
+            self._cerrado = True
+
     def _hacer_tecla(self, nombre):
         def manejar(estado, _nombre, _char=None, _escalado=None, _arg=None):
             # estado: "d-" pulsada, "u-" soltada, "p-" pulsacion completa
             if estado and estado[0] in ("d", "p"):
-                self.tecla.emit(nombre)
+                self._emitir(self.tecla, nombre)
         return manejar
 
     # ------------------------------------------------------------ control
@@ -299,10 +310,23 @@ class Motor(QObject):
             return {}
 
     def cerrar(self):
-        try:
-            self.mpv.terminate()
-        except Exception:
-            pass
+        """Apaga mpv sin colgar la salida: si tarda mas de 1,5 s se deja atras
+        (el proceso termina igual)."""
+        self._cerrado = True
+        import threading
+
+        def apagar():
+            try:
+                self.mpv.command("stop")
+            except Exception:
+                pass
+            try:
+                self.mpv.terminate()
+            except Exception:
+                pass
+        hilo = threading.Thread(target=apagar, daemon=True)
+        hilo.start()
+        hilo.join(1.5)
 
 
 class Reproductor(QObject):

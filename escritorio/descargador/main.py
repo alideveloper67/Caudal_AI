@@ -121,7 +121,21 @@ def main():
         reproductor = Reproductor(ajustes, coleccion)
         ctx = Contexto(ajustes, historial, coleccion, gestor, reproductor)
         ctx.cuenta = cuenta
-        ctx.cerrar_sesion = lambda: (Cuentas().olvidar(), reiniciar())
+        ctx.cerrar_sesion = lambda: (Cuentas().olvidar(cuenta), reiniciar())
+        if cuenta.get("sesion") is not None:
+            # biblioteca compartida con los demas dispositivos de la cuenta
+            from descargador.sincronizacion import Sincronizador
+            sinc = Sincronizador(coleccion, cuenta,
+                                 al_renovar=lambda: Cuentas().actualizar_recordada(cuenta))
+            coleccion.sincronizador = sinc
+            ctx.sincronizador = sinc
+
+            def llego_de_otro():
+                ctx.me_gusta_cambio.emit("", True)
+                ctx.listas_cambio.emit()
+                ctx.guardados_cambio.emit()
+            sinc.cambio_remoto.connect(llego_de_otro)
+            sinc.iniciar()
         ventana = Ventana(ctx)
         estado["ventana"] = ventana
         ventana.show()
@@ -150,7 +164,10 @@ def main():
 
     codigo = app.exec()
     servidor.close()
-    sys.exit(codigo)
+    # salida inmediata: una descarga o una busqueda a medio camino no deben
+    # dejar el proceso vivo e invisible (todo lo importante ya esta guardado)
+    sys.stdout.flush()
+    os._exit(codigo)
 
 
 if __name__ == "__main__":

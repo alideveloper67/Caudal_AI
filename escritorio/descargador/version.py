@@ -23,7 +23,10 @@ VERSION = "2.0.0"
 # usuario/repositorio de GitHub donde publicas las versiones
 ORIGEN = "alideveloper67/Caudal_AI"
 
-API = f"https://api.github.com/repos/{ORIGEN}/releases/latest"
+# el mismo repositorio publica el escritorio y el movil: cada app solo hace
+# caso a las versiones con su etiqueta (escritorio-v2.1.0, movil-v1.0.0)
+PREFIJO = "escritorio-v"
+API = f"https://api.github.com/repos/{ORIGEN}/releases?per_page=40"
 CABECERAS = {
     "User-Agent": "Caudal",
     "Accept": "application/vnd.github+json",
@@ -40,6 +43,16 @@ def hay_novedad(instalada, publicada):
     return _numeros(publicada) > _numeros(instalada)
 
 
+def elegir_release(publicadas):
+    """La version mas alta del escritorio (ignora borradores, pruebas y las del movil)."""
+    candidatas = [r for r in publicadas or []
+                  if isinstance(r, dict) and not r.get("draft") and not r.get("prerelease")
+                  and str(r.get("tag_name") or "").startswith(PREFIJO)]
+    if not candidatas:
+        return None
+    return max(candidatas, key=lambda r: _numeros(str(r["tag_name"])[len(PREFIJO):]))
+
+
 def buscar_actualizacion(espera=12):
     """Mira si hay una version nueva publicada.
 
@@ -49,12 +62,14 @@ def buscar_actualizacion(espera=12):
     try:
         peticion = urllib.request.Request(API, headers=CABECERAS)
         with urllib.request.urlopen(peticion, timeout=espera) as r:
-            datos = json.loads(r.read().decode())
+            publicadas = json.loads(r.read().decode())
     except (urllib.error.URLError, OSError, ValueError, TimeoutError):
         return None
-
-    etiqueta = str(datos.get("tag_name") or datos.get("name") or "")
-    if not etiqueta or not hay_novedad(VERSION, etiqueta):
+    datos = elegir_release(publicadas)
+    if not datos:
+        return None
+    etiqueta = str(datos.get("tag_name"))[len(PREFIJO):]
+    if not hay_novedad(VERSION, etiqueta):
         return None
 
     instalador = apk = ""
@@ -66,8 +81,10 @@ def buscar_actualizacion(espera=12):
         elif nombre.endswith(".apk") and not apk:
             apk = enlace
 
+    if not instalador:
+        return None
     return {
-        "version": etiqueta.lstrip("vV"),
+        "version": etiqueta,
         "notas": (datos.get("body") or "").strip(),
         "instalador": instalador,
         "apk": apk,
@@ -97,4 +114,6 @@ def instalar_y_salir(ruta_instalador):
     """Lanza el instalador nuevo y cierra esta copia para que pueda sustituirla."""
     banderas = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     subprocess.Popen([ruta_instalador, "/actualizar"], creationflags=banderas)
-    sys.exit(0)
+    # salida inmediata, como al cerrar: nada debe quedarse vivo y bloquear
+    # los archivos que el instalador tiene que sustituir
+    os._exit(0)

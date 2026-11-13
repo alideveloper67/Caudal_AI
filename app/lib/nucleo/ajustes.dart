@@ -1,120 +1,109 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
-import 'modelos.dart';
+import 'plataforma.dart';
 
-/// Preferencias de la app, guardadas en el teléfono.
+/// Preferencias de la app. Mismas claves que Caudal Escritorio, para que las
+/// que se comparten (calidad, ecualizador, region...) signifiquen lo mismo.
 class Ajustes extends ChangeNotifier {
-  Ajustes._(this._prefs);
+  Ajustes._(this._prefs, this._prefijo);
 
   final SharedPreferences _prefs;
+  final String _prefijo;
 
-  static Future<Ajustes> abrir() async {
+  /// Cada cuenta tiene sus ajustes: el prefijo es su id.
+  static Future<Ajustes> cargar(String cuenta) async {
     final prefs = await SharedPreferences.getInstance();
-    return Ajustes._(prefs);
+    return Ajustes._(prefs, 'aj.$cuenta.');
   }
 
-  // Caudal no se conecta a ningun servidor: todo lo que se descarga se queda
-  // en este telefono. Aqui solo viven las preferencias del usuario.
+  static const Map<String, Object> defectos = {
+    'region': 'PE',
+    'calidad_audio': 'maxima', // maxima | normal | ahorro
+    'calidad_audio_datos': 'normal', // con datos moviles
+    'calidad_video': 'maxima', // maxima | 2160 | 1440 | 1080 | 720 | 480 | 360
+    'codec_video': 'auto', // auto | sin_av1 | compatible
+    'crossfade': 0,
+    'normalizar': true,
+    'super_volumen': 0, // 0..4
+    'ecualizador': false,
+    'eq_bandas': '[0,0,0,0,0,0,0,0,0,0]',
+    'eq_preset': 'Plano',
+    'velocidad': 1.0,
+    'autoplay': true,
+    'sponsorblock': true,
+    'sponsorblock_videos': false,
+    'preferir_descargado': true,
+    'aleatorio': false,
+    'repetir': 'no', // no | todo | una
+    'formato_audio': 'mp3', // mp3 | m4a | opus | flac | wav
+    'bitrate_mp3': '320',
+    'calidad_descarga': 'mejor',
+    'tipo_descarga': 'audio', // completo | audio | video
+    'solo_wifi_descargas': false,
+    'letras_auto': false,
+    'volumen': 100,
+    'guardar_publico': true,
+    'descarga_fuerte': false,
+  };
 
-  // ---- preferencias de descarga
-  TipoMedio get tipoPorDefecto =>
-      TipoMedioTexto.desdeClave(_prefs.getString('tipo') ?? 'completo');
-
-  Future<void> definirTipo(TipoMedio t) async {
-    await _prefs.setString('tipo', t.clave);
-    notifyListeners();
+  T _valor<T>(String clave) {
+    final v = _prefs.get(_prefijo + clave);
+    final d = defectos[clave];
+    if (v == null) return d as T;
+    if (T == double && v is int) return v.toDouble() as T;
+    if (T == int && v is double) return v.round() as T;
+    if (v is T) return v as T;
+    return d as T;
   }
 
-  String get calidad => _prefs.getString('calidad') ?? 'mejor';
+  String texto(String clave) => _valor<String>(clave);
+  int entero(String clave) => _valor<int>(clave);
+  double decimal(String clave) => _valor<double>(clave);
+  bool sino(String clave) => _valor<bool>(clave);
 
-  Future<void> definirCalidad(String c) async {
-    await _prefs.setString('calidad', c);
-    notifyListeners();
-  }
-
-  String get formatoAudio => _prefs.getString('formato_audio') ?? 'mp3';
-
-  Future<void> definirFormatoAudio(String f) async {
-    await _prefs.setString('formato_audio', f);
-    notifyListeners();
-  }
-
-  /// Bajar directo al teléfono cuando se pueda, sin pasar por el servidor.
-  bool get descargaDirecta => _prefs.getBool('descarga_directa') ?? true;
-
-  Future<void> definirDescargaDirecta(bool v) async {
-    await _prefs.setBool('descarga_directa', v);
-    notifyListeners();
-  }
-
-  /// Modo música: el audio se descarga normalizado para que suene mucho más
-  /// fuerte, y el reproductor añade un empujón extra de volumen.
-  bool get modoMusica => _prefs.getBool('modo_musica') ?? false;
-
-  Future<void> definirModoMusica(bool v) async {
-    await _prefs.setBool('modo_musica', v);
-    notifyListeners();
-  }
-
-  /// Cuánto empuja el reproductor por encima de lo normal (1.0 = sin empuje).
-  double get refuerzoReproductor => _prefs.getDouble('refuerzo_reproductor') ?? 1.6;
-
-  Future<void> definirRefuerzoReproductor(double v) async {
-    await _prefs.setDouble('refuerzo_reproductor', v.clamp(1.0, 2.0));
-    notifyListeners();
-  }
-
-  /// Guardar en la carpeta pública de descargas (visible para otras apps).
-  bool get guardarEnPublico => _prefs.getBool('guardar_publico') ?? true;
-
-  Future<void> definirGuardarEnPublico(bool v) async {
-    await _prefs.setBool('guardar_publico', v);
-    notifyListeners();
-  }
-
-  /// Avisar cuando cada descarga termina.
-  bool get avisarAlTerminar => _prefs.getBool('avisar') ?? true;
-
-  Future<void> definirAvisar(bool v) async {
-    await _prefs.setBool('avisar', v);
-    notifyListeners();
-  }
-
-  // ---- navegador
-  List<String> get favoritos => _prefs.getStringList('favoritos') ?? const [];
-
-  Future<void> agregarFavorito(String url) async {
-    final lista = [...favoritos];
-    if (!lista.contains(url)) {
-      lista.insert(0, url);
-      if (lista.length > 40) lista.removeLast();
-      await _prefs.setStringList('favoritos', lista);
-      notifyListeners();
+  List<int> get bandasEq {
+    try {
+      return (jsonDecode(texto('eq_bandas')) as List).map((e) => (e as num).toInt()).toList();
+    } catch (_) {
+      return List.filled(10, 0);
     }
   }
 
-  Future<void> quitarFavorito(String url) async {
-    final lista = [...favoritos]..remove(url);
-    await _prefs.setStringList('favoritos', lista);
-    notifyListeners();
+  Future<void> poner(String clave, Object valor, {bool avisar = true}) async {
+    final k = _prefijo + clave;
+    if (valor is String) {
+      await _prefs.setString(k, valor);
+    } else if (valor is bool) {
+      await _prefs.setBool(k, valor);
+    } else if (valor is int) {
+      await _prefs.setInt(k, valor);
+    } else if (valor is double) {
+      await _prefs.setDouble(k, valor);
+    } else if (valor is List) {
+      await _prefs.setString(k, jsonEncode(valor));
+    }
+    if (avisar) notifyListeners();
   }
 
-  // ---- búsquedas recientes
-  List<String> get busquedas => _prefs.getStringList('busquedas') ?? const [];
+  /// Lo que se sube a la nube (lo comun a todos los dispositivos).
+  static const compartidos = [
+    'region', 'calidad_audio', 'calidad_video', 'codec_video', 'normalizar', 'super_volumen',
+    'ecualizador', 'eq_bandas', 'eq_preset', 'autoplay', 'sponsorblock', 'sponsorblock_videos',
+    'formato_audio', 'bitrate_mp3', 'crossfade',
+  ];
 
-  Future<void> recordarBusqueda(String consulta) async {
-    final texto = consulta.trim();
-    if (texto.isEmpty) return;
-    final lista = [...busquedas]..remove(texto);
-    lista.insert(0, texto);
-    if (lista.length > 12) lista.removeRange(12, lista.length);
-    await _prefs.setStringList('busquedas', lista);
-    notifyListeners();
-  }
+  // atajos que usa el gestor de descargas
+  String get formatoAudio => texto('formato_audio');
+  /// En iPhone no hay "música del teléfono" en la que escribir: siempre no.
+  bool get guardarEnPublico => Plataforma.esAndroid && sino('guardar_publico');
 
-  Future<void> limpiarBusquedas() async {
-    await _prefs.remove('busquedas');
-    notifyListeners();
-  }
+  /// Si la opción "Guardar en la música del teléfono" tiene sentido aquí.
+  static bool get hayGuardarEnPublico => Plataforma.esAndroid;
+  bool get modoMusica => sino('descarga_fuerte');
+  bool get descargaDirecta => true;
+
+  Map<String, Object?> paraNube() => {for (final k in compartidos) k: _prefs.get(_prefijo + k)};
 }

@@ -1,12 +1,12 @@
 <h1 align="center">Caudal</h1>
 
 <p align="center">
-Descarga música y videos en tu computadora, tu Android o tu iPhone.<br>
-Con su propio navegador, su biblioteca y su reproductor.
+Música y videos en tu computadora y en tu Android, con tu cuenta en los dos.<br>
+Escucha, mira y descarga; lo descargado suena sin internet.
 </p>
 
 <p align="center">
-  <a href="https://github.com/alideveloper67/Caudal_AI/releases/latest">
+  <a href="https://github.com/alideveloper67/Caudal_AI/releases">
     <b>Descargar la última versión</b>
   </a>
 </p>
@@ -15,53 +15,40 @@ Con su propio navegador, su biblioteca y su reproductor.
 
 ## Qué hace
 
-- **Navegador propio.** Entras a YouTube, Instagram, TikTok o donde sea y aparecen
-  los botones de descargar video y descargar audio, sin salir de la app.
-- **Eliges qué bajar.** Video con sonido, solo video o solo audio, siempre en la
-  mejor calidad disponible.
-- **Listas completas.** Pega el enlace de una lista de Spotify, Apple Music o
-  YouTube Music y se descargan todas sus canciones.
-- **Biblioteca sin conexión.** Lo descargado se queda en tu dispositivo y suena
-  aunque no tengas internet.
-- **Modo música.** Nivela el volumen para que todo suene igual de fuerte.
-- **Tus dispositivos conectados.** Una cuenta enlaza la computadora y el teléfono.
+- **Una cuenta para todo.** Entras con usuario y contraseña en Windows y en
+  Android, y tus me gusta, listas, guardados y ajustes se ven igual en los dos.
+  Con **Mantener la sesión iniciada** no vuelves a escribirla.
+- **YouTube Music y YouTube dentro**, sin anuncios, en máxima calidad y en
+  segundo plano.
+- **Descargar cualquier enlace.** Pegas el enlace de YouTube, TikTok, Instagram,
+  Facebook, X… en la pestaña **Descargar**, ves la vista previa y eliges video o
+  audio y su calidad.
+- **Súper volumen** (Fuerte, Muy fuerte, Fiesta, Máximo) sin saturar.
+- **Ecualizador** que se oye mientras lo mueves y solo se queda si pulsas
+  **Guardar** (Cancelar lo deja como estaba).
+- **Biblioteca sin conexión**: lo descargado se queda en tu dispositivo.
+- **Se actualiza sola** cuando sale una versión nueva.
 
-## Las tres piezas
+## Las piezas
 
 | Carpeta | Qué es |
 |---|---|
-| `escritorio/` | La aplicación de Windows, escrita en Python con PySide6. |
-| `app/` | La aplicación de Android e iPhone, escrita en Flutter. |
-| `servidor/` | La API de cuentas y el resolvedor de enlaces, en FastAPI. |
-| `instalador/` | El instalador de Windows, escrito para este proyecto. |
+| `escritorio/` | App de Windows (Python + PySide6 + libmpv). Ver [escritorio/LEEME.md](escritorio/LEEME.md). |
+| `app/` | App de Android (Flutter). Ver [app/README.md](app/README.md). |
+| `supabase/` | `esquema.sql`: las tablas de las cuentas compartidas. |
+| `instalador/` | El instalador de Windows (`CaudalInstalador.exe`). |
 
 ## Instalar
 
-**Windows** — baja `CaudalInstalador.exe` de la
-[última versión](https://github.com/alideveloper67/Caudal_AI/releases/latest) y ábrelo.
-Si ya tenías Caudal, se actualiza encima y conserva tus descargas y ajustes.
+- **Windows**: baja `CaudalInstalador.exe` de la última versión
+  `escritorio-v…` y ábrelo. Si ya tenías Caudal, se instala encima y conserva
+  tus descargas y ajustes.
+- **Android**: baja el `.apk` de la última versión `movil-v…` y ábrelo.
+  `Caudal.apk` es el ligero; `Caudal-universal.apk` sirve en cualquier teléfono.
 
-**Android** — baja el APK y ábrelo desde el teléfono. `Caudal.apk` es el ligero;
-`Caudal-universal.apk` funciona en cualquier teléfono aunque pese más.
+Más detalles (actualizaciones, cuentas, cómo compilar) en [LEEME.md](LEEME.md).
 
-**iPhone** — se compila en Codemagic con el `codemagic.yaml` que está en el
-repositorio y se instala por sideload.
+---
 
-La aplicación avisa sola cuando hay una versión nueva.
-
-## Dónde se guardan las descargas
-
-Dentro de tu propio dispositivo. El servidor solo administra las cuentas: nunca
-guarda tus archivos.
-
-## Para desarrollarlo
-
-```
-escritorio/   pip install -r requirements.txt && python ejecutar.py
-app/          flutter pub get && flutter run
-servidor/     pip install -r requirements.txt && python -m caudal
-```
-
-Hace falta **ffmpeg** en `escritorio/bin` para unir video y audio y para convertir.
-
-Los detalles de por qué está partido así están en [LEEME.md](LEEME.md).
+Descarga solo contenido del que tengas los derechos o cuyo uso permitan la
+licencia y los términos del sitio.

@@ -56,7 +56,12 @@ class Coleccion:
         self._indice_local = None
         self._existe_cache = {}
         self._gustan = None
+        self.sincronizador = None       # lo pone main al entrar con una cuenta
         self._crear()
+        try:
+            self.con.execute("PRAGMA journal_mode=WAL")   # leer mientras se sincroniza
+        except sqlite3.DatabaseError:
+            pass
 
     # ------------------------------------------------------------ esquema
 
@@ -75,7 +80,8 @@ class Coleccion:
             id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT NOT NULL, creada REAL)""")
         columnas = {f["name"] for f in c.execute("PRAGMA table_info(listas)").fetchall()}
         for col, tipo in (("descripcion", "TEXT DEFAULT ''"), ("fijada", "INTEGER DEFAULT 0"),
-                          ("color", "TEXT DEFAULT ''"), ("tocada", "REAL DEFAULT 0")):
+                          ("color", "TEXT DEFAULT ''"), ("tocada", "REAL DEFAULT 0"),
+                          ("uuid", "TEXT")):
             if col not in columnas:
                 c.execute(f"ALTER TABLE listas ADD COLUMN {col} {tipo}")
         c.execute("""CREATE TABLE IF NOT EXISTS lista_items (
@@ -85,6 +91,11 @@ class Coleccion:
             id INTEGER PRIMARY KEY AUTOINCREMENT, clave TEXT NOT NULL, fecha REAL,
             contexto TEXT DEFAULT '')""")
         c.execute("CREATE INDEX IF NOT EXISTS idx_repro_fecha ON reproducciones(fecha DESC)")
+        if "nube_id" not in {f["name"] for f in c.execute("PRAGMA table_info(reproducciones)")}:
+            c.execute("ALTER TABLE reproducciones ADD COLUMN nube_id INTEGER")
+        c.execute("""CREATE TABLE IF NOT EXISTS pendientes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, op TEXT NOT NULL, datos TEXT NOT NULL,
+            creada REAL)""")
         c.execute("""CREATE TABLE IF NOT EXISTS guardados (
             tipo TEXT NOT NULL, id TEXT NOT NULL, datos TEXT NOT NULL, fecha REAL,
             PRIMARY KEY (tipo, id))""")
@@ -114,6 +125,41 @@ class Coleccion:
                 (f["lista_id"], f"local:{f['descarga_id']}", f["orden"], time.time()))
         self.con.commit()
         self.guardar_estado("listas_migradas", True)
+
+    # ------------------------------------------------------------ nube
+
+    def _anotar(self, op, datos):
+        """Deja una orden para la nube; el sincronizador la envia cuando puede."""
+        if self.sincronizador is None:
+            return
+        self.con.execute("INSERT INTO pendientes (op, datos, creada) VALUES (?,?,?)",
+                         (op, json.dumps(datos, ensure_ascii=False), time.time()))
+        self.con.commit()
+        self.sincronizador.pronto()
+
+    def olvidar_memoria(self):
+        """Tras traer cambios de otros dispositivos."""
+        self._gustan = None
+        self._indice_local = None
+
+    def _uuid_lista(self, lista_id):
+        f = self.con.execute("SELECT uuid FROM listas WHERE id = ?", (lista_id,)).fetchone()
+        if not f:
+            return None
+        if f["uuid"]:
+            return f["uuid"]
+        import uuid as _uuid
+        nuevo = str(_uuid.uuid4())
+        self.con.execute("UPDATE listas SET uuid = ? WHERE id = ?", (nuevo, lista_id))
+        self.con.commit()
+        return nuevo
+
+    def _anotar_lista(self, lista_id):
+        l = self.lista(lista_id)
+        if l:
+            self._anotar("lista_poner", {"uuid": self._uuid_lista(lista_id), "nombre": l["nombre"],
+                                         "descripcion": l.get("descripcion") or "",
+                                         "fijada": bool(l.get("fijada"))})
 
     # ------------------------------------------------------------ pistas
 
@@ -234,12 +280,16 @@ class Coleccion:
             self.con.execute("DELETE FROM me_gusta WHERE clave = ?", (clave,))
             self.con.commit()
             self._gustan.discard(clave)
+            if clave.startswith("yt:"):
+                self._anotar("me_gusta_quitar", {"clave": clave})
             return False
         self.recordar(pista)
         self.con.execute("INSERT OR REPLACE INTO me_gusta (clave, fecha) VALUES (?,?)",
                          (clave, time.time()))
         self.con.commit()
         self._gustan.add(clave)
+        if clave.startswith("yt:"):
+            self._anotar("me_gusta_poner", {"clave": clave, "datos": para_nube(pista)})
         return True
 
     def lista_me_gusta(self, filtro=""):
@@ -273,10 +323,12 @@ class Coleccion:
             raise ValueError("La lista necesita un nombre.")
         if self.con.execute("SELECT 1 FROM listas WHERE nombre = ?", (nombre,)).fetchone():
             raise ValueError("Ya tienes una lista con ese nombre.")
+        import uuid as _uuid
         cur = self.con.execute(
-            "INSERT INTO listas (nombre, creada, descripcion, tocada) VALUES (?,?,?,?)",
-            (nombre, time.time(), descripcion, time.time()))
+            "INSERT INTO listas (nombre, creada, descripcion, tocada, uuid) VALUES (?,?,?,?,?)",
+            (nombre, time.time(), descripcion, time.time(), str(_uuid.uuid4())))
         self.con.commit()
+        self._anotar_lista(cur.lastrowid)
         return cur.lastrowid
 
     def nombre_libre(self, base="Mi lista"):
@@ -304,8 +356,12 @@ class Coleccion:
             self.con.execute("UPDATE listas SET fijada = ? WHERE id = ?",
                              (1 if fijada else 0, lista_id))
         self.con.commit()
+        self._anotar_lista(lista_id)
 
     def borrar_lista(self, lista_id):
+        u = self._uuid_lista(lista_id)
+        if u:
+            self._anotar("lista_borrar", {"uuid": u})
         self.con.execute("DELETE FROM lista_items WHERE lista_id = ?", (lista_id,))
         self.con.execute("DELETE FROM listas WHERE id = ?", (lista_id,))
         self.con.commit()
@@ -318,6 +374,7 @@ class Coleccion:
                              (lista_id,)).fetchone()
         orden = f["m"]
         nuevas = 0
+        para_subir = []
         for p in pistas:
             if not p.get("clave"):
                 continue
@@ -327,20 +384,30 @@ class Coleccion:
                 "INSERT OR IGNORE INTO lista_items (lista_id, clave, orden, agregada)"
                 " VALUES (?,?,?,?)", (lista_id, p["clave"], orden, time.time()))
             nuevas += cur.rowcount
+            if cur.rowcount and p["clave"].startswith("yt:"):
+                para_subir.append({"clave": p["clave"], "datos": para_nube(p), "orden": orden})
         self.con.execute("UPDATE listas SET tocada = ? WHERE id = ?", (time.time(), lista_id))
         self.con.commit()
+        if para_subir:
+            self._anotar("items_poner", {"uuid": self._uuid_lista(lista_id), "items": para_subir})
         return nuevas
 
     def quitar_de_lista(self, lista_id, clave):
         self.con.execute("DELETE FROM lista_items WHERE lista_id = ? AND clave = ?",
                          (lista_id, clave))
         self.con.commit()
+        if clave.startswith("yt:"):
+            self._anotar("item_quitar", {"uuid": self._uuid_lista(lista_id), "clave": clave})
 
     def mover_en_lista(self, lista_id, claves_en_orden):
         for i, clave in enumerate(claves_en_orden):
             self.con.execute("UPDATE lista_items SET orden = ? WHERE lista_id = ? AND clave = ?",
                              (i + 1, lista_id, clave))
         self.con.commit()
+        items = [{"clave": c, "datos": para_nube(self.pista(c) or {}), "orden": i + 1}
+                 for i, c in enumerate(claves_en_orden) if c.startswith("yt:")]
+        if items:
+            self._anotar("items_poner", {"uuid": self._uuid_lista(lista_id), "items": items})
 
     def pistas_de_lista(self, lista_id, filtro=""):
         claves = [f["clave"] for f in self.con.execute(
@@ -373,10 +440,14 @@ class Coleccion:
         self.con.execute("INSERT OR REPLACE INTO guardados (tipo, id, datos, fecha) VALUES (?,?,?,?)",
                          (tipo, ident, json.dumps(datos, ensure_ascii=False), time.time()))
         self.con.commit()
+        if tipo in ("album", "lista", "artista"):
+            self._anotar("guardado_poner", {"tipo": tipo, "id": ident, "datos": datos})
 
     def olvidar(self, tipo, ident):
         self.con.execute("DELETE FROM guardados WHERE tipo = ? AND id = ?", (tipo, ident))
         self.con.commit()
+        if tipo in ("album", "lista", "artista"):
+            self._anotar("guardado_quitar", {"tipo": tipo, "id": ident})
 
     def guardado(self, tipo, ident):
         return bool(self.con.execute("SELECT 1 FROM guardados WHERE tipo = ? AND id = ?",
@@ -402,9 +473,15 @@ class Coleccion:
         if not pista or not pista.get("clave"):
             return
         self.recordar(pista)
-        self.con.execute("INSERT INTO reproducciones (clave, fecha, contexto) VALUES (?,?,?)",
-                         (pista["clave"], time.time(),
-                          json.dumps(contexto, ensure_ascii=False) if contexto else ""))
+        ahora = time.time()
+        en_nube = self.sincronizador is not None and pista["clave"].startswith("yt:")
+        self.con.execute("INSERT INTO reproducciones (clave, fecha, contexto, nube_id) VALUES (?,?,?,?)",
+                         (pista["clave"], ahora,
+                          json.dumps(contexto, ensure_ascii=False) if contexto else "",
+                          -1 if en_nube else None))
+        if en_nube:
+            self._anotar("escucha", {"clave": pista["clave"], "datos": para_nube(pista),
+                                     "contexto": contexto, "fecha": ahora})
         if contexto and contexto.get("tipo") and contexto.get("id") is not None:
             self.con.execute(
                 "INSERT OR REPLACE INTO contextos_recientes (tipo, id, datos, fecha) VALUES (?,?,?,?)",
@@ -489,6 +566,13 @@ class Coleccion:
             return json.loads(f["valor"])
         except ValueError:
             return defecto
+
+
+def para_nube(pista):
+    """Lo que se comparte de una pista: sin rutas de este equipo."""
+    fuera = {"archivo", "descarga_id", "es_audio", "tamano", "calidad", "fecha", "url"}
+    return {k: v for k, v in (pista or {}).items()
+            if k not in fuera and not str(k).startswith("_")}
 
 
 def _filtrar(pistas, filtro):

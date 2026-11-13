@@ -266,6 +266,14 @@ class Ventana(QWidget):
         menu = QMenu(self)
         cab = menu.addAction(f"{cuenta.get('nombre', '')}  ·  @{cuenta.get('usuario', '')}")
         cab.setEnabled(False)
+        sinc = getattr(self.ctx, "sincronizador", None)
+        if sinc is not None:
+            textos = {"sincronizado": "Biblioteca sincronizada", "pendiente": "Sincronizando…",
+                      "sin_conexion": "Sin conexión: se sincroniza al volver",
+                      "error": "No se pudo sincronizar ahora", "": "Sincronizando…"}
+            estado = menu.addAction(textos.get(sinc.ultimo_estado, "Sincronizando…"))
+            estado.setEnabled(False)
+            menu.addAction("Sincronizar ahora", sinc.ya)
         menu.addSeparator()
         menu.addAction(iconos.icono("engranaje", 16, C["texto2"]), "Ajustes",
                        lambda: self.navegar({"pagina": "ajustes"}))
@@ -279,7 +287,9 @@ class Ventana(QWidget):
     def _cambiar_contrasena(self):
         from PySide6.QtWidgets import QInputDialog
         from ..cuentas import Cuentas, ErrorCuenta
-        usuario = (getattr(self.ctx, "cuenta", None) or {}).get("usuario", "")
+        cuenta = getattr(self.ctx, "cuenta", None) or {}
+        if not cuenta.get("sesion"):
+            return
         actual, ok = QInputDialog.getText(self, "Cambiar la contraseña", "Contraseña actual:",
                                           QLineEdit.Password)
         if not ok:
@@ -290,7 +300,7 @@ class Ventana(QWidget):
         if not ok:
             return
         try:
-            Cuentas().cambiar_contrasena(usuario, actual, nueva)
+            Cuentas().cambiar_contrasena(cuenta, actual, nueva)
         except ErrorCuenta as e:
             QMessageBox.warning(self, APP_NOMBRE, str(e))
             return
@@ -869,34 +879,118 @@ class Ventana(QWidget):
             self.alternar_completa()
             e.ignore()
             return
-        if (not self._saliendo and self.ajustes["segundo_plano"] and self.bandeja
-                and (self.r.estado in ("sonando", "cargando") or self.ctx.gestor.hay_actividad())):
-            e.ignore()
-            self.hide()
-            if not self._aviso_bandeja:
-                self._aviso_bandeja = True
-                self.bandeja.showMessage(
-                    "Caudal sigue sonando",
-                    "Está junto al reloj. Clic para abrirlo; clic derecho → Salir para cerrarlo.",
-                    QSystemTrayIcon.Information, 4000)
+        if self._saliendo:
+            e.accept()
             return
+        sonando = self.r.estado in ("sonando", "cargando")
+        if sonando and self.bandeja:
+            eleccion = self.ajustes["al_cerrar"]
+            if eleccion not in ("bandeja", "salir"):
+                eleccion = self._preguntar_al_cerrar()
+                if eleccion is None:
+                    e.ignore()
+                    return
+            if eleccion == "bandeja":
+                e.ignore()
+                self._a_la_bandeja()
+                return
         activas = [t for t in self.ctx.gestor.lista() if t.activa]
-        if activas and not self._saliendo:
+        if activas:
             r = QMessageBox.question(self, APP_NOMBRE,
                                      f"Hay {len(activas)} descarga(s) en marcha. Si sales ahora se "
-                                     "detendrán (podrás retomarlas). ¿Salir igualmente?")
+                                     "detienen y podrás retomarlas al volver. ¿Salir igualmente?")
             if r != QMessageBox.Yes:
                 e.ignore()
                 return
-        self._guardar_estado()
-        self.teclas_multimedia.soltar()
-        self.ctx.gestor.cancelar_todo()
-        self.r.cerrar()
-        if self.mini:
-            self.mini.hide()
+        e.ignore()
+        self.salir()
+
+    def _preguntar_al_cerrar(self):
+        """Primera vez que se cierra con musica: se pregunta y se puede recordar."""
+        from PySide6.QtWidgets import QCheckBox
+        caja = QMessageBox(self)
+        caja.setWindowTitle(APP_NOMBRE)
+        caja.setIcon(QMessageBox.Question)
+        caja.setText("¿Qué hacemos con la música?")
+        caja.setInformativeText("Caudal puede seguir sonando en segundo plano, junto al reloj de "
+                                "Windows, o cerrarse del todo.")
+        seguir = caja.addButton("Seguir sonando", QMessageBox.AcceptRole)
+        cerrar = caja.addButton("Cerrar Caudal", QMessageBox.DestructiveRole)
+        caja.addButton("Cancelar", QMessageBox.RejectRole)
+        recordar = QCheckBox("Recordar mi elección (se cambia en Ajustes)")
+        caja.setCheckBox(recordar)
+        caja.setDefaultButton(seguir)
+        caja.exec()
+        elegido = caja.clickedButton()
+        if elegido is seguir:
+            eleccion = "bandeja"
+        elif elegido is cerrar:
+            eleccion = "salir"
+        else:
+            return None
+        if recordar.isChecked():
+            self.ajustes["al_cerrar"] = eleccion
+            self.ajustes.guardar()
+        return eleccion
+
+    def _a_la_bandeja(self):
+        if self.mini and self.mini.isVisible():
+            pass
+        self.hide()
+        if not self._aviso_bandeja:
+            self._aviso_bandeja = True
+            self.bandeja.showMessage(
+                "Caudal sigue sonando",
+                "Está junto al reloj. Clic para abrirlo; clic derecho → Salir para cerrarlo.",
+                QSystemTrayIcon.Information, 4000)
+
+    def salir(self):
+        """La unica salida: guarda, para todo y termina el proceso de verdad."""
+        if getattr(self, "_saliendo_ya", False):
+            return
+        self._saliendo_ya = True
+        self._saliendo = True
+        try:
+            self._guardar_estado()
+        except Exception:
+            pass
+        try:
+            cuenta = getattr(self.ctx, "cuenta", None)
+            if cuenta and cuenta.get("sesion"):
+                from ..cuentas import Cuentas
+                Cuentas().actualizar_recordada(cuenta)   # el token renovado, para la proxima
+        except Exception:
+            pass
+        # primero desaparece todo de la pantalla: el apagado va detras
+        for w in (self.mini, self):
+            try:
+                if w:
+                    w.hide()
+            except RuntimeError:
+                pass
         if self.bandeja:
             self.bandeja.hide()
-        e.accept()
+        QApplication.processEvents()
+        try:
+            self.teclas_multimedia.soltar()
+        except Exception:
+            pass
+        try:
+            self.ctx.gestor.cancelar_todo()
+        except Exception:
+            pass
+        try:
+            self.r.cerrar()
+        except Exception:
+            pass
+        for w in (self.mini, self):
+            try:
+                if w:
+                    w.hide()
+            except RuntimeError:
+                pass
+        if self.bandeja:
+            self.bandeja.hide()
         QApplication.quit()
 
     def _guardar_estado(self):
@@ -908,6 +1002,4 @@ class Ventana(QWidget):
             pass
         self.ajustes.guardar()
 
-    def salir(self):
-        self._saliendo = True
-        self.close()
+

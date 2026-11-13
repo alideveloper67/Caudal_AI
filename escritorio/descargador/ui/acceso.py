@@ -224,7 +224,9 @@ class VentanaAcceso(QWidget):
         self.bt_accion.clicked.connect(self._enviar)
         vc.addWidget(self.bt_accion)
 
-        pie = QLabel("Tu cuenta y tu biblioteca se guardan en este equipo.")
+        pie = QLabel("La misma cuenta sirve en Windows y en Android. Lo que descargas "
+                     "se queda en cada equipo.")
+        pie.setWordWrap(True)
         pie.setObjectName("ayuda")
         pie.setAlignment(Qt.AlignCenter)
         vc.addWidget(pie)
@@ -243,6 +245,13 @@ class VentanaAcceso(QWidget):
             self.e_usuario.e.setText(ultimo)
         self._modo(0 if self.cuentas.hay_cuentas() else 1)
 
+    def closeEvent(self, e):
+        # cerrar la pantalla de entrada sin entrar = cerrar Caudal
+        if not getattr(self, "_entro", False):
+            from PySide6.QtWidgets import QApplication
+            QApplication.quit()
+        super().closeEvent(e)
+
     def _modo(self, i):
         self.pila.setCurrentIndex(i)
         self.bt_entrar.setChecked(i == 0)
@@ -256,7 +265,7 @@ class VentanaAcceso(QWidget):
         else:
             self.et_titulo.setText("Crea tu cuenta")
             primera = not self.cuentas.hay_cuentas()
-            self.et_sub.setText("Es gratis y tarda un momento."
+            self.et_sub.setText("Es gratis y sirve en todos tus dispositivos."
                                 + (" Lo que ya tenías en Caudal pasa a esta cuenta." if primera else ""))
             self.bt_accion.setText("Crear cuenta y empezar")
             self.n_nombre.e.setFocus()
@@ -266,26 +275,48 @@ class VentanaAcceso(QWidget):
         self.et_error.show()
 
     def _enviar(self):
-        try:
-            if self.pila.currentIndex() == 0:
-                if not self.e_usuario.texto().strip():
-                    raise ErrorCuenta("Escribe tu usuario.")
-                cuenta = self.cuentas.entrar(self.e_usuario.texto(), self.e_clave.texto())
-            else:
-                if self.n_clave.texto() != self.n_clave2.texto():
-                    raise ErrorCuenta("Las dos contraseñas no coinciden.")
-                cuenta = self.cuentas.crear(self.n_usuario.texto(), self.n_clave.texto(),
-                                            self.n_nombre.texto())
-        except ErrorCuenta as e:
-            self._error(str(e))
+        if getattr(self, "_ocupado", False):
             return
-        recordar = self.recordar.isChecked()
-        if recordar:
-            self.cuentas.recordar(cuenta["usuario"])
+        entrar = self.pila.currentIndex() == 0
+        if entrar:
+            usuario, clave = self.e_usuario.texto(), self.e_clave.texto()
+            if not usuario.strip():
+                self._error("Escribe tu usuario.")
+                return
+            funcion, args = self.cuentas.entrar, (usuario, clave)
         else:
-            self.cuentas.olvidar()
-        self.cuentas.anotar_ultimo(cuenta["usuario"])
-        self.entro.emit(cuenta, recordar)
+            if self.n_clave.texto() != self.n_clave2.texto():
+                self._error("Las dos contraseñas no coinciden.")
+                return
+            funcion, args = self.cuentas.crear, (self.n_usuario.texto(), self.n_clave.texto(),
+                                                 self.n_nombre.texto())
+        # la red va en segundo plano: la ventana no se congela
+        self._ocupado = True
+        self.et_error.hide()
+        texto = self.bt_accion.text()
+        self.bt_accion.setText("Entrando…" if entrar else "Creando tu cuenta…")
+        self.bt_accion.setEnabled(False)
+
+        def listo(cuenta):
+            self._ocupado = False
+            self._entro = True
+            recordar = self.recordar.isChecked()
+            if recordar:
+                self.cuentas.recordar(cuenta)
+            else:
+                self.cuentas.olvidar()
+            self.cuentas.anotar_ultimo(cuenta["usuario"])
+            self.entro.emit(cuenta, recordar)
+
+        def fallo(e):
+            self._ocupado = False
+            self.bt_accion.setText(texto)
+            self.bt_accion.setEnabled(True)
+            self._error(str(e) if isinstance(e, ErrorCuenta)
+                        else "No se pudo conectar. Revisa tu internet y vuelve a probar.")
+
+        from ..hilos import en_segundo_plano
+        en_segundo_plano(funcion, *args, ok=listo, error=fallo, dueno=self)
 
 
 def _sin_usar():  # pragma: no cover

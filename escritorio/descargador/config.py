@@ -128,7 +128,8 @@ DEFECTOS = {
     "ecualizador": False,
     "eq_bandas": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
     "eq_preset": "Plano",
-    "segundo_plano": True,           # al cerrar la ventana sigue sonando en la bandeja
+    "segundo_plano": True,           # (antiguo) se sustituye por al_cerrar
+    "al_cerrar": "preguntar",        # preguntar | bandeja | salir (con musica sonando)
     "mini_encima": True,             # el mini reproductor queda por encima de todo
     "letras_auto": False,            # abrir las letras al reproducir
     "panel_derecho": "sonando",      # sonando | cola | letras | oculto

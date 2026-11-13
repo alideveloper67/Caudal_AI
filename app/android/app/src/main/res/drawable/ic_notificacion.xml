@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Icono de la notificacion: el triangulo de reproducir con la corriente debajo -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp" android:height="24dp"
+    android:viewportWidth="24" android:viewportHeight="24">
+    <path android:fillColor="#FFFFFF" android:pathData="M8,3.5L18,9.5L8,15.5Z"/>
+    <path android:strokeColor="#FFFFFF" android:strokeWidth="1.6" android:strokeLineCap="round"
+        android:pathData="M4,18.5C6.5,16.8 9,20.2 12,18.5C15,16.8 17.5,20.2 20,18.5"/>
+</vector>
