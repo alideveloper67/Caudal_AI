@@ -156,6 +156,14 @@ class PaginaAjustes(Pagina):
         s.fila("Normalizar el volumen", "Todas las canciones suenan igual de fuertes "
                                         "(-14 LUFS, el mismo criterio que Spotify).",
                self.normalizar)
+        from ...reproduccion import NOMBRES_SUPER_VOLUMEN
+        self.super = _combo([(n, k) for k, n in NOMBRES_SUPER_VOLUMEN.items()],
+                            int(a["super_volumen"] or 0), 200)
+        self._conectar(self.super, "super_volumen",
+                       lambda: (ctx.reproductor.aplicar_sonido(), ctx.sonido_cambio.emit()))
+        s.fila("Súper volumen", "Mucho más fuerte sin que se rompa el sonido: un limitador "
+                                "evita la saturación. También en el botón del altavoz de abajo.",
+               self.super)
         caja_fundido = QWidget()
         hf = QHBoxLayout(caja_fundido)
         hf.setContentsMargins(0, 0, 0, 0)

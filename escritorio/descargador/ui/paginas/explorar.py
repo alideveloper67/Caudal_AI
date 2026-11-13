@@ -22,8 +22,8 @@ class PaginaExplorar(Pagina):
         if datos is not None:
             self._pintar(datos)
         else:
-            self.espera = QLabel("Cargando novedades y géneros…")
-            self.espera.setObjectName("secundario")
+            from ..componentes import Esqueleto
+            self.espera = Esqueleto("tarjetas")
             self.cuerpo.addWidget(self.espera)
             en_segundo_plano(catalogo.explorar, ok=self._llego,
                              error=lambda e: self.error("Sin conexión con YouTube Music.",
@@ -61,8 +61,8 @@ class PaginaGenero(Pagina):
         if datos is not None:
             self._pintar(datos)
         else:
-            self.espera = QLabel("Cargando…")
-            self.espera.setObjectName("secundario")
+            from ..componentes import Esqueleto
+            self.espera = Esqueleto("tarjetas")
             self.cuerpo.addWidget(self.espera)
             en_segundo_plano(catalogo.pagina, ident, params, ok=lambda d: self._llego(clave, d),
                              error=lambda e: self.error(f"No se pudo abrir.\n{e}"), dueno=self)

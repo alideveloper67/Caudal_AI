@@ -253,9 +253,8 @@ class PaginaBuscar(Pagina):
         if datos is not None:
             self._resultados(datos)
             return
-        espera = QLabel("Buscando…")
-        espera.setObjectName("secundario")
-        self.zv.addWidget(espera)
+        from ..componentes import Esqueleto
+        self.zv.addWidget(Esqueleto("filas"))
         if self.filtro == "todo":
             funcion, args = catalogo.buscar_todo, (self.consulta,)
         else:

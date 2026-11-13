@@ -151,6 +151,9 @@ class BarraReproduccion(QFrame):
         self.bt_temporizador = BotonIcono("temporizador", 17, "Temporizador para dormir", 32)
         self.bt_temporizador.clicked.connect(self._menu_temporizador)
         der.addWidget(self.bt_temporizador)
+        self.bt_super = BotonIcono("altavoz_fuerte", 18, "Súper volumen", 32)
+        self.bt_super.clicked.connect(self._menu_super)
+        der.addWidget(self.bt_super)
         self.bt_eq = BotonIcono("ecualizador", 17, "Ecualizador y sonido", 32)
         self.bt_eq.clicked.connect(self.pidio_ecualizador.emit)
         der.addWidget(self.bt_eq)
@@ -181,6 +184,8 @@ class BarraReproduccion(QFrame):
         self.r.temporizador_cambio.connect(self._temporizador)
         ctx.me_gusta_cambio.connect(lambda *_: self._pintar_gusta())
         self._pintar_modos()
+        self._pintar_super()
+        ctx.sonido_cambio.connect(self._pintar_super)
         self._pista(None)
 
     # ------------------------------------------------------------ eventos del motor
@@ -367,6 +372,36 @@ class BarraReproduccion(QFrame):
             menu.addAction(f"Detener en {m} minutos", lambda m=m: self.r.programar_apagado(m))
         menu.addAction("Al terminar esta canción", lambda: self.r.programar_apagado(None, True))
         menu.exec(self.bt_temporizador.mapToGlobal(QPoint(0, -menu.sizeHint().height() - 6)))
+
+    def _menu_super(self):
+        from ..reproduccion import NOMBRES_SUPER_VOLUMEN
+        menu = QMenu(self)
+        titulo = menu.addAction("Súper volumen: más fuerte sin saturar")
+        titulo.setEnabled(False)
+        menu.addSeparator()
+        actual = int(self.ctx.ajustes["super_volumen"] or 0)
+        for nivel, nombre in NOMBRES_SUPER_VOLUMEN.items():
+            a = menu.addAction(nombre, lambda n=nivel: self._poner_super(n))
+            a.setCheckable(True)
+            a.setChecked(nivel == actual)
+        menu.addSeparator()
+        menu.addAction("Ecualizador y más…", self.pidio_ecualizador.emit)
+        menu.exec(self.bt_super.mapToGlobal(QPoint(0, -menu.sizeHint().height() - 6)))
+
+    def _poner_super(self, nivel):
+        from ..reproduccion import NOMBRES_SUPER_VOLUMEN
+        self.ctx.ajustes["super_volumen"] = nivel
+        self.ctx.ajustes.guardar()
+        self.r.aplicar_sonido()
+        self._pintar_super()
+        self.ctx.aviso.emit("Súper volumen apagado" if not nivel
+                            else f"Súper volumen: {NOMBRES_SUPER_VOLUMEN[nivel].lower()}")
+
+    def _pintar_super(self):
+        from ..reproduccion import NOMBRES_SUPER_VOLUMEN
+        nivel = int(self.ctx.ajustes["super_volumen"] or 0)
+        self.bt_super.set_activo(bool(nivel))
+        self.bt_super.setToolTip("Súper volumen: " + NOMBRES_SUPER_VOLUMEN.get(nivel, "").lower())
 
     def marcar_panel(self, nombre):
         self.bt_letras.set_activo(nombre == "letras")

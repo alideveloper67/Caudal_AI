@@ -63,10 +63,15 @@ class PaginaDescargas(QWidget):
         v = QVBoxLayout(self)
         v.setContentsMargins(24, 20, 24, 14)
         v.setSpacing(14)
-        t = QLabel("Descargas")
+        t = QLabel("Descargar videos")
         t.setObjectName("titulo_pagina")
         t.setStyleSheet("font-size:30px;font-weight:900;")
         v.addWidget(t)
+        sub = QLabel("Pega el enlace de cualquier video: YouTube, TikTok, Instagram, Facebook, X, "
+                     "Telegram, Twitch, Vimeo, Reddit… y unos 1800 sitios más.")
+        sub.setObjectName("secundario")
+        sub.setWordWrap(True)
+        v.addWidget(sub)
 
         # --- pegar enlaces
         caja = QFrame()
@@ -124,6 +129,17 @@ class PaginaDescargas(QWidget):
         self.et_carpeta.clicked.connect(lambda: abrir_ruta(self.ajustes["carpeta"]))
         vc.addWidget(self.et_carpeta, 0, Qt.AlignLeft)
         v.addWidget(caja)
+
+        # --- vista previa de lo pegado
+        self.zona_previa = QVBoxLayout()
+        self.zona_previa.setSpacing(8)
+        v.addLayout(self.zona_previa)
+        self._previas = {}
+        self._t_previa = QTimer(self)
+        self._t_previa.setSingleShot(True)
+        self._t_previa.setInterval(450)
+        self._t_previa.timeout.connect(self._mostrar_previas)
+        self.campo.textChanged.connect(lambda _t: self._t_previa.start())
 
         # --- pestanas
         pest = QHBoxLayout()
@@ -247,6 +263,19 @@ class PaginaDescargas(QWidget):
         self.gestor.agregar_varias(urls)
         self.campo.clear()
         self._pestana(0)
+
+    def _mostrar_previas(self):
+        """Una tarjeta por enlace pegado: portada, titulo, calidad y botones."""
+        from .buscar import TarjetaEnlace
+        urls = redes.extraer_urls(self.campo.text().strip())[:3]
+        for url in list(self._previas):
+            if url not in urls:
+                self._previas.pop(url).deleteLater()
+        for url in urls:
+            if url not in self._previas:
+                tarjeta = TarjetaEnlace(self.ctx, url)
+                self._previas[url] = tarjeta
+                self.zona_previa.addWidget(tarjeta)
 
     def _mas_opciones(self):
         texto = self.campo.text().strip()

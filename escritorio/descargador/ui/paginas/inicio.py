@@ -33,7 +33,9 @@ class PaginaInicio(Pagina):
         ctx = self.ctx
         col = ctx.coleccion
         cab = QHBoxLayout()
-        t = QLabel(saludo())
+        cuenta = getattr(ctx, "cuenta", None) or {}
+        nombre = (cuenta.get("nombre") or "").split(" ")[0]
+        t = QLabel(f"{saludo()}, {nombre}" if nombre else saludo())
         t.setObjectName("titulo_pagina")
         t.setStyleSheet("font-size:30px;font-weight:900;")
         cab.addWidget(t)
@@ -112,8 +114,8 @@ class PaginaInicio(Pagina):
         if datos is not None:
             self._con_catalogo(datos)
         else:
-            self.et_cargando = QLabel("Cargando recomendaciones…")
-            self.et_cargando.setObjectName("secundario")
+            from ..componentes import Esqueleto
+            self.et_cargando = Esqueleto("tarjetas")
             self.zv.addWidget(self.et_cargando)
             en_segundo_plano(catalogo.inicio, ok=self._llego, error=self._sin_red, dueno=self)
 
@@ -146,8 +148,12 @@ class PaginaInicio(Pagina):
     def _sin_red(self, _e):
         if getattr(self, "et_cargando", None) is not None:
             try:
-                self.et_cargando.setText("Sin conexión con YouTube Music. Mientras tanto, tienes "
-                                         "lo descargado en «En tu disco».")
+                self.et_cargando.deleteLater()
+                self.et_cargando = None
+                from ..componentes import SinResultados
+                self.zv.addWidget(SinResultados(
+                    "globo", "Sin conexión con YouTube Music",
+                    "Mientras vuelve, tienes lo descargado en «En tu disco»."))
             except RuntimeError:
                 pass
 

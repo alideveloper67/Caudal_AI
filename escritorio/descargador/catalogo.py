@@ -107,6 +107,52 @@ TRADUCCIONES = {
     "covers and remixes": "Versiones y remixes",
     "long listening": "Para escuchar largo rato",
     "mixes": "Mixes",
+    "decades": "Décadas",
+    "family": "En familia",
+    "christian & gospel": "Cristiana y gospel",
+    "country & americana": "Country",
+    "dance & electronic": "Dance y electrónica",
+    "folk & acoustic": "Folk y acústica",
+    "hip-hop en español": "Hip-hop en español",
+    "indie & alternative": "Indie y alternativa",
+    "classical": "Clásica",
+    "brazilian funk": "Funk brasileño",
+    "african": "Africana",
+    "arabic": "Árabe",
+    "blues": "Blues",
+    "metal": "Metal",
+    "pop": "Pop",
+    "r&b & soul": "R&B y soul",
+    "reggae & caribbean": "Reggae y caribeña",
+    "rock": "Rock",
+    "soundtracks & musicals": "Bandas sonoras",
+    "latin": "Latina",
+    "salsa": "Salsa",
+    "bachata": "Bachata",
+    "regional mexican": "Regional mexicana",
+    "reggaeton": "Reguetón",
+    "kids": "Infantil",
+    "holiday": "Navidad",
+    "korean hip-hop": "Hip-hop coreano",
+    "j-pop": "J-Pop",
+    "k-pop": "K-Pop",
+    "jazz": "Jazz",
+    "cumbia": "Cumbia",
+    "1980s": "Años 80",
+    "1990s": "Años 90",
+    "2000s": "Años 2000",
+    "2010s": "Años 2010",
+    "1970s": "Años 70",
+    "1960s": "Años 60",
+    "energy boosters": "Para cargar energía",
+    "feel good": "Buen rollo",
+    "gaming": "Para jugar",
+    "romance": "Romance",
+    "sad": "Melancolía",
+    "sleep": "Para dormir",
+    "workout": "Para entrenar",
+    "party": "Fiesta",
+    "focus": "Concentración",
     "community playlists": "Listas de la comunidad",
     "album": "Álbum",
     "single": "Sencillo",
@@ -675,6 +721,47 @@ def pagina(browse_id, params=None, continuar=1):
 
 def inicio():
     return pagina("FEmusic_home", continuar=2)
+
+
+_PORTADAS_GENERO = None
+
+
+def portada_genero(browse_id, params):
+    """La portada de la primera lista de un genero, para ilustrar su tarjeta.
+    Se guarda una semana en disco: solo se busca una vez."""
+    global _PORTADAS_GENERO
+    import json
+    from .config import carpeta_datos
+    archivo = carpeta_datos() / "portadas_generos.json"
+    with _cerrojo:
+        if _PORTADAS_GENERO is None:
+            try:
+                _PORTADAS_GENERO = json.loads(archivo.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                _PORTADAS_GENERO = {}
+        clave = f"{browse_id}|{params}"
+        dato = _PORTADAS_GENERO.get(clave)
+        if dato and time.time() - dato[1] < 7 * 86400:
+            return dato[0]
+    url = ""
+    try:
+        datos = pagina(browse_id, params, continuar=0)
+        for sec in datos.get("secciones") or []:
+            for el in sec.get("elementos") or []:
+                if el.get("miniatura"):
+                    url = agrandar_miniatura(el["miniatura"], 300)
+                    break
+            if url:
+                break
+    except Exception:
+        return ""
+    with _cerrojo:
+        _PORTADAS_GENERO[clave] = [url, time.time()]
+        try:
+            archivo.write_text(json.dumps(_PORTADAS_GENERO), encoding="utf-8")
+        except OSError:
+            pass
+    return url
 
 
 def explorar():

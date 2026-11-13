@@ -245,3 +245,38 @@ def test_repetir_todo_vuelve_al_principio():
     assert r._avanzar() is None
     r.repetir = "todo"
     assert r._avanzar() is pistas[0] and r.pos == 0
+
+
+# ---------------------------------------------------------------- cuentas
+
+def test_cuentas_crear_entrar_y_recordar(datos_aislados):
+    from descargador.cuentas import Cuentas, ErrorCuenta, activar
+    from descargador import config
+    c = Cuentas()
+    assert not c.hay_cuentas()
+    primera = c.crear("kevin", "secreta1", "Kevin")
+    assert primera["carpeta"] == ""             # hereda los datos que ya habia
+    with pytest.raises(ErrorCuenta):
+        c.crear("Kevin", "otra123")             # sin distinguir mayusculas
+    with pytest.raises(ErrorCuenta):
+        c.crear("a b", "secreta1")
+    with pytest.raises(ErrorCuenta):
+        c.crear("ana", "123")
+    segunda = c.crear("ana", "clave99")
+    assert segunda["carpeta"] == "perfiles/ana"
+    with pytest.raises(ErrorCuenta):
+        c.entrar("kevin", "mal")
+    assert c.entrar("KEVIN", "secreta1")["usuario"] == "kevin"
+    texto = (config.carpeta_datos() / "cuentas.json").read_text(encoding="utf-8")
+    assert "secreta1" not in texto              # nunca en claro
+    c.recordar("ana")
+    assert Cuentas().recordada()["usuario"] == "ana"
+    Cuentas().olvidar()
+    assert Cuentas().recordada() is None
+    c.cambiar_contrasena("ana", "clave99", "nueva77")
+    assert Cuentas().entrar("ana", "nueva77")
+    # cada cuenta con su biblioteca
+    activar(segunda)
+    assert config.carpeta_perfil().name == "ana"
+    activar(primera)
+    assert config.carpeta_perfil() == config.carpeta_datos()

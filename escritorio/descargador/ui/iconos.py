@@ -496,6 +496,23 @@ def _dibujar_extra(p, nombre, e, color):
         f.setBold(True)
         p.setFont(f)
         p.drawText(QRectF(4 * e, 4 * e, 16 * e, 16 * e), Qt.AlignCenter, "10")
+    elif nombre in ("ojo", "ojo_tachado"):
+        ruta = QPainterPath()
+        ruta.moveTo(2.5 * e, 12 * e)
+        ruta.cubicTo(6 * e, 5.5 * e, 18 * e, 5.5 * e, 21.5 * e, 12 * e)
+        ruta.cubicTo(18 * e, 18.5 * e, 6 * e, 18.5 * e, 2.5 * e, 12 * e)
+        p.drawPath(ruta)
+        p.drawEllipse(QPointF(12 * e, 12 * e), 3 * e, 3 * e)
+        if nombre == "ojo_tachado":
+            p.drawLine(QPointF(4 * e, 4 * e), QPointF(20 * e, 20 * e))
+    elif nombre == "candado":
+        p.drawRoundedRect(QRectF(5 * e, 10.5 * e, 14 * e, 10 * e), 2 * e, 2 * e)
+        p.drawArc(QRectF(8 * e, 3.5 * e, 8 * e, 12 * e), 0, 180 * 16)
+    elif nombre == "salir":
+        p.drawPolyline([QPointF(10 * e, 4 * e), QPointF(4 * e, 4 * e), QPointF(4 * e, 20 * e),
+                        QPointF(10 * e, 20 * e)])
+        p.drawLine(QPointF(9 * e, 12 * e), QPointF(20.5 * e, 12 * e))
+        p.drawPolyline([QPointF(16.5 * e, 8 * e), QPointF(20.5 * e, 12 * e), QPointF(16.5 * e, 16 * e)])
     elif nombre == "compartir":
         p.drawPolyline([QPointF(12 * e, 15 * e), QPointF(12 * e, 3.5 * e)])
         p.drawPolyline([QPointF(7.5 * e, 8 * e), QPointF(12 * e, 3.5 * e), QPointF(16.5 * e, 8 * e)])

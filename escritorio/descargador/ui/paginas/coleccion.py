@@ -66,7 +66,7 @@ class PaginaColeccion(Pagina):
             if datos is not None:
                 self._pintar(datos)
             else:
-                self.cargando()
+                self.cargando(tipo="filas")
                 funcion = catalogo.album if self.tipo == "album" else catalogo.lista
                 en_segundo_plano(funcion, self.ident, ok=lambda d: self._llego(clave, d),
                                  error=lambda e: self.error(f"No se pudo abrir.\n{str(e)[:200]}",
@@ -352,8 +352,7 @@ class PaginaColeccion(Pagina):
             return
         p = pistas[i]
         menu.addAction(iconos.icono("papelera", 16, C["texto2"]), "Quitar de esta lista",
-                       lambda: (self.ctx.coleccion.quitar_de_lista(self.ident, p["clave"]),
-                                self.ctx.listas_cambio.emit()))
+                       lambda: self.ctx.quitar_de_lista(self.ident, p))
         if self.orden == "personalizado" and not self.filtro:
             if i > 0:
                 menu.addAction("Subir", lambda: self._mover(i, i - 1))

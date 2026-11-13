@@ -40,6 +40,10 @@ PRESETS_EQ = {
     "Altavoz pequeño": [-6, -4, 0, 3, 4, 3, 2, 1, 0, -2],
 }
 
+# super volumen: sonoridad objetivo en LUFS (Spotify normal = -14)
+NIVELES_SUPER_VOLUMEN = {1: -11, 2: -9, 3: -7, 4: -5}
+NOMBRES_SUPER_VOLUMEN = {0: "Apagado", 1: "Fuerte", 2: "Muy fuerte", 3: "Fiesta", 4: "Máximo"}
+
 CATEGORIAS_MUSICA = ["music_offtopic"]
 CATEGORIAS_VIDEO = ["sponsor", "selfpromo", "interaction", "music_offtopic"]
 
@@ -344,6 +348,8 @@ class Reproductor(QObject):
         self._fundido = None
         self._ultimo_guardado = 0.0
         self._calidad_forzada = None
+        self._traspaso = None
+        self._est_carga = 1.5           # segundos que suele tardar en abrir un video
 
         self.volumen = int(ajustes["volumen"])
         self.velocidad = float(ajustes["velocidad"] or 1.0)
@@ -398,8 +404,9 @@ class Reproductor(QObject):
         return m
 
     def motor_actual(self):
-        if self.modo == "video" and self.destino_video in self.videos:
-            return self.videos[self.destino_video]
+        if self.modo == "video":
+            # sin pantalla todavia no hay motor: la vista lo crea y arranca el video
+            return self.videos.get(self.destino_video)
         if self.audio:
             return self.audio[self.activo]
         return None
@@ -419,7 +426,14 @@ class Reproductor(QObject):
             if any(g > 0 for g in bandas):
                 # margen para que al subir bandas no sature
                 partes.insert(0, f"volume={-max(bandas) * 0.6:.1f}dB")
-        if self.ajustes["normalizar"]:
+        nivel = int(self.ajustes["super_volumen"] or 0)
+        if nivel > 0:
+            # mas sonoridad sin saturar: se sube el volumen percibido (LUFS) y un
+            # limitador de pico real impide que la onda se recorte
+            objetivo = NIVELES_SUPER_VOLUMEN.get(nivel, -9)
+            partes.append(f"loudnorm=I={objetivo}:TP=-1.0:LRA=7")
+            partes.append("alimiter=limit=0.96:attack=3:release=60:level=disabled")
+        elif self.ajustes["normalizar"]:
             partes.append("loudnorm=I=-14:TP=-1.5:LRA=11")
         if not partes:
             return ""
@@ -444,13 +458,14 @@ class Reproductor(QObject):
         self.ajustes["volumen"] = self.volumen
         self._aplicar_volumen()
 
-    def fijar_velocidad(self, v):
+    def fijar_velocidad(self, v, guardar=True):
         self.velocidad = max(0.25, min(3.0, float(v)))
-        self.ajustes["velocidad"] = self.velocidad
-        self.ajustes.guardar()
         for m in self._todos():
             m.fijar_velocidad(self.velocidad)
-        self.aviso.emit(f"Velocidad {self.velocidad:g}×")
+        if guardar:
+            self.ajustes["velocidad"] = self.velocidad
+            self.ajustes.guardar()
+            self.aviso.emit(f"Velocidad {self.velocidad:g}×")
 
     # ------------------------------------------------------------ cola
 
@@ -618,6 +633,8 @@ class Reproductor(QObject):
     # ------------------------------------------------------------ transporte
 
     def alternar(self):
+        if self._traspaso:
+            self._terminar_traspaso(True)
         m = self.motor_actual()
         if self.actual is None or m is None:
             return
@@ -640,12 +657,15 @@ class Reproductor(QObject):
                 m.pausar(False)
 
     def detener(self):
+        self._traspaso = None
         self._cortar_fundido()
         for m in self._todos():
             m.detener()
         self._fijar_estado("parado")
 
     def buscar(self, segundos):
+        if self._traspaso:
+            self._terminar_traspaso(True)
         m = self.motor_actual()
         if m:
             m.buscar(segundos)
@@ -753,14 +773,22 @@ class Reproductor(QObject):
         return True
 
     def cambiar_modo(self, modo):
-        """Pasar de cancion a video (o al reves) sin perder el punto."""
+        """Pasar de cancion a video (o al reves) sin perder el punto.
+
+        Al pasar a video la cancion sigue sonando hasta que el video tiene
+        imagen en ese mismo punto: no hay silencio mientras carga."""
         if modo == self.modo:
             return
         posicion = self._posicion
         pausado = self.estado == "pausa"
         anterior = self.motor_actual()
+        sonando = self.estado == "sonando" and anterior is not None and not anterior.es_video
+        self._terminar_traspaso(False)
         self._poner_modo(modo)
-        if anterior:
+        if modo == "video" and sonando and self.actual:
+            self._traspaso = {"saliente": anterior, "objetivo": None}
+            self._vigilar_traspaso()
+        elif anterior:
             anterior.detener()
         if self.actual:
             self._cargar(self.actual, inicio=posicion, pausado=pausado, mismo=True)
@@ -776,8 +804,13 @@ class Reproductor(QObject):
         posicion = self._posicion
         pausado = self.estado == "pausa"
         viejo = self.videos.get(self.destino_video)
+        self._terminar_traspaso(True)
         self.destino_video = destino
-        if viejo:
+        if viejo and self.estado == "sonando":
+            # la pantalla vieja sigue hasta que la nueva la alcanza: sin corte
+            self._traspaso = {"saliente": viejo, "objetivo": None}
+            self._vigilar_traspaso()
+        elif viejo:
             viejo.detener()
         self._cargar(self.actual, inicio=posicion, pausado=pausado, mismo=True)
 
@@ -812,7 +845,8 @@ class Reproductor(QObject):
             self.pista_cambio.emit(pista)
             self.duracion_cambio.emit(self._duracion)
             self.posicion_cambio.emit(self._posicion)
-        self._fijar_estado("cargando")
+        if not self._traspaso:
+            self._fijar_estado("cargando")
         self._apagar_si_toca_al_cambiar(cambio)
 
         querer_video = self.modo == "video"
@@ -846,8 +880,7 @@ class Reproductor(QObject):
         modo = "video" if querer_video else "audio"
         if cambio:
             self._calidad_forzada = None
-        calidad = (self._calidad_forzada or self.ajustes["calidad_video"]) if querer_video \
-            else self.ajustes["calidad_audio"]
+        calidad = self.calidad_video_efectiva() if querer_video else self.ajustes["calidad_audio"]
         codec = self.ajustes["codec_video"]
 
         def listo(datos):
@@ -860,6 +893,11 @@ class Reproductor(QObject):
 
         def fallo(e):
             if gen != self._gen:
+                return
+            if self._traspaso:
+                # el video no se pudo abrir: la cancion sigue como estaba
+                self._terminar_traspaso(False, volver_a_audio=True)
+                self.error.emit(f"No se pudo abrir el video: {e}")
                 return
             self._fijar_estado("parado")
             self.error.emit(str(e))
@@ -900,12 +938,22 @@ class Reproductor(QObject):
                 return
             self.error.emit("No hay motor de reproducción.")
             return
+        saliente = (self._traspaso or {}).get("saliente")
         for m in self._todos():
-            if m is not motor:
+            if m is not motor and m is not saliente:
                 m.detener()
-        motor.fijar_volumen(self.volumen)
         motor.fijar_velocidad(self.velocidad)
-        motor.cargar(fuente, inicio=inicio, pausado=pausado)
+        if saliente is not None:
+            # el nuevo carga EN PAUSA un poco por delante; cuando lo que suena
+            # llega a ese punto, arranca el nuevo y se apaga el viejo a la vez
+            objetivo = saliente.posicion_actual() + self._est_carga + 0.6
+            self._traspaso.update(objetivo=objetivo, listo=False, desde=time.time(),
+                                  fuente=fuente)
+            motor.fijar_volumen(0)
+            motor.cargar(fuente, inicio=objetivo, pausado=True)
+        else:
+            motor.fijar_volumen(self.volumen)
+            motor.cargar(fuente, inicio=inicio, pausado=pausado)
         info = dict((fuente.get("info") or {}))
         info["local"] = bool(fuente.get("local"))
         info["archivo"] = fuente.get("archivo", "")
@@ -942,6 +990,65 @@ class Reproductor(QObject):
                              ok=segmentos, dueno=self)
         # precargar la siguiente para que empiece al instante
         QTimer.singleShot(4000, lambda: gen == self._gen and self._precargar())
+        # y dejar listo el video de esta, por si pulsas "Ver el video"
+        if self.modo == "audio" and vid and not pista.get("archivo"):
+            QTimer.singleShot(2500, lambda: gen == self._gen and self._preparar_video(vid))
+
+    def _preparar_video(self, vid):
+        en_segundo_plano(catalogo.resolver, vid, "video", self.calidad_video_efectiva(),
+                         self.ajustes["codec_video"], self.ajustes,
+                         ok=lambda _d: None, error=lambda _e: None, dueno=self)
+
+    def calidad_video_efectiva(self):
+        """'Maxima' es la mayor que tu pantalla puede mostrar: en un monitor
+        1080p, un 4K solo gasta red y procesador sin verse mejor."""
+        calidad = self._calidad_forzada or self.ajustes["calidad_video"]
+        if calidad != "maxima":
+            return calidad
+        try:
+            from PySide6.QtGui import QGuiApplication
+            alto = max(int(p.size().height() * p.devicePixelRatio())
+                       for p in QGuiApplication.screens())
+        except Exception:
+            return calidad
+        for escalon in (4320, 2160, 1440, 1080, 720):
+            if alto >= escalon * 0.9:
+                return str(escalon)
+        return "720"
+
+    def _vigilar_traspaso(self):
+        """Seguro: un traspaso que se alarga mas de 5 s se completa igual."""
+        t = self._traspaso
+        if not t:
+            return
+        if time.time() - t.setdefault("inicio", time.time()) > 5.0:
+            entrante = self.motor_actual()
+            if entrante is not None and t.get("objetivo") is not None:
+                entrante.buscar(max(t["saliente"].posicion_actual(), t["objetivo"]))
+            self._terminar_traspaso(True)
+            return
+        QTimer.singleShot(250, self._vigilar_traspaso)
+
+    def _terminar_traspaso(self, completar=True, volver_a_audio=False):
+        t = self._traspaso
+        if not t:
+            return
+        self._traspaso = None
+        saliente = t["saliente"]
+        if completar:
+            entrante = self.motor_actual()
+            if entrante is not None:
+                entrante.fijar_volumen(self.volumen)
+                entrante.pausar(False)
+            saliente.detener()
+            if t.get("desde") and t.get("listo_en"):
+                # se aprende cuanto tarda en cargar este equipo / esta conexion
+                tardo = t["listo_en"] - t["desde"]
+                self._est_carga = max(0.4, min(6.0, self._est_carga * 0.6 + tardo * 0.4))
+            self._fijar_estado("sonando")
+        elif volver_a_audio:
+            self._poner_modo("audio")
+            self._fijar_estado("sonando")
 
     def _precargar(self):
         sig = self._mirar_siguiente()
@@ -973,6 +1080,27 @@ class Reproductor(QObject):
     def _al_posicion(self, m, valor):
         if valor is None:
             return
+        t = self._traspaso
+        if t:
+            if m is t["saliente"]:
+                # mientras el nuevo carga, la barra sigue a lo que suena
+                self._posicion = float(valor)
+                self.posicion_cambio.emit(self._posicion)
+                objetivo = t.get("objetivo")
+                if objetivo is None:
+                    return
+                if t.get("listo") and float(valor) >= objetivo - 0.04:
+                    self._terminar_traspaso(True)
+                elif not t.get("listo") and float(valor) > objetivo + 0.3:
+                    # tardo mas de lo previsto: se recoloca un poco mas adelante
+                    entrante = self.motor_actual()
+                    nuevo = float(valor) + self._est_carga + 1.0
+                    t["objetivo"] = nuevo
+                    if entrante is not None:
+                        entrante.buscar(nuevo)
+                return
+            if m is self.motor_actual():
+                return
         if self._fundido and m is self._fundido["entrante"]:
             pass
         elif not self._es_actual(m):
@@ -1011,6 +1139,17 @@ class Reproductor(QObject):
         self.duracion_cambio.emit(self._duracion)
 
     def _al_cargar(self, m):
+        t = self._traspaso
+        if t:
+            if m is self.motor_actual():
+                t["listo"] = True
+                t["listo_en"] = time.time()
+                if t["saliente"].posicion_actual() >= (t.get("objetivo") or 0) - 0.04:
+                    # el viejo ya paso el punto: se recoloca un poco por delante
+                    nuevo = t["saliente"].posicion_actual() + 0.8
+                    t["objetivo"] = nuevo
+                    m.buscar(nuevo)
+            return
         if self._fundido and m is self._fundido.get("entrante"):
             self._fijar_estado("sonando")
             return
@@ -1019,12 +1158,12 @@ class Reproductor(QObject):
         self._fijar_estado("pausa" if m.en_pausa() else "sonando")
 
     def _al_pausa(self, m, pausado):
-        if not self._es_actual(m) or self.estado in ("parado", "cargando"):
+        if self._traspaso or not self._es_actual(m) or self.estado in ("parado", "cargando"):
             return
         self._fijar_estado("pausa" if pausado else "sonando")
 
     def _al_esperar(self, m, esperando):
-        if not self._es_actual(m):
+        if self._traspaso or not self._es_actual(m):
             return
         if esperando:
             self._fijar_estado("cargando")
@@ -1032,6 +1171,17 @@ class Reproductor(QObject):
             self._fijar_estado("pausa" if m.en_pausa() else "sonando")
 
     def _al_terminar(self, m, razon, detalle):
+        t = self._traspaso
+        if t:
+            if m is t["saliente"] and razon == "eof":
+                self._terminar_traspaso(True)
+                return
+            if m is self.motor_actual() and razon == "error":
+                self._terminar_traspaso(False, volver_a_audio=True)
+                self.error.emit("No se pudo abrir el video; sigue sonando la canción.")
+                return
+            if m is t["saliente"]:
+                return
         if self._fundido and m is self._fundido.get("saliente"):
             return
         if not self._es_actual(m):

@@ -13,7 +13,7 @@ import sqlite3
 import time
 from pathlib import Path
 
-from .config import carpeta_datos
+from .config import carpeta_datos, carpeta_perfil
 
 
 def _video_id_de_url(url):
@@ -50,10 +50,12 @@ def pista_de_descarga(fila):
 
 class Coleccion:
     def __init__(self, archivo=None):
-        self.archivo = Path(archivo) if archivo else carpeta_datos() / "historial.db"
+        self.archivo = Path(archivo) if archivo else carpeta_perfil() / "historial.db"
         self.con = sqlite3.connect(str(self.archivo), check_same_thread=False)
         self.con.row_factory = sqlite3.Row
         self._indice_local = None
+        self._existe_cache = {}
+        self._gustan = None
         self._crear()
 
     # ------------------------------------------------------------ esquema
@@ -171,6 +173,19 @@ class Coleccion:
 
     def invalidar_indice(self):
         self._indice_local = None
+        self._existe_cache.clear()
+
+    def _existe(self, ruta):
+        """os.path.exists con memoria de 20 s: las filas se repintan sin tocar el disco."""
+        ahora = time.time()
+        dato = self._existe_cache.get(ruta)
+        if dato is not None and ahora - dato[1] < 20:
+            return dato[0]
+        existe = bool(ruta) and os.path.exists(ruta)
+        if len(self._existe_cache) > 5000:
+            self._existe_cache.clear()
+        self._existe_cache[ruta] = (existe, ahora)
+        return existe
 
     def _indice(self):
         if self._indice_local is None:
@@ -188,7 +203,7 @@ class Coleccion:
         """Archivo ya descargado de ese video, si lo hay: asi suena sin internet."""
         if not video_id:
             return None
-        candidatos = [c for c in self._indice().get(video_id, []) if os.path.exists(c[0])]
+        candidatos = [c for c in self._indice().get(video_id, []) if self._existe(c[0])]
         if not candidatos:
             return None
         if querer_video:
@@ -201,14 +216,15 @@ class Coleccion:
         if not pista:
             return False
         if pista.get("archivo"):
-            return os.path.exists(pista["archivo"])
+            return self._existe(pista["archivo"])
         return self.copia_local(pista.get("video_id")) is not None
 
     # ------------------------------------------------------------ me gusta
 
     def me_gusta(self, clave):
-        return bool(self.con.execute("SELECT 1 FROM me_gusta WHERE clave = ?",
-                                     (clave,)).fetchone())
+        if self._gustan is None:
+            self._gustan = {f["clave"] for f in self.con.execute("SELECT clave FROM me_gusta")}
+        return clave in self._gustan
 
     def alternar_me_gusta(self, pista):
         clave = pista.get("clave")
@@ -217,11 +233,13 @@ class Coleccion:
         if self.me_gusta(clave):
             self.con.execute("DELETE FROM me_gusta WHERE clave = ?", (clave,))
             self.con.commit()
+            self._gustan.discard(clave)
             return False
         self.recordar(pista)
         self.con.execute("INSERT OR REPLACE INTO me_gusta (clave, fecha) VALUES (?,?)",
                          (clave, time.time()))
         self.con.commit()
+        self._gustan.add(clave)
         return True
 
     def lista_me_gusta(self, filtro=""):

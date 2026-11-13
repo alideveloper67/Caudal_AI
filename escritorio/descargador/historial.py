@@ -5,12 +5,12 @@ import sqlite3
 import time
 from pathlib import Path
 
-from .config import carpeta_datos
+from .config import carpeta_datos, carpeta_perfil
 
 
 class Historial:
     def __init__(self):
-        self.archivo = carpeta_datos() / "historial.db"
+        self.archivo = carpeta_perfil() / "historial.db"
         self.con = sqlite3.connect(str(self.archivo), check_same_thread=False)
         self.con.row_factory = sqlite3.Row
         self._crear()

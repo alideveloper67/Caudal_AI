@@ -4,10 +4,10 @@
 import os
 import sys
 
-from PySide6.QtCore import QAbstractNativeEventFilter, QByteArray, QEvent, QObject, Qt, QTimer
+from PySide6.QtCore import QAbstractNativeEventFilter, QByteArray, QEvent, QObject, QPoint, Qt, QTimer
 from PySide6.QtGui import QAction, QGuiApplication, QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QAbstractSpinBox, QApplication, QComboBox, QFrame, QHBoxLayout,
-                               QLineEdit, QMenu, QMessageBox, QPlainTextEdit, QSplitter,
+                               QLineEdit, QMenu, QMessageBox, QPlainTextEdit, QPushButton, QSplitter,
                                QStackedWidget, QSystemTrayIcon, QTextEdit, QVBoxLayout, QWidget)
 
 from .. import catalogo, redes, version
@@ -24,7 +24,7 @@ from .panel_lateral import PanelLateral
 EXT_AUDIO = {".mp3", ".m4a", ".opus", ".ogg", ".flac", ".wav", ".aac", ".wma", ".webm"}
 EXT_VIDEO = {".mp4", ".mkv", ".mov", ".avi", ".webm", ".m4v", ".wmv", ".flv", ".ts"}
 
-SINGLETONS = ("descargas", "navegador", "telefono", "ajustes", "video")
+SINGLETONS = ("descargas", "video")
 
 
 class _Teclas(QObject):
@@ -239,6 +239,19 @@ class Ventana(QWidget):
         self.bt_ajustes = BotonIcono("engranaje", 19, "Ajustes", 36)
         self.bt_ajustes.clicked.connect(lambda: self.navegar({"pagina": "ajustes"}))
         h.addWidget(self.bt_ajustes)
+        cuenta = getattr(self.ctx, "cuenta", None) or {}
+        if cuenta:
+            nombre = cuenta.get("nombre") or cuenta.get("usuario") or "?"
+            self.bt_cuenta = QPushButton(nombre[:1].upper())
+            self.bt_cuenta.setFixedSize(34, 34)
+            self.bt_cuenta.setCursor(Qt.PointingHandCursor)
+            self.bt_cuenta.setToolTip(nombre)
+            self.bt_cuenta.setStyleSheet(
+                f"QPushButton{{background:{C['acento']};color:{C['acento_texto']};border:3px solid "
+                f"{C['superficie2']};border-radius:17px;font-weight:900;font-size:14px;padding:0;}}"
+                f"QPushButton:hover{{border-color:{C['superficie3']};}}")
+            self.bt_cuenta.clicked.connect(self._menu_cuenta)
+            h.addWidget(self.bt_cuenta)
 
         self._t_buscar = QTimer(self)
         self._t_buscar.setSingleShot(True)
@@ -247,6 +260,62 @@ class Ventana(QWidget):
         self.campo.textEdited.connect(lambda _t: self._t_buscar.start())
         self.campo.returnPressed.connect(self._buscar_ahora)
         return barra
+
+    def _menu_cuenta(self):
+        cuenta = getattr(self.ctx, "cuenta", None) or {}
+        menu = QMenu(self)
+        cab = menu.addAction(f"{cuenta.get('nombre', '')}  ·  @{cuenta.get('usuario', '')}")
+        cab.setEnabled(False)
+        menu.addSeparator()
+        menu.addAction(iconos.icono("engranaje", 16, C["texto2"]), "Ajustes",
+                       lambda: self.navegar({"pagina": "ajustes"}))
+        menu.addAction(iconos.icono("candado", 16, C["texto2"]), "Cambiar la contraseña",
+                       self._cambiar_contrasena)
+        menu.addSeparator()
+        menu.addAction(iconos.icono("salir", 16, C["texto2"]), "Cerrar sesión", self._cerrar_sesion)
+        menu.exec(self.bt_cuenta.mapToGlobal(self.bt_cuenta.rect().bottomRight())
+                  - QPoint(menu.sizeHint().width(), -6))
+
+    def _cambiar_contrasena(self):
+        from PySide6.QtWidgets import QInputDialog
+        from ..cuentas import Cuentas, ErrorCuenta
+        usuario = (getattr(self.ctx, "cuenta", None) or {}).get("usuario", "")
+        actual, ok = QInputDialog.getText(self, "Cambiar la contraseña", "Contraseña actual:",
+                                          QLineEdit.Password)
+        if not ok:
+            return
+        nueva, ok = QInputDialog.getText(self, "Cambiar la contraseña",
+                                         "Contraseña nueva (al menos 6 caracteres):",
+                                         QLineEdit.Password)
+        if not ok:
+            return
+        try:
+            Cuentas().cambiar_contrasena(usuario, actual, nueva)
+        except ErrorCuenta as e:
+            QMessageBox.warning(self, APP_NOMBRE, str(e))
+            return
+        self.aviso.mostrar("Contraseña cambiada")
+
+    def _cerrar_sesion(self):
+        r = QMessageBox.question(self, APP_NOMBRE, "¿Cerrar la sesión? La próxima vez Caudal "
+                                                   "te pedirá entrar.")
+        if r != QMessageBox.Yes:
+            return
+        self._saliendo = True
+        self._guardar_estado()
+        self.teclas_multimedia.soltar()
+        self.ctx.gestor.cancelar_todo()
+        self.r.cerrar()
+        if self.mini:
+            self.mini.hide()
+        if self.bandeja:
+            self.bandeja.hide()
+        self.hide()
+        cerrar = getattr(self.ctx, "cerrar_sesion", None)
+        if cerrar:
+            cerrar()
+        else:
+            QApplication.quit()
 
     # ------------------------------------------------------------ navegacion
 
@@ -283,15 +352,6 @@ class Ventana(QWidget):
         elif pag == "ajustes":
             from .paginas.ajustes import PaginaAjustes
             w = PaginaAjustes(self.ctx)
-        elif pag == "navegador":
-            from .navegador import VistaNavegador
-            w = VistaNavegador()
-            w.descargar.connect(self._descargar_del_navegador)
-            w.titulo = "Navegador"
-        elif pag == "telefono":
-            from .panel_caudal import PanelCaudal
-            w = PanelCaudal(self.ajustes)
-            w.titulo = "Teléfono"
         elif pag == "video":
             from .video import VistaVideo
             w = VistaVideo(self.ctx)
@@ -355,7 +415,11 @@ class Ventana(QWidget):
             self.historia[i] = (d, None)
 
     def _mostrar(self, destino, w):
+        cambio = self.pila.currentWidget() is not w
         self.pila.setCurrentWidget(w)
+        if cambio and destino.get("pagina") != "video":
+            from .componentes import aparecer
+            aparecer(w)
         self.lateral.marcar(destino)
         pag = destino.get("pagina")
         if pag == "buscar":
@@ -598,11 +662,6 @@ class Ventana(QWidget):
         DialogoEcualizador(self.ctx, self).exec()
 
     # ------------------------------------------------------------ descargas
-
-    def _descargar_del_navegador(self, url, tipo):
-        self.ctx.gestor.agregar(url, tipo=tipo)
-        self.aviso.mostrar("Descargando " + ("el audio" if tipo == "audio" else "el video")
-                           + " · mira el progreso en Descargas")
 
     def _contar_descargas(self):
         activas = sum(1 for t in self.ctx.gestor.lista() if t.activa or t.estado == "en_cola")

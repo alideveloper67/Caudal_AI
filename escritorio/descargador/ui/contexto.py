@@ -49,6 +49,7 @@ class Contexto(QObject):
     listas_cambio = Signal()
     guardados_cambio = Signal()
     descargas_cambio = Signal()
+    sonido_cambio = Signal()
     aviso = Signal(str)
 
     def __init__(self, ajustes, historial, coleccion, gestor, reproductor, padre=None):
@@ -180,11 +181,37 @@ class Contexto(QObject):
 
     # ------------------------------------------------------------ me gusta y listas
 
-    def alternar_me_gusta(self, pista):
+    def avisar(self, texto, deshacer=None):
+        """Aviso abajo; con `deshacer`, lleva el boton para revertir."""
+        if self.ventana is not None:
+            self.ventana.aviso.mostrar(texto, 3200, "Deshacer" if deshacer else None, deshacer)
+        else:
+            self.aviso.emit(texto)
+
+    def alternar_me_gusta(self, pista, avisar=True):
         ahora = self.coleccion.alternar_me_gusta(pista)
         self.me_gusta_cambio.emit(pista.get("clave") or "", ahora)
-        self.aviso.emit("Añadida a Tus me gusta" if ahora else "Quitada de Tus me gusta")
+        if avisar:
+            if ahora:
+                self.avisar("Añadida a Tus me gusta")
+            else:
+                self.avisar("Quitada de Tus me gusta",
+                            lambda: self.alternar_me_gusta(pista, avisar=False))
         return ahora
+
+    def quitar_de_lista(self, lista_id, pista):
+        claves = [p["clave"] for p in self.coleccion.pistas_de_lista(lista_id)]
+        posicion = claves.index(pista["clave"]) if pista.get("clave") in claves else None
+        self.coleccion.quitar_de_lista(lista_id, pista["clave"])
+        self.listas_cambio.emit()
+
+        def deshacer():
+            self.coleccion.agregar_a_lista(lista_id, [pista])
+            if posicion is not None:
+                orden = [c for c in claves]
+                self.coleccion.mover_en_lista(lista_id, orden)
+            self.listas_cambio.emit()
+        self.avisar("Quitada de la lista", deshacer)
 
     def anadir_a_lista(self, pistas, lista_id=None):
         if isinstance(pistas, dict):

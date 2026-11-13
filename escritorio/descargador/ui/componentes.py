@@ -3,8 +3,8 @@
 
 import json
 
-from PySide6.QtCore import (QEasingCurve, QMimeData, QPoint, QPointF, QPropertyAnimation,
-                            QRect, QRectF, QSize, Qt, QTimer, Signal)
+from PySide6.QtCore import (QEasingCurve, QEvent, QMimeData, QObject, QPoint, QPointF,
+                            QPropertyAnimation, QRect, QRectF, QSize, Qt, QTimer, Signal)
 from PySide6.QtGui import (QColor, QCursor, QDrag, QFont, QFontMetrics, QLinearGradient,
                            QPainter, QPainterPath, QPen)
 from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea,
@@ -834,6 +834,25 @@ class Tarjeta(QWidget):
         self._timer = QTimer(self)
         self._timer.setInterval(16)
         self._timer.timeout.connect(self._paso)
+        if self.es_genero:
+            self._img_genero = None
+            from ..hilos import en_segundo_plano
+            from .. import catalogo
+            yo = self
+
+            def con_url(url):
+                if not url:
+                    return
+                imagenes.imagen(url, lambda img: _poner_img(img))
+
+            def _poner_img(img):
+                try:
+                    yo._img_genero = img
+                    yo.update()
+                except RuntimeError:
+                    pass
+            en_segundo_plano(catalogo.portada_genero, elemento.get("id"), elemento.get("params"),
+                             ok=con_url, error=lambda _e: None, dueno=self)
         if not self.es_genero:
             url = elemento.get("miniatura") or elemento.get("foto") or ""
             yo = self
@@ -903,12 +922,26 @@ class Tarjeta(QWidget):
             grad.setColorAt(0, color.lighter(115))
             grad.setColorAt(1, color.darker(160))
             p.fillPath(ruta, grad)
+            p.save()
+            p.setClipPath(ruta)
+            img = getattr(self, "_img_genero", None)
+            if img is not None and not img.isNull():
+                # la portada inclinada asomando por la esquina, con su sombra
+                lado = r_img.height() * 0.78
+                p.translate(r_img.right() - lado * 0.42, r_img.bottom() - lado * 0.50)
+                p.rotate(25 - (4 if self._encima else 0))
+                p.setPen(Qt.NoPen)
+                p.setBrush(QColor(0, 0, 0, 90))
+                p.drawRoundedRect(QRectF(-lado / 2 + 4, -lado / 2 + 6, lado, lado), 4, 4)
+                p.setRenderHint(QPainter.SmoothPixmapTransform, True)
+                p.drawImage(QRectF(-lado / 2, -lado / 2, lado, lado), img)
+            p.restore()
             if self._encima:
                 p.fillPath(ruta, QColor(255, 255, 255, 22))
             p.setPen(QColor("#FFFFFF"))
             p.setFont(fuente(17, QFont.Bold, True))
-            p.drawText(r_img.adjusted(14, 12, -10, -10), Qt.AlignLeft | Qt.AlignTop | Qt.TextWordWrap,
-                       self.el.get("titulo") or "")
+            p.drawText(r_img.adjusted(14, 12, -(r_img.width() * 0.32), -10),
+                       Qt.AlignLeft | Qt.AlignTop | Qt.TextWordWrap, self.el.get("titulo") or "")
             return
         if self.el.get("tipo") == "me_gusta":
             ruta = QPainterPath()
@@ -1236,6 +1269,118 @@ class Lienzo(QWidget):
         p.fillRect(QRect(0, 0, self.width(), self.alto_degradado), grad)
 
 
+class _RuedaSuave(QObject):
+    """Desplazamiento suave con la rueda del raton (en vez de saltos secos)."""
+
+    def __init__(self, area):
+        super().__init__(area)
+        self.area = area
+        self.barra = area.verticalScrollBar()
+        self.anim = QPropertyAnimation(self.barra, b"value", self)
+        self.anim.setDuration(260)
+        self.anim.setEasingCurve(QEasingCurve.OutCubic)
+        self.destino = None
+        area.viewport().installEventFilter(self)
+
+    def eventFilter(self, obj, e):
+        if e.type() == QEvent.Wheel and not (e.modifiers() & (Qt.ShiftModifier | Qt.ControlModifier)):
+            d = e.angleDelta().y()
+            if d == 0 or e.pixelDelta().y():
+                return False          # touchpads ya desplazan suave por su cuenta
+            if self.anim.state() != QPropertyAnimation.Running:
+                self.destino = self.barra.value()
+            paso = -d / 120 * max(110, self.area.viewport().height() * 0.16)
+            self.destino = max(self.barra.minimum(), min(self.barra.maximum(), self.destino + paso))
+            self.anim.stop()
+            self.anim.setStartValue(self.barra.value())
+            self.anim.setEndValue(int(self.destino))
+            self.anim.start()
+            return True
+        return False
+
+
+def suavizar(area):
+    area._rueda = _RuedaSuave(area)
+    return area
+
+
+class Esqueleto(QWidget):
+    """Formas grises con un brillo que pasa: lo que se ve mientras algo carga."""
+
+    def __init__(self, tipo="tarjetas", padre=None):
+        super().__init__(padre)
+        self.tipo = tipo
+        self.fase = 0.0
+        self.setMinimumHeight(260 if tipo == "tarjetas" else 330)
+        self._t = QTimer(self)
+        self._t.setInterval(33)
+        self._t.timeout.connect(self._paso)
+        self._t.start()
+
+    def _paso(self):
+        self.fase = (self.fase + 0.025) % 1.6
+        self.update()
+
+    def _formas(self):
+        w = self.width()
+        formas = []
+        if self.tipo == "tarjetas":
+            formas.append(QRectF(4, 0, 220, 24))
+            x = 4
+            while x + 160 < w:
+                formas.append(QRectF(x + 12, 46, 152, 152))
+                formas.append(QRectF(x + 12, 210, 120, 14))
+                formas.append(QRectF(x + 12, 232, 90, 12))
+                x += 180
+        else:
+            for i in range(6):
+                y = i * 56
+                formas.append(QRectF(12, y + 18, 20, 18))
+                formas.append(QRectF(52, y + 8, 40, 40))
+                formas.append(QRectF(104, y + 12, min(320, w * 0.4), 14))
+                formas.append(QRectF(104, y + 34, min(200, w * 0.25), 11))
+        return formas
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        w = max(1, self.width())
+        grad = QLinearGradient(0, 0, w, 0)
+        centro = self.fase - 0.3
+        base = QColor(255, 255, 255, 16)
+        brillo = QColor(255, 255, 255, 34)
+        grad.setColorAt(0, base)
+        for pos, c in ((centro - 0.15, base), (centro, brillo), (centro + 0.15, base)):
+            if 0 <= pos <= 1:
+                grad.setColorAt(pos, c)
+        grad.setColorAt(1, base)
+        p.setPen(Qt.NoPen)
+        p.setBrush(grad)
+        for r in self._formas():
+            p.drawRoundedRect(r, 6, 6)
+
+
+def aparecer(widget, ms=170):
+    """Fundido de entrada al mostrar una pagina."""
+    from PySide6.QtWidgets import QGraphicsOpacityEffect
+    efecto = QGraphicsOpacityEffect(widget)
+    efecto.setOpacity(0.0)
+    widget.setGraphicsEffect(efecto)
+    anim = QPropertyAnimation(efecto, b"opacity", widget)
+    anim.setDuration(ms)
+    anim.setStartValue(0.0)
+    anim.setEndValue(1.0)
+    anim.setEasingCurve(QEasingCurve.OutCubic)
+
+    def fin():
+        try:
+            widget.setGraphicsEffect(None)   # sin efecto, pintar sale gratis
+        except RuntimeError:
+            pass
+    anim.finished.connect(fin)
+    anim.start(QPropertyAnimation.DeleteWhenStopped)
+
+
 class Pagina(QScrollArea):
     """Pagina con desplazamiento vertical, margenes y degradado opcional."""
 
@@ -1255,19 +1400,19 @@ class Pagina(QScrollArea):
         self.setWidget(self.lienzo)
         self.titulo = ""
         self.color = None
+        suavizar(self)
 
     def set_color(self, color):
         self.color = color
         self.lienzo.set_color(color)
 
-    def cargando(self, texto="Cargando…"):
+    def cargando(self, texto="", tipo="tarjetas"):
         caja = QWidget()
         h = QVBoxLayout(caja)
-        h.setContentsMargins(0, 80, 0, 0)
-        et = QLabel(texto)
-        et.setAlignment(Qt.AlignCenter)
-        et.setObjectName("secundario")
-        h.addWidget(et)
+        h.setContentsMargins(0, 30, 0, 0)
+        h.setSpacing(30)
+        h.addWidget(Esqueleto("filas" if tipo == "filas" else "tarjetas"))
+        h.addWidget(Esqueleto("tarjetas"))
         self.cuerpo.addWidget(caja)
         self.cuerpo.addStretch(1)
         return caja
@@ -1460,28 +1605,77 @@ class BarraAcciones(QWidget):
         self.h.addStretch(1)
 
 
-class Aviso(QLabel):
-    """Mensaje flotante abajo al centro que se va solo."""
+class Aviso(QFrame):
+    """Mensaje flotante abajo al centro: aparece y se va con un fundido, y puede
+    llevar una accion (por ejemplo «Deshacer»)."""
 
     def __init__(self, padre):
         super().__init__(padre)
-        self.setStyleSheet(f"background:{C['texto']};color:#0A0B0E;border-radius:8px;"
-                           "padding:10px 18px;font-size:13.5px;font-weight:600;")
+        self.setObjectName("aviso")
+        self.setStyleSheet(f"QFrame#aviso{{background:{C['texto']};border-radius:10px;}}"
+                           "QLabel{color:#0A0B0E;font-size:13.5px;font-weight:600;background:transparent;}"
+                           "QPushButton{background:transparent;border:none;color:#0B6E82;"
+                           "font-size:13.5px;font-weight:800;padding:0 4px;}"
+                           "QPushButton:hover{text-decoration:underline;}")
+        h = QHBoxLayout(self)
+        h.setContentsMargins(18, 10, 14, 10)
+        h.setSpacing(16)
+        self.et = QLabel("")
+        h.addWidget(self.et)
+        self.bt = QPushButton("")
+        self.bt.setCursor(Qt.PointingHandCursor)
+        self.bt.clicked.connect(self._accion)
+        h.addWidget(self.bt)
         self.hide()
+        self._funcion = None
+        from PySide6.QtWidgets import QGraphicsOpacityEffect
+        self._opacidad = QGraphicsOpacityEffect(self)
+        self._opacidad.setOpacity(1.0)
+        self.setGraphicsEffect(self._opacidad)
+        self._anim = QPropertyAnimation(self._opacidad, b"opacity", self)
+        self._anim.setDuration(180)
+        self._anim.finished.connect(self._fin_anim)
         self._t = QTimer(self)
         self._t.setSingleShot(True)
-        self._t.timeout.connect(self.hide)
+        self._t.timeout.connect(self._ocultar)
 
-    def mostrar(self, texto, ms=3200):
+    def mostrar(self, texto, ms=3200, accion=None, al_pulsar=None):
         if not texto:
             return
-        self.setText(texto)
+        self.et.setText(texto)
+        self._funcion = al_pulsar
+        self.bt.setText(accion or "")
+        self.bt.setVisible(bool(accion))
         self.adjustSize()
-        padre = self.parentWidget()
-        self.move((padre.width() - self.width()) // 2, padre.height() - self.height() - 120)
+        self.colocar()
         self.raise_()
-        self.show()
-        self._t.start(ms)
+        if not self.isVisible() or self._anim.endValue() == 0.0:
+            self._anim.stop()
+            self._anim.setStartValue(self._opacidad.opacity() if self.isVisible() else 0.0)
+            self._anim.setEndValue(1.0)
+            self.show()
+            self._anim.start()
+        self._t.start(ms if not accion else max(ms, 6000))
+
+    def colocar(self):
+        padre = self.parentWidget()
+        self.move((padre.width() - self.width()) // 2, padre.height() - self.height() - 112)
+
+    def _accion(self):
+        funcion, self._funcion = self._funcion, None
+        self._ocultar()
+        if funcion:
+            funcion()
+
+    def _ocultar(self):
+        self._anim.stop()
+        self._anim.setStartValue(self._opacidad.opacity())
+        self._anim.setEndValue(0.0)
+        self._anim.start()
+
+    def _fin_anim(self):
+        if self._anim.endValue() == 0.0:
+            self.hide()
 
 
 class SinResultados(QWidget):

@@ -184,8 +184,7 @@ class PanelLateral(QWidget):
     traer_lista = Signal()
 
     NAV = [("inicio", "Inicio", "casa"), ("explorar", "Explorar", "brujula"),
-           ("descargas", "Descargas", "descargar"), ("navegador", "Navegador web", "globo"),
-           ("telefono", "Conectar el teléfono", "telefono")]
+           ("descargas", "Descargar videos", "descargar")]
 
     def __init__(self, ctx, padre=None):
         super().__init__(padre)
@@ -291,6 +290,8 @@ class PanelLateral(QWidget):
         self.lista.setContentsMargins(0, 0, 0, 0)
         self.lista.setSpacing(0)
         self.area.setWidget(interior)
+        from .componentes import suavizar
+        suavizar(self.area)
         vb.addWidget(self.area, 1)
         v.addWidget(bib, 1)
 

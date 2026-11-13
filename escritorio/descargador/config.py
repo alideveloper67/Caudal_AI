@@ -24,6 +24,26 @@ def carpeta_datos() -> Path:
     return ruta
 
 
+# cuenta con la que se entro: su biblioteca y sus ajustes viven en su carpeta
+PERFIL = {"carpeta": "", "cuenta": None}
+
+
+def fijar_perfil(carpeta, cuenta=None):
+    PERFIL["carpeta"] = carpeta or ""
+    PERFIL["cuenta"] = cuenta
+
+
+def carpeta_perfil() -> Path:
+    """Datos de la cuenta activa (la primera cuenta usa la carpeta de siempre)."""
+    ruta = carpeta_datos() / PERFIL["carpeta"] if PERFIL["carpeta"] else carpeta_datos()
+    ruta.mkdir(parents=True, exist_ok=True)
+    return ruta
+
+
+def cuenta_activa():
+    return PERFIL["cuenta"] or {}
+
+
 def carpeta_caratulas() -> Path:
     ruta = carpeta_datos() / "caratulas"
     ruta.mkdir(parents=True, exist_ok=True)
@@ -114,12 +134,14 @@ DEFECTOS = {
     "panel_derecho": "sonando",      # sonando | cola | letras | oculto
     "subtitulos_video": False,
     "teclas_multimedia": True,
+    "super_volumen": 0,              # 0 apagado, 1..4 cada vez mas fuerte (sin saturar)
+    "recordar_sesion": True,
 }
 
 
 class Ajustes:
     def __init__(self):
-        self.archivo = carpeta_datos() / "ajustes.json"
+        self.archivo = carpeta_perfil() / "ajustes.json"
         self.datos = dict(DEFECTOS)
         self.cargar()
 

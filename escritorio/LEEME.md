@@ -6,6 +6,15 @@ quieras. Lo que descargas queda en tu biblioteca y suena sin internet.
 
 ---
 
+## Cuenta
+
+Al abrir Caudal la primera vez creas tu cuenta (usuario y contraseña). Cada
+cuenta tiene su propia biblioteca, listas, me gusta y ajustes. La primera que
+se crea se queda con lo que ya había en el equipo. Con **Mantener la sesión
+iniciada** entra directo la próxima vez; para salir: círculo con tu inicial
+(arriba a la derecha) → Cerrar sesión. Las cuentas viven en este equipo y la
+contraseña se guarda cifrada (PBKDF2).
+
 ## Lo que hace
 
 ### Como Spotify
@@ -28,6 +37,13 @@ quieras. Lo que descargas queda en tu biblioteca y suena sin internet.
   parecidas cuando se acaba.
 - **Letra sincronizada** que avanza sola sobre el color de la portada; clic en
   una línea para saltar ahí.
+- **Súper volumen** (Fuerte, Muy fuerte, Fiesta, Máximo): sube mucho el volumen
+  percibido con un limitador de pico real, así no satura. Botón del altavoz en
+  la barra de abajo.
+- El ecualizador se oye en vivo mientras lo mueves, pero solo se guarda con
+  **Guardar**; Cancelar o cerrar lo deja como estaba.
+- Quitar algo de una lista, de Tus me gusta o de la cola se puede **deshacer**
+  desde el aviso.
 - Aleatorio, repetir (todo / una), **fundido entre canciones** (0–12 s),
   **normalizar volumen** (-14 LUFS), **ecualizador de 10 bandas** con 14
   ajustes listos, velocidad sin cambiar el tono, **temporizador para dormir**.
@@ -38,6 +54,9 @@ quieras. Lo que descargas queda en tu biblioteca y suena sin internet.
 - **Sin anuncios** y **en segundo plano**: al cerrar la ventana sigue sonando
   junto al reloj (bandeja). Para salir del todo: clic derecho → Salir.
 - **Mini reproductor** flotante, siempre encima, con el video o la portada.
+- Pasar de canción a video, a la ventanita y de vuelta **sin cortes**: lo que
+  suena sigue hasta que la otra pantalla tiene la imagen en el mismo punto.
+  El video de la canción se prepara por adelantado mientras escuchas.
 - Video en **máxima calidad**: hasta 8K y HDR, imagen y sonido por separado
   como los sirve YouTube. Calidad, códec, subtítulos, velocidad y capítulos
   se cambian mientras ves. **Pantalla completa** con controles que se
@@ -52,7 +71,9 @@ quieras. Lo que descargas queda en tu biblioteca y suena sin internet.
 ### Descargas
 
 Cualquier canción, álbum, lista o video se descarga desde su menú
-(**Descargar ›**) o desde la página **Descargas** pegando enlaces:
+(**Descargar ›**) o desde **Descargar videos**: pegas el enlace de cualquier
+sitio (YouTube, TikTok, Instagram, Facebook, X, Telegram… ~1800) y aparece una
+vista previa con su portada y calidad para escucharlo, verlo o bajarlo:
 
 | Formato | Qué obtienes |
 |---|---|
@@ -115,6 +136,7 @@ escritorio/
 │   ├── reproduccion.py         motor libmpv: cola, fundido, ecualizador, video
 │   ├── mpv_carga.py            encuentra y carga libmpv-2.dll
 │   ├── coleccion.py            me gusta, listas, escuchas, guardados (SQLite)
+│   ├── cuentas.py              cuentas locales y perfil activo
 │   ├── motor.py                cola de descargas (yt-dlp + ffmpeg)
 │   ├── historial.py            registro de descargas
 │   ├── hilos.py                trabajo en segundo plano sin congelar la ventana
@@ -124,6 +146,7 @@ escritorio/
 │       ├── componentes.py      filas, tarjetas, carruseles, cabeceras
 │       ├── barra_reproduccion.py, panel_lateral.py, panel_derecho.py
 │       ├── video.py            vista de video y mini reproductor
+│       ├── acceso.py           pantalla de iniciar sesión / crear cuenta
 │       ├── ecualizador.py, dialogo_descarga.py, imagenes.py
 │       └── paginas/            inicio, buscar, explorar, artista, colección,
 │                               biblioteca, descargas, ajustes
@@ -149,8 +172,9 @@ pip install -r requirements.txt
 python ejecutar.py
 ```
 
-Los datos viven en `%APPDATA%\DescargadorVideos` (ajustes.json, historial.db,
-portadas en caché).
+Los datos viven en `%APPDATA%\DescargadorVideos`: `cuentas.json`, la caché de
+portadas y, por cuenta, `ajustes.json` e `historial.db` (la primera cuenta en
+la carpeta raíz, las demás en `perfiles\<usuario>`).
 
 ---
 

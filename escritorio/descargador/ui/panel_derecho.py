@@ -54,6 +54,8 @@ class VistaSonando(QScrollArea):
         self.v.setContentsMargins(16, 4, 16, 20)
         self.v.setSpacing(14)
         self.setWidget(interior)
+        from .componentes import suavizar
+        suavizar(self)
 
         self.portada = Portada(220, 220, "cuadrada", 8)
         self.v.addWidget(self.portada, 0, Qt.AlignHCenter)
@@ -249,6 +251,8 @@ class VistaCola(QScrollArea):
         self.v.setContentsMargins(8, 4, 8, 20)
         self.v.setSpacing(2)
         self.setWidget(interior)
+        from .componentes import suavizar
+        suavizar(self)
         self._pendiente = False
         r = ctx.reproductor
         r.cola_cambio.connect(self._programar)
@@ -307,8 +311,8 @@ class VistaCola(QScrollArea):
                                  arrastrable=False, compacto=True)
                 fila.reproducir.connect(r.saltar_a_proxima)
                 fila.menu.connect(lambda i, pos, p=p: self.ctx.menu_pista(
-                    p, pos, extra=lambda m, i=i: m.addAction("Quitar de la cola",
-                                                             lambda: r.quitar_proxima(i))))
+                    p, pos, extra=lambda m, i=i, p=p: m.addAction(
+                        "Quitar de la cola", lambda: self._quitar_proxima(i, p))))
                 self.v.addWidget(fila)
 
         siguientes = r.siguientes_de_contexto(80)
@@ -336,6 +340,15 @@ class VistaCola(QScrollArea):
             nota.setContentsMargins(8, 16, 8, 0)
             self.v.addWidget(nota)
         self.v.addStretch(1)
+
+    def _quitar_proxima(self, i, p):
+        r = self.ctx.reproductor
+        r.quitar_proxima(i)
+
+        def deshacer():
+            r.proximas.insert(min(i, len(r.proximas)), p)
+            r.cola_cambio.emit()
+        self.ctx.avisar("Quitada de la cola", deshacer)
 
     def _fila_contexto(self, r, i, p):
         absoluto = r.pos + 1 + i

@@ -7,7 +7,7 @@ hiddenimports = ['descargador.ui.actualizador', 'descargador.ui.dialogo_listas',
                  'descargador.ui.paginas.inicio', 'descargador.ui.paginas.buscar', 'descargador.ui.paginas.explorar',
                  'descargador.ui.paginas.artista', 'descargador.ui.paginas.coleccion', 'descargador.ui.paginas.biblioteca',
                  'descargador.ui.paginas.descargas', 'descargador.ui.paginas.ajustes', 'descargador.ui.video',
-                 'descargador.ui.ecualizador', 'descargador.ui.navegador', 'descargador.ui.panel_caudal', 'mpv']
+                 'descargador.ui.ecualizador', 'mpv']
 for paquete in ('yt_dlp', 'ytmusicapi'):
     tmp_ret = collect_all(paquete)
     datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
@@ -22,7 +22,11 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    # sin navegador integrado: fuera Chromium (mas de 100 MB) y lo que no se usa
+    excludes=['PySide6.QtWebEngineCore', 'PySide6.QtWebEngineWidgets', 'PySide6.QtWebEngineQuick',
+              'PySide6.QtWebChannel', 'PySide6.QtQuick', 'PySide6.QtQml', 'PySide6.Qt3DCore',
+              'PySide6.QtCharts', 'PySide6.QtDataVisualization', 'PySide6.QtPdf',
+              'PySide6.QtMultimedia', 'PySide6.QtMultimediaWidgets', 'tkinter'],
     noarchive=False,
     optimize=0,
 )

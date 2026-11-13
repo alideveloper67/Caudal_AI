@@ -486,10 +486,26 @@ class MiniReproductor(QWidget):
             self.r.mover_video("mini")
 
     def closeEvent(self, e):
-        if self.r.modo == "video" and self.r.destino_video == "mini":
+        if (not getattr(self, "_cerrando", False) and self.r.modo == "video"
+                and self.r.destino_video == "mini"):
+            # la ventanita sigue visible (y el video en ella) hasta que la grande
+            # tiene la imagen en el mismo punto: asi no hay corte
+            e.ignore()
+            self._cerrando = True
             self.r.mover_video("principal")
+            self._esperas = 0
+            self._esperar_traspaso()
+            return
+        self._cerrando = False
         self.cerrado.emit()
         super().closeEvent(e)
+
+    def _esperar_traspaso(self):
+        self._esperas += 1
+        if self.r._traspaso is None or self._esperas > 120:
+            self.close()
+            return
+        QTimer.singleShot(50, self._esperar_traspaso)
 
     def _video_listo(self, _datos):
         pass

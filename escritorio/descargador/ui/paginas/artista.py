@@ -56,7 +56,7 @@ class PaginaArtista(Pagina):
         if datos is not None:
             self._pintar(datos)
         else:
-            self.cargando("Cargando el artista…")
+            self.cargando(tipo="filas")
             en_segundo_plano(catalogo.artista, ident, ok=self._llego,
                              error=lambda e: self.error(f"No se pudo abrir el artista.\n{e}",
                                                         lambda: self.ctx.navegar(

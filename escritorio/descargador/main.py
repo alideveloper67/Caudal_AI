@@ -31,13 +31,6 @@ def _avisar_a_la_abierta(argumentos):
 def main():
     _preparar_rutas()
 
-    # El navegador integrado se queda en negro en equipos con tarjetas graficas
-    # antiguas: Chromium intenta dibujar por GPU y el driver no responde.
-    os.environ.setdefault(
-        "QTWEBENGINE_CHROMIUM_FLAGS",
-        "--disable-gpu --disable-gpu-compositing --disable-software-rasterizer --no-sandbox",
-    )
-
     from PySide6.QtCore import Qt
     from PySide6.QtGui import QIcon
     from PySide6.QtNetwork import QLocalServer
@@ -74,40 +67,83 @@ def main():
         except Exception:
             pass
 
-    ajustes = Ajustes()
-    catalogo.fijar_region(ajustes["region"])
-    historial = Historial()
-    coleccion = Coleccion()
-    gestor = Gestor(ajustes, historial)
-    reproductor = Reproductor(ajustes, coleccion)
-    ctx = Contexto(ajustes, historial, coleccion, gestor, reproductor)
+    from descargador.cuentas import Cuentas, activar
 
-    ventana = Ventana(ctx)
-    ventana.show()
+    estado = {"ventana": None, "acceso": None}
 
     # una sola instancia: las siguientes le pasan sus enlaces a esta
     servidor = QLocalServer()
     QLocalServer.removeServer(NOMBRE_INSTANCIA)
     servidor.listen(NOMBRE_INSTANCIA)
+    pendientes = list(argumentos)
+
+    def abrir_enlaces(texto):
+        ventana = estado["ventana"]
+        if ventana is None:
+            if estado["acceso"] is not None:
+                estado["acceso"].raise_()
+                estado["acceso"].activateWindow()
+            if texto and texto != "mostrar":
+                pendientes.append(texto)
+            return
+        ventana.traer_al_frente()
+        if texto and texto != "mostrar":
+            from descargador import redes
+            urls = redes.extraer_urls(texto.replace("\n", " "))
+            if urls:
+                ventana.buscar_texto(" ".join(urls))
 
     def nueva_conexion():
         s = servidor.nextPendingConnection()
         if s is None:
             return
-
-        def leer():
-            texto = bytes(s.readAll()).decode("utf-8", "ignore").strip()
-            ventana.traer_al_frente()
-            if texto and texto != "mostrar":
-                ventana.buscar_texto(texto.replace("\n", " "))
-        s.readyRead.connect(leer)
+        s.readyRead.connect(lambda: abrir_enlaces(
+            bytes(s.readAll()).decode("utf-8", "ignore").strip()))
     servidor.newConnection.connect(nueva_conexion)
 
-    if argumentos:
-        from descargador import redes
-        urls = redes.extraer_urls(" ".join(argumentos))
-        if urls:
-            ventana.buscar_texto(" ".join(urls))
+    def reiniciar():
+        """Cerrar sesion: se vuelve a abrir Caudal desde la pantalla de entrada."""
+        from PySide6.QtCore import QProcess
+        servidor.close()
+        if getattr(sys, "frozen", False):
+            QProcess.startDetached(sys.executable, [])
+        else:
+            QProcess.startDetached(sys.executable, [os.path.abspath(sys.argv[0])])
+        app.quit()
+
+    def iniciar(cuenta):
+        activar(cuenta)
+        ajustes = Ajustes()
+        catalogo.fijar_region(ajustes["region"])
+        historial = Historial()
+        coleccion = Coleccion()
+        gestor = Gestor(ajustes, historial)
+        reproductor = Reproductor(ajustes, coleccion)
+        ctx = Contexto(ajustes, historial, coleccion, gestor, reproductor)
+        ctx.cuenta = cuenta
+        ctx.cerrar_sesion = lambda: (Cuentas().olvidar(), reiniciar())
+        ventana = Ventana(ctx)
+        estado["ventana"] = ventana
+        ventana.show()
+        if estado["acceso"] is not None:
+            estado["acceso"].close()
+            estado["acceso"] = None
+        for texto in pendientes:
+            abrir_enlaces(texto if "\n" not in texto else texto)
+        pendientes.clear()
+        if argumentos:
+            abrir_enlaces(" ".join(argumentos))
+
+    cuentas = Cuentas()
+    recordada = cuentas.recordada()
+    if recordada:
+        iniciar(recordada)
+    else:
+        from descargador.ui.acceso import VentanaAcceso
+        acceso = VentanaAcceso()
+        estado["acceso"] = acceso
+        acceso.entro.connect(lambda cuenta, _r: iniciar(cuenta))
+        acceso.show()
 
     from descargador.hilos import en_segundo_plano
     en_segundo_plano(imagenes.limpiar_cache)
