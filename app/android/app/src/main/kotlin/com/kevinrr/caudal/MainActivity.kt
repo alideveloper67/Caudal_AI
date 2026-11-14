@@ -36,6 +36,12 @@ class MainActivity : AudioServiceActivity() {
         }
         pendiente = textoDe(intent)
 
+        // aviso de versiones nuevas aunque la app este cerrada (RevisorVersiones.kt)
+        try {
+            RevisorVersiones.programar(applicationContext)
+        } catch (_: Exception) {
+        }
+
         // widget de la pantalla de inicio (CaudalWidget.kt)
         CaudalWidget.Puente.registrar(flutterEngine, applicationContext)
 

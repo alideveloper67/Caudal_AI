@@ -1,9 +1,11 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import 'package:permission_handler/permission_handler.dart';
 
 import 'nucleo/ajustes.dart';
 import 'nucleo/capturador_oculto.dart';
@@ -180,6 +182,18 @@ class _CaudalAppState extends State<CaudalApp> {
       _comprobando = false;
     });
     unawaited(_buscarVersion());
+    unawaited(_pedirNotificaciones());
+  }
+
+  /// Android 13+: sin este permiso no se ven los controles de la musica en la
+  /// notificacion ni el aviso de versiones nuevas. Android lo pregunta como
+  /// mucho dos veces; si se dijo que no, no insiste.
+  Future<void> _pedirNotificaciones() async {
+    if (defaultTargetPlatform != TargetPlatform.android) return;
+    try {
+      await Future.delayed(const Duration(seconds: 2));
+      if (await Permission.notification.isDenied) await Permission.notification.request();
+    } catch (_) {}
   }
 
   Future<void> _cerrarSesion(Servicios s) async {

@@ -67,6 +67,9 @@ android {
 
 dependencies {
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
+    // revisa una vez al dia si hay version nueva, aunque la app este cerrada
+    implementation("androidx.work:work-runtime-ktx:2.9.1")
+    implementation("androidx.core:core-ktx:1.13.1")
 }
 
 kotlin {
