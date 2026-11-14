@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
+import '../../nucleo/recomendador.dart';
 import '../../nucleo/catalogo.dart';
 import '../../nucleo/coleccion.dart';
 import '../comunes.dart';
@@ -8,6 +11,7 @@ import '../servicios.dart';
 import '../tema.dart';
 import 'ajustes_pagina.dart';
 import 'juntos_pagina.dart';
+import 'mensajes_pagina.dart';
 import 'resumen.dart';
 
 const espacioInferior = 84.0;
@@ -32,6 +36,8 @@ class _InicioPaginaState extends State<InicioPagina> with AutomaticKeepAliveClie
   List<Json> _atajos = [];
   List<Json> _mixes = [];
   List<Json> _enTelefono = [];
+  Json? _descubre;
+  List<Json> _tiempo = [];
 
   @override
   bool get wantKeepAlive => true;
@@ -72,6 +78,7 @@ class _InicioPaginaState extends State<InicioPagina> with AutomaticKeepAliveClie
          'subtitulo': '${a['nombre']} y artistas parecidos', 'miniatura': a['miniatura']}
     ];
     final enTelefono = await col.descargadas();
+    final tiempo = await Recomendador.maquinaDelTiempoDe(col);
     if (!mounted) return;
     setState(() {
       _localListo = true;
@@ -79,7 +86,12 @@ class _InicioPaginaState extends State<InicioPagina> with AutomaticKeepAliveClie
       _atajos = atajos.take(8).toList();
       _mixes = mixes;
       _enTelefono = enTelefono;
+      _tiempo = tiempo;
     });
+    // "Descubre para ti" pide la radio de varias canciones: va aparte, sin frenar lo demas
+    Recomendador.descubrir(col).then((d) {
+      if (mounted && d != null) setState(() => _descubre = d);
+    }).catchError((_) {});
     if (forzar || _catalogo == null || DateTime.now().difference(_cuando) > const Duration(minutes: 15)) {
       try {
         Json datos;
@@ -189,9 +201,18 @@ class _InicioPaginaState extends State<InicioPagina> with AutomaticKeepAliveClie
                       Entrada(indice: ++turno, child: Carrusel(titulo: 'Volver a escuchar', elementos: _recientes)),
                       const SizedBox(height: Esp.entreSecciones),
                     ],
+                    if (_filtro != 'videos' && _descubre != null) ...[
+                      Entrada(indice: ++turno, child: _TarjetaDescubre(mix: _descubre!)),
+                      const SizedBox(height: Esp.entreSecciones),
+                    ],
                     if (_filtro == 'todo')
                       // hechos con tu historial; se oculta sola si aun no hay nada
                       SeccionMixes(alAbrir: (m) => Caudal.leer(context).abrirElemento(context, m)),
+                    if (_filtro == 'todo' && _tiempo.isNotEmpty) ...[
+                      Entrada(indice: ++turno,
+                          child: Carrusel(titulo: 'Máquina del tiempo', elementos: _tiempo)),
+                      const SizedBox(height: Esp.entreSecciones),
+                    ],
                     if (_filtro == 'todo' && _mixes.isNotEmpty) ...[
                       Entrada(indice: ++turno,
                           child: Carrusel(titulo: 'Mixes de tus artistas', elementos: _mixes)),
@@ -228,8 +249,8 @@ class _Cabecera extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Container(
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(colors: [Color(0xFF16324A), C.fondo],
+        decoration: BoxDecoration(
+          gradient: LinearGradient(colors: [C.cabecera, C.fondo],
               begin: Alignment.topCenter, end: Alignment.bottomCenter),
         ),
         padding: EdgeInsets.fromLTRB(Esp.lado, MediaQuery.paddingOf(context).top + Esp.m, Esp.lado, Esp.s),
@@ -241,7 +262,7 @@ class _Cabecera extends StatelessWidget {
                 onTap: () => _ajustes(context),
                 child: CircleAvatar(
                   radius: 17, backgroundColor: C.acento,
-                  child: Text(inicial, style: const TextStyle(color: C.acentoTexto, fontWeight: FontWeight.w900)),
+                  child: Text(inicial, style: TextStyle(color: C.acentoTexto, fontWeight: FontWeight.w900)),
                 ),
               ),
             ),
@@ -258,11 +279,7 @@ class _Cabecera extends StatelessWidget {
               icon: const Icon(Icons.insights_rounded),
               onPressed: () => ResumenPagina.abrir(context),
             ),
-            IconButton(
-              tooltip: 'Ajustes',
-              icon: const Icon(Icons.settings_outlined),
-              onPressed: () => _ajustes(context),
-            ),
+            const _BotonMensajes(),
           ]),
           const SizedBox(height: 10),
           SingleChildScrollView(
@@ -307,4 +324,132 @@ class _Atajo extends StatelessWidget {
       ),
     ));
   }
+}
+
+/// "Descubre para ti": una tarjeta grande, como la de Spotify.
+class _TarjetaDescubre extends StatelessWidget {
+  const _TarjetaDescubre({required this.mix});
+  final Json mix;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = Caudal.of(context);
+    final portadas = [for (final m in (mix['miniaturas'] as List? ?? const [])) '$m']
+        .where((m) => m.isNotEmpty).take(3).toList();
+    final pistas = [
+      for (final p in (mix['pistas'] as List? ?? const []))
+        if (p is Map) Map<String, dynamic>.from(p)
+    ];
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: Esp.lado),
+      child: Pulsable(
+        escala: 0.98,
+        child: GestureDetector(
+          onTap: () => s.abrirElemento(context, mix),
+          child: Container(
+            padding: const EdgeInsets.all(Esp.l),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(18),
+              gradient: const LinearGradient(colors: [Color(0xFF5B3FD6), Color(0xFF1C2A5E)],
+                  begin: Alignment.topLeft, end: Alignment.bottomRight),
+            ),
+            child: Row(children: [
+              SizedBox(
+                width: 96, height: 96,
+                child: Stack(children: [
+                  for (final (i, url) in portadas.reversed.indexed)
+                    Positioned(
+                      left: (portadas.length - 1 - i) * 12.0, top: (portadas.length - 1 - i) * 6.0,
+                      child: Portada(url: url, lado: 72, radio: 8),
+                    ),
+                ]),
+              ),
+              const SizedBox(width: Esp.m),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  const Row(children: [
+                    Icon(Icons.auto_awesome_rounded, size: 16, color: Color(0xFFFFD66B)),
+                    SizedBox(width: 6),
+                    Text('HECHO PARA TI', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800,
+                        letterSpacing: 1, color: Color(0xFFFFD66B))),
+                  ]),
+                  const SizedBox(height: 4),
+                  Text('${mix['titulo']}', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900)),
+                  const SizedBox(height: 2),
+                  Text('${mix['subtitulo']}', maxLines: 2, overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 12.5, color: Color(0xCCFFFFFF))),
+                ]),
+              ),
+              IconButton.filled(
+                tooltip: 'Reproducir',
+                style: IconButton.styleFrom(backgroundColor: Colors.white, foregroundColor: const Color(0xFF1C2A5E)),
+                onPressed: pistas.isEmpty ? null : () => s.reproductor.reproducirLista(pistas,
+                    contexto: {'tipo': 'mix', 'id': mix['id'], 'titulo': mix['titulo']}),
+                icon: const Icon(Icons.play_arrow_rounded),
+              ),
+            ]),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// El sobre de los mensajes, con cuántos hay sin leer (se mira cada minuto).
+class _BotonMensajes extends StatefulWidget {
+  const _BotonMensajes();
+
+  @override
+  State<_BotonMensajes> createState() => _BotonMensajesState();
+}
+
+class _BotonMensajesState extends State<_BotonMensajes> with WidgetsBindingObserver {
+  int _sinLeer = 0;
+  Timer? _reloj;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _mirar());
+    _reloj = Timer.periodic(const Duration(seconds: 60), (_) => _mirar());
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState estado) {
+    if (estado == AppLifecycleState.resumed) _mirar();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _reloj?.cancel();
+    super.dispose();
+  }
+
+  Future<void> _mirar() async {
+    if (!mounted) return;
+    final chat = chatDe(context);
+    if (chat == null) return;
+    try {
+      final n = await chat.sinLeer();
+      if (mounted && n != _sinLeer) setState(() => _sinLeer = n);
+    } catch (_) {}
+  }
+
+  @override
+  Widget build(BuildContext context) => IconButton(
+        tooltip: _sinLeer > 0 ? 'Mensajes ($_sinLeer sin leer)' : 'Mensajes',
+        icon: Badge(
+          isLabelVisible: _sinLeer > 0,
+          label: Text('$_sinLeer'),
+          backgroundColor: C.acento,
+          textColor: C.acentoTexto,
+          child: const Icon(Icons.forum_outlined),
+        ),
+        onPressed: () async {
+          await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MensajesPagina()));
+          _mirar();
+        },
+      );
 }

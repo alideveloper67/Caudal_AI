@@ -53,3 +53,6 @@ Thumbs.db
 
 # la receta de compilacion del escritorio si se sube
 !escritorio/Caudal Escritorio.spec
+
+# estado local de Netlify
+.netlify/

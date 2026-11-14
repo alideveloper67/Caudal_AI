@@ -307,3 +307,29 @@ def test_sala_real_dos_clientes_python():
         bucle_b.llamar(inv.salir)
         bucle_a.parar()
         bucle_b.parar()
+
+
+def test_chat_de_la_sala():
+    vistos = []
+    s = _sala_sin_red(True, ReproductorFalso())
+    s.al_chat = vistos.append
+    s.canal.enviado.clear()
+    assert s.enviar_chat("  hola a todos 🎉  ")
+    ev, d = s.canal.enviado[-1]
+    assert ev == "chat" and d["texto"] == "hola a todos 🎉" and d["nombre"] == "Yo"
+    assert not s.enviar_chat("   ")
+    # llega uno de otro (y uno roto que se ignora)
+    s._al_mensaje("chat", {"de": "OTRO", "nombre": "Ana", "texto": "x" * 900, "t": 5})
+    s._al_mensaje("chat", {"de": "OTRO", "texto": ""})
+    assert [m["texto"][:5] for m in vistos] == ["hola ", "xxxxx"]
+    assert len(vistos[-1]["texto"]) == J.LARGO_CHAT
+    # quien entra recibe lo ultimo del chat
+    s.canal.enviado.clear()
+    s._al_mensaje("hola", {"de": "NUEVO"})
+    ev, d = [x for x in s.canal.enviado if x[0] == "chat_historial"][0]
+    assert d["para"] == "NUEVO" and len(d["mensajes"]) == 2
+    nuevo = _sala_sin_red(False, ReproductorFalso())
+    llegados = []
+    nuevo.al_chat = llegados.append
+    nuevo._al_mensaje("chat_historial", {"para": nuevo.mi_id, "mensajes": d["mensajes"]})
+    assert len(llegados) == 2 and len(nuevo.chat) == 2

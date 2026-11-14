@@ -233,6 +233,16 @@ class Ventana(QWidget):
         self.campo.addAction(self.icono_lupa, QLineEdit.LeadingPosition)
         h.addWidget(self.campo, 1)
         h.addStretch(1)
+        self.bt_mensajes = BotonIcono("chat", 19, "Mensajes", 36)
+        self.bt_mensajes.clicked.connect(lambda: self.navegar({"pagina": "mensajes"}))
+        h.addWidget(self.bt_mensajes)
+        # cuántos mensajes sin leer (se mira cada minuto)
+        self._sin_leer = 0
+        self._reloj_mensajes = QTimer(self)
+        self._reloj_mensajes.setInterval(60000)
+        self._reloj_mensajes.timeout.connect(self._mirar_mensajes)
+        self._reloj_mensajes.start()
+        QTimer.singleShot(4000, self._mirar_mensajes)
         self.bt_resumen = BotonIcono("ecualizador", 19, "Tu resumen", 36)
         self.bt_resumen.clicked.connect(lambda: self.navegar({"pagina": "resumen"}))
         h.addWidget(self.bt_resumen)
@@ -280,8 +290,12 @@ class Ventana(QWidget):
         menu.addSeparator()
         menu.addAction(iconos.icono("engranaje", 16, C["texto2"]), "Ajustes",
                        lambda: self.navegar({"pagina": "ajustes"}))
-        menu.addAction(iconos.icono("candado", 16, C["texto2"]), "Cambiar la contraseña",
-                       self._cambiar_contrasena)
+        menu.addAction(iconos.icono("candado", 16, C["texto2"]), "Privacidad y tus datos",
+                       self._privacidad)
+        if not (getattr(self.ctx, "cuenta", None) or {}).get("google"):
+            # quien entra con Google no tiene contraseña de Caudal
+            menu.addAction(iconos.icono("candado", 16, C["texto2"]), "Cambiar la contraseña",
+                           self._cambiar_contrasena)
         menu.addSeparator()
         menu.addAction(iconos.icono("salir", 16, C["texto2"]), "Cerrar sesión", self._cerrar_sesion)
         menu.exec(self.bt_cuenta.mapToGlobal(self.bt_cuenta.rect().bottomRight())
@@ -309,11 +323,18 @@ class Ventana(QWidget):
             return
         self.aviso.mostrar("Contraseña cambiada")
 
-    def _cerrar_sesion(self):
-        r = QMessageBox.question(self, APP_NOMBRE, "¿Cerrar la sesión? La próxima vez Caudal "
-                                                   "te pedirá entrar.")
-        if r != QMessageBox.Yes:
-            return
+    def _privacidad(self):
+        from .legal_ui import DialogoPrivacidad
+        d = DialogoPrivacidad(self.ctx, self)
+        d.cuenta_eliminada.connect(lambda: self._cerrar_sesion(preguntar=False))
+        d.exec()
+
+    def _cerrar_sesion(self, preguntar=True):
+        if preguntar:
+            r = QMessageBox.question(self, APP_NOMBRE, "¿Cerrar la sesión? La próxima vez Caudal "
+                                                       "te pedirá entrar.")
+            if r != QMessageBox.Yes:
+                return
         self._saliendo = True
         self._guardar_estado()
         self.teclas_multimedia.soltar()
@@ -371,6 +392,9 @@ class Ventana(QWidget):
         elif pag == "ajustes":
             from .paginas.ajustes import PaginaAjustes
             w = PaginaAjustes(self.ctx)
+        elif pag == "mensajes":
+            from .paginas.mensajes import PaginaMensajes
+            w = PaginaMensajes(self.ctx)
         elif pag == "video":
             from .video import VistaVideo
             w = VistaVideo(self.ctx)
@@ -449,10 +473,26 @@ class Ventana(QWidget):
         self.bt_atras.setEnabled(self.indice > 0)
         self.bt_adelante.setEnabled(self.indice < len(self.historia) - 1)
         self.bt_resumen.set_activo(pag == "resumen", punto=False)
+        self.bt_mensajes.set_activo(pag == "mensajes" or self._sin_leer > 0, punto=self._sin_leer > 0)
         self.bt_descargas.set_activo(pag == "descargas", punto=False)
         self.bt_ajustes.set_activo(pag == "ajustes", punto=False)
         titulo = getattr(w, "titulo", "") or ""
         self.setWindowTitle(f"{titulo} · {APP_NOMBRE}" if titulo and pag != "inicio" else APP_NOMBRE)
+
+    def _mirar_mensajes(self):
+        from .paginas.mensajes import chat_de
+        from ..hilos import en_segundo_plano
+        c = chat_de(self.ctx)
+        if c is None:
+            return
+
+        def listo(n):
+            self._sin_leer = int(n or 0)
+            en_mensajes = bool(self.historia) and self.historia[self.indice][0].get("pagina") == "mensajes"
+            self.bt_mensajes.set_activo(en_mensajes or self._sin_leer > 0, punto=self._sin_leer > 0)
+            self.bt_mensajes.setToolTip(f"Mensajes ({self._sin_leer} sin leer)" if self._sin_leer else "Mensajes")
+
+        en_segundo_plano(c.sin_leer, ok=listo, error=lambda _e: None, dueno=self)
 
     def atras(self):
         if self.indice > 0:

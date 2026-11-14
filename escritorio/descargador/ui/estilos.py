@@ -29,6 +29,38 @@ C = {
     "cian":        "#6366F1",
 }
 
+# Los colores y fondos que se pueden elegir (los mismos que en el teléfono).
+# nombre -> (etiqueta, acento, alto, bajo, texto sobre el acento)
+ACENTOS = {
+    "cian": ("Cian", "#22D3EE", "#67E8F9", "#0EA5C6", "#03222B"),
+    "violeta": ("Violeta", "#8B6CFF", "#B4A1FF", "#6D4FE6", "#14093D"),
+    "rosa": ("Rosa", "#FF5C8A", "#FF93B1", "#E63E6E", "#3D0716"),
+    "verde": ("Verde", "#2BD576", "#6EE7A3", "#1FAF5E", "#032412"),
+    "naranja": ("Naranja", "#FF8A3D", "#FFB27F", "#E56F20", "#3A1600"),
+    "rojo": ("Rojo", "#F2555A", "#F78A8D", "#D63A40", "#3B0608"),
+    "azul": ("Azul", "#4C8DFF", "#8DB5FF", "#2F6FE0", "#051A40"),
+    "dorado": ("Dorado", "#F5C542", "#F9DB85", "#D9A91E", "#332400"),
+}
+# nombre -> (etiqueta, fondo, panel, superficie, superficie2, superficie3, hover, borde)
+FONDOS = {
+    "oscuro": ("Oscuro", "#06070A", "#101217", "#14171D", "#1B1F27", "#252A35", "#1F232C", "#222731"),
+    "negro": ("Negro puro", "#000000", "#0A0A0A", "#101010", "#171717", "#222222", "#1A1A1A", "#1C1C1C"),
+    "noche": ("Azul noche", "#070B18", "#0E1426", "#131A30", "#1A2340", "#243052", "#1C2644", "#1F2946"),
+    "uva": ("Morado", "#0D0716", "#160E24", "#1C122E", "#251A3B", "#32244E", "#281C40", "#2B2042"),
+    "bosque": ("Bosque", "#050D0A", "#0C1813", "#111F19", "#172A22", "#20372D", "#1A2D25", "#1C3027"),
+    "grafito": ("Grafito", "#121316", "#1A1C20", "#202227", "#282B31", "#33373E", "#2B2E34", "#2E3138"),
+}
+
+
+def aplicar_aspecto(acento, fondo):
+    """Cambia la paleta. Se llama al arrancar, antes de construir la ventana."""
+    a = ACENTOS.get(acento) or ACENTOS["cian"]
+    C.update(acento=a[1], acento_alto=a[2], acento_bajo=a[3], acento_texto=a[4])
+    f = FONDOS.get(fondo) or FONDOS["oscuro"]
+    C.update(fondo=f[1], panel=f[2], superficie=f[3], superficie2=f[4], superficie3=f[5],
+             hover=f[6], borde=f[7])
+
+
 FUENTE = '"Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif'
 FUENTE_TITULO = '"Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif'
 

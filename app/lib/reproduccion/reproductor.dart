@@ -8,6 +8,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 import '../nucleo/ajustes.dart';
 import '../nucleo/catalogo.dart';
 import '../nucleo/coleccion.dart';
+import '../nucleo/recomendador.dart';
 import '../nucleo/red.dart';
 import '../nucleo/streams.dart';
 import '../nucleo/transiciones.dart';
@@ -562,8 +563,27 @@ class Reproductor extends ChangeNotifier {
   Future<void> avanzar(int segundos) =>
       buscar(Duration(milliseconds: max(0, posicion.value.inMilliseconds + segundos * 1000)));
 
+  /// Tu gusto, para limpiar la radio automatica (se recalcula cada 10 min).
+  Gusto? _gusto;
+  DateTime _gustoDe = DateTime(2000);
+
+  Future<Gusto?> _gustoActual() async {
+    if (_gusto != null && DateTime.now().difference(_gustoDe) < const Duration(minutes: 10)) return _gusto;
+    try {
+      _gusto = await Recomendador.gusto(coleccion);
+      _gustoDe = DateTime.now();
+    } catch (_) {}
+    return _gusto;
+  }
+
   Future<void> siguiente({bool automatico = false}) async {
     if (actual == null) return;
+    // saltar antes de que cuente como escuchada: el recomendador lo aprende
+    if (!automatico && !_escuchaContada && posicion.value < const Duration(seconds: 30) &&
+        '${actual!['video_id'] ?? ''}'.isNotEmpty && fuente?.local != true) {
+      unawaited(Recomendador.anotarSalto(coleccion, actual!).catchError((_) {}));
+      _gusto = null;
+    }
     if (automatico && repetir == 'una') {
       await _cargar(actual!);
       return;
@@ -625,7 +645,11 @@ class Reproductor extends ChangeNotifier {
       final datos = await Catalogo.radio(videoId: '${pista['video_id']}');
       final vistos = secuencia.map((p) => p['video_id']).toSet();
       final nuevas = <Json>[];
-      for (final p in List<Json>.from(datos['pistas'] as List)) {
+      var candidatas = List<Json>.from(datos['pistas'] as List);
+      // sin lo que sueles saltar ni lo que ya sono estos dias
+      final g = await _gustoActual();
+      if (g != null) candidatas = Recomendador.limpiarRadio(candidatas, g);
+      for (final p in candidatas) {
         if (p['video_id'] != null && !vistos.contains(p['video_id'])) {
           nuevas.add({...p, '_auto': true});
           vistos.add(p['video_id']);
@@ -914,6 +938,7 @@ class Reproductor extends ChangeNotifier {
       if (seg >= umbral) {
         _escuchaContada = true;
         coleccion.registrarEscucha(actual!, contexto);
+        unawaited(Recomendador.perdonar(coleccion, actual!).catchError((_) {}));
       }
     }
     final cf = ajustes.entero('crossfade');

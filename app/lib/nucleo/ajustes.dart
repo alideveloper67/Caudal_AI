@@ -27,6 +27,9 @@ class Ajustes extends ChangeNotifier {
     'codec_video': 'auto', // auto | sin_av1 | compatible
     'crossfade': 0,
     'normalizar': true,
+    'traducir_letra': true, // la traduccion bajo cada linea de la letra
+    'acento': 'cian', // color de la app (ver Aspecto.acentos)
+    'fondo': 'oscuro', // fondo de la app (ver Aspecto.fondos)
     'super_volumen': 0, // 0..4
     'ecualizador': false,
     'eq_bandas': '[0,0,0,0,0,0,0,0,0,0]',

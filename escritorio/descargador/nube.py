@@ -9,8 +9,12 @@ Se entra con usuario y contrasena. Supabase pide un correo, asi que cada usuario
 se traduce a "<usuario>@usuarios.caudal.app": nunca se envia ningun correo.
 """
 
+import base64
+import hashlib
+import secrets
 import threading
 import time
+from urllib.parse import urlencode
 
 import requests
 
@@ -72,10 +76,11 @@ def usuario_libre(usuario):
     return bool(r.json())
 
 
-def registrar(usuario, contrasena, nombre):
+def registrar(usuario, contrasena, nombre, extra=None):
+    """`extra`: aceptación de los términos y datos básicos (ver legal.extra_registro)."""
     r = _peticion("POST", "/auth/v1/signup", json={
         "email": correo_de(usuario), "password": contrasena,
-        "data": {"usuario": usuario.strip().lower(), "nombre": nombre}})
+        "data": {**(extra or {}), "usuario": usuario.strip().lower(), "nombre": nombre}})
     if r.status_code >= 300:
         raise _traducir(r)
     datos = r.json()
@@ -88,6 +93,32 @@ def entrar(usuario, contrasena):
     r = _peticion("POST", "/auth/v1/token?grant_type=password",
                   json={"email": correo_de(usuario), "password": contrasena})
     if r.status_code >= 300:
+        raise _traducir(r)
+    return Sesion.desde_respuesta(r.json())
+
+
+# ---------------------------------------------------------------- Google
+
+def nuevo_verificador():
+    """Codigo de un solo uso (PKCE): el navegador se lleva su huella y la app
+    presenta el original al canjear, asi nadie mas puede usar el codigo."""
+    return secrets.token_urlsafe(48)[:64]
+
+
+def url_google(verificador, vuelta):
+    huella = base64.urlsafe_b64encode(
+        hashlib.sha256(verificador.encode("ascii")).digest()).decode().rstrip("=")
+    return f"{URL}/auth/v1/authorize?" + urlencode({
+        "provider": "google", "redirect_to": vuelta, "code_challenge": huella,
+        "code_challenge_method": "s256", "prompt": "select_account"})
+
+
+def canjear_google(codigo, verificador):
+    r = _peticion("POST", "/auth/v1/token?grant_type=pkce",
+                  json={"auth_code": codigo, "code_verifier": verificador})
+    if r.status_code >= 300:
+        if 400 <= r.status_code < 500:
+            raise ErrorNube("No se pudo terminar de entrar con Google. Vuelve a intentarlo.")
         raise _traducir(r)
     return Sesion.desde_respuesta(r.json())
 

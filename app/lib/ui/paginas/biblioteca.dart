@@ -5,6 +5,7 @@ import '../comunes.dart';
 import '../servicios.dart';
 import '../tema.dart';
 import 'ajustes_pagina.dart';
+import 'importar_archivos_hoja.dart';
 import 'inicio.dart';
 
 class BibliotecaPagina extends StatefulWidget {
@@ -114,13 +115,18 @@ class _BibliotecaPaginaState extends State<BibliotecaPagina> with AutomaticKeepA
                 child: GestureDetector(
                   onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AjustesPagina())),
                   child: CircleAvatar(radius: 16, backgroundColor: C.acento,
-                      child: Text(s.cuenta.inicial, style: const TextStyle(color: C.acentoTexto, fontWeight: FontWeight.w900))),
+                      child: Text(s.cuenta.inicial, style: TextStyle(color: C.acentoTexto, fontWeight: FontWeight.w900))),
                 ),
               ),
               const SizedBox(width: Esp.m),
               const Text('Tu biblioteca', style: estiloTituloBarra),
             ]),
             actions: [
+              IconButton(
+                tooltip: 'Traer música de otra app o de tu teléfono',
+                icon: const Icon(Icons.playlist_add_rounded, size: 28),
+                onPressed: () => hojaTraer(context),
+              ),
               IconButton(tooltip: 'Nueva lista', icon: const Icon(Icons.add_rounded, size: 28), onPressed: _nuevaLista),
             ],
             bottom: PreferredSize(
@@ -236,7 +242,7 @@ class _Item extends StatelessWidget {
                     style: estiloTituloFila.copyWith(color: sonando ? C.acento : C.texto)),
                 const SizedBox(height: 3),
                 Row(children: [
-                  if (el['fijada'] == true) const Padding(
+                  if (el['fijada'] == true) Padding(
                     padding: EdgeInsets.only(right: 5),
                     child: Icon(Icons.push_pin_rounded, size: 13, color: C.acento),
                   ),
@@ -244,7 +250,7 @@ class _Item extends StatelessWidget {
                       style: estiloSecundario)),
                 ]),
               ])),
-              if (sonando) const Icon(Icons.volume_up_rounded, color: C.acento, size: 20),
+              if (sonando) Icon(Icons.volume_up_rounded, color: C.acento, size: 20),
             ]),
           ),
         );

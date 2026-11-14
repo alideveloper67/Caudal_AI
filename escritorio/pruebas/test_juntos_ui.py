@@ -13,7 +13,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from PySide6.QtCore import QObject, Signal  # noqa: E402
-from PySide6.QtWidgets import QApplication, QLabel, QWidget  # noqa: E402
+from PySide6.QtWidgets import QFrame, QApplication, QLabel, QWidget  # noqa: E402
 
 from descargador import juntos as J  # noqa: E402
 from pruebas.test_juntos import ReproductorFalso, _hay_red  # noqa: E402
@@ -115,7 +115,7 @@ def test_pantalla_con_sala_real(app):
     s = g.sala
     assert pag.pilas.currentIndex() == 1 and pag.et_codigo.text() == s.codigo
     assert "Tú pones la música" in pag.et_estado.text()
-    assert "Prueba UI" in pag.et_suena.text()
+    assert "Prueba UI" in pag.et_titulo.text()
 
     # un invitado (otro "aparato") entra con el enlace
     bucle = J.BucleSimple()
@@ -126,10 +126,22 @@ def test_pantalla_con_sala_real(app):
     bucle.salas.append(inv)
     try:
         bucle.llamar(inv.abrir)
-        esperar(app, lambda: pag.lista.count() == 2, "Beto aparece en la lista")
-        textos = [pag.lista.item(i).text() for i in range(pag.lista.count())]
-        assert any("Ana PC" in t and "pone la música" in t for t in textos)
+        def miembros():
+            return [w for w in pag.caja_miembros.findChildren(QFrame) if w.objectName() == "miembro"]
+        esperar(app, lambda: len(miembros()) == 2, "Beto aparece en la sala")
+        textos = [" ".join(l.text() for l in m.findChildren(QLabel)) for m in miembros()]
+        assert any("Ana PC" in t and "Pone la música" in t for t in textos)
         assert any("Beto" in t for t in textos)
+
+        # el chat de la sala llega de un lado a otro
+        llegados = []
+        inv.al_chat = llegados.append
+        pag.campo_chat.setText("hola Beto 🎉")
+        pag._enviar_chat()
+        esperar(app, lambda: any(m["texto"] == "hola Beto 🎉" for m in llegados), "a Beto le llega el chat")
+        bucle.llamar(lambda: inv.enviar_chat("hola Ana"))
+        esperar(app, lambda: any("hola Ana" in l.text() for l in pag.interior_chat.findChildren(QLabel)),
+                "a Ana le llega el chat")
         esperar(app, lambda: (b.pista or {}).get("video_id") == "dQw4w9WgXcQ", "Beto la carga")
 
         # reaccion de Beto: flota en la pantalla

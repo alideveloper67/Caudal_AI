@@ -116,6 +116,9 @@ DEFECTOS = {
     "aceleracion": True,             # decodificar con la tarjeta grafica si se puede
     "calidad_adaptable": True,       # bajar un escalon si el equipo pierde cuadros
     "crossfade": 0,                  # segundos de fundido entre canciones (0 = sin fundido)
+    "traducir_letra": True,          # la traduccion bajo cada linea de la letra
+    "acento": "cian",                # color de la app (estilos.ACENTOS)
+    "fondo": "oscuro",               # fondo de la app (estilos.FONDOS)
     "normalizar": True,              # mismo volumen percibido entre canciones
     "autoplay": True,                # al acabarse la cola, seguir con canciones parecidas
     "sponsorblock": True,            # saltar lo que no es musica en videos musicales

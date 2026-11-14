@@ -112,8 +112,25 @@ def main():
         app.quit()
 
     def iniciar(cuenta):
+        sesion = cuenta.get("sesion")
+        if sesion is not None and getattr(sesion, "access", ""):
+            # cuentas de antes de los términos (o sin los datos básicos): se piden una vez
+            from descargador import legal
+            try:
+                perfil = legal.perfil(sesion)
+            except Exception:  # noqa: BLE001
+                perfil = None           # sin red: se pregunta la próxima vez
+            if perfil is not None and not (legal.aceptado(perfil) and legal.completo(perfil)):
+                from descargador.ui.legal_ui import DialogoAceptar
+                if DialogoAceptar(sesion, perfil).exec() != DialogoAceptar.Accepted:
+                    Cuentas().olvidar(cuenta)
+                    reiniciar()
+                    return
         activar(cuenta)
         ajustes = Ajustes()
+        # el color y el fondo elegidos, antes de construir la ventana
+        from descargador.ui.estilos import aplicar_aspecto
+        aplicar_aspecto(ajustes["acento"], ajustes["fondo"])
         catalogo.fijar_region(ajustes["region"])
         historial = Historial()
         coleccion = Coleccion()
@@ -127,6 +144,7 @@ def main():
             inteligente.gestor = gestor
             inteligente.descargada.connect(lambda _p: ctx.descargas_cambio.emit())
         ctx.cerrar_sesion = lambda: (Cuentas().olvidar(cuenta), reiniciar())
+        ctx.reiniciar = reiniciar
         if cuenta.get("sesion") is not None:
             # biblioteca compartida con los demas dispositivos de la cuenta
             from descargador.sincronizacion import Sincronizador

@@ -4,8 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
+import '../../nucleo/ajustes.dart';
 import '../../nucleo/catalogo.dart';
 import '../../nucleo/coleccion.dart';
+import '../../nucleo/traductor.dart';
 import '../../reproduccion/reproductor.dart';
 import '../comunes.dart';
 import '../plataforma.dart';
@@ -295,7 +297,7 @@ class _ReproductorPaginaState extends State<ReproductorPagina> {
                               borderRadius: BorderRadius.circular(4),
                             ),
                             child: Text(r.fuente!.insignia,
-                                style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: C.acento)),
+                                style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: C.acento)),
                           ),
                         const Spacer(),
                         if ('${p['video_id'] ?? ''}'.isNotEmpty || (p['archivo'] != null && p['es_audio'] != true))
@@ -365,7 +367,7 @@ class _ReproductorPaginaState extends State<ReproductorPagina> {
             child: Text('Temporizador para dormir', style: estiloTituloSeccion)),
         if (restante != null)
           ListTile(
-            leading: const Icon(Icons.timer_off_outlined, color: C.acento),
+            leading: Icon(Icons.timer_off_outlined, color: C.acento),
             title: Text(restante == -1 ? 'Activo: al terminar la canción'
                 : 'Activo: quedan ${restante ~/ 60} min ${restante % 60} s'),
             subtitle: const Text('Tocar para desactivar', style: estiloSecundario),
@@ -422,7 +424,7 @@ class _BotonGrande extends StatelessWidget {
               duration: const Duration(milliseconds: 200),
               transitionBuilder: (hijo, a) => ScaleTransition(scale: a, child: FadeTransition(opacity: a, child: hijo)),
               child: cargando
-                  ? const Padding(key: ValueKey('cargando'), padding: EdgeInsets.all(22),
+                  ? Padding(key: ValueKey('cargando'), padding: EdgeInsets.all(22),
                       child: CircularProgressIndicator(strokeWidth: 3, color: C.fondo))
                   : Center(key: const ValueKey('icono'),
                       child: IconoPlayPausa(sonando: r.estado == EstadoRepro.sonando, tamano: 42, color: C.fondo)),
@@ -447,11 +449,11 @@ class _VideoEnLinea extends StatelessWidget {
           child: ColoredBox(
             color: Colors.black,
             child: MaterialVideoControlsTheme(
-              normal: const MaterialVideoControlsThemeData(
+              normal: MaterialVideoControlsThemeData(
                 seekBarThumbColor: C.acento, seekBarPositionColor: C.acento,
                 buttonBarButtonColor: Colors.white, topButtonBar: [],
               ),
-              fullscreen: const MaterialVideoControlsThemeData(
+              fullscreen: MaterialVideoControlsThemeData(
                 seekBarThumbColor: C.acento, seekBarPositionColor: C.acento,
               ),
               child: Video(controller: r.pantalla, controls: MaterialVideoControls,
@@ -620,6 +622,8 @@ class _TarjetaLetraState extends State<_TarjetaLetra> {
           Row(children: [
             const Text('Letra', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
             const Spacer(),
+            if (hay) const BotonTraducir(compacto: true),
+            if (hay) const SizedBox(width: 10),
             if (hay) const Icon(Icons.open_in_full_rounded, size: 18),
           ]),
           const SizedBox(height: 10),
@@ -633,7 +637,7 @@ class _TarjetaLetraState extends State<_TarjetaLetra> {
                         // la letra se desvanece por arriba y por abajo en vez de cortarse
                         // (dos velos del color de la tarjeta: sin capas extra que componer)
                         child: Stack(fit: StackFit.expand, children: [
-                          _VistaLetra(letra: l, compacta: true),
+                          _VistaLetra(letra: l, compacta: true, clave: '${widget.pista['clave']}'),
                           Positioned(left: 0, right: 0, top: 0, height: 14,
                               child: DecoratedBox(decoration: BoxDecoration(gradient: LinearGradient(
                                   begin: Alignment.topCenter, end: Alignment.bottomCenter,
@@ -666,18 +670,22 @@ class LetraCompleta extends StatelessWidget {
             Text('${pista['titulo']}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
             Text('${pista['artista'] ?? ''}', style: const TextStyle(fontSize: 13, color: Color(0xCCFFFFFF))),
           ]),
+          actions: const [BotonTraducir(), SizedBox(width: 12)],
         ),
         body: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 22),
-          child: _VistaLetra(letra: letra ?? const {}, compacta: false),
+          child: _VistaLetra(letra: letra ?? const {}, compacta: false, clave: '${pista['clave']}'),
         ),
       );
 }
 
 class _VistaLetra extends StatefulWidget {
-  const _VistaLetra({required this.letra, required this.compacta});
+  const _VistaLetra({required this.letra, required this.compacta, required this.clave});
   final Map<String, dynamic> letra;
   final bool compacta;
+
+  /// La cancion (para guardar su traduccion).
+  final String clave;
 
   @override
   State<_VistaLetra> createState() => _VistaLetraState();
@@ -693,14 +701,61 @@ class _VistaLetraState extends State<_VistaLetra> {
   int _actual = -1;
   Reproductor? _r;
   DateTime _toque = DateTime(2000);
+  Ajustes? _ajustes;
+
+  /// Traduccion de cada linea (de [_ls] o, sin tiempos, del texto plano).
+  List<String> _trad = const [];
+  String _pedida = '';
+
+  List<String> get _textos => _ls.isNotEmpty
+      ? [for (final l in _ls) l.$2]
+      : '${widget.letra['texto'] ?? ''}'.split('\n');
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     if (_r == null) {
-      _r = Caudal.leer(context).reproductor;
+      final s = Caudal.leer(context);
+      _r = s.reproductor;
       _r!.posicion.addListener(_alAvanzar);
+      _ajustes = s.ajustes..addListener(_traducirSiToca);
+      _traducirSiToca();
     }
+  }
+
+  void _traducirSiToca() {
+    if (!mounted) return;
+    final quiere = _ajustes?.sino('traducir_letra') ?? false;
+    if (!quiere) {
+      if (_trad.isNotEmpty) setState(() => _trad = const []);
+      _pedida = '';
+      return;
+    }
+    final clave = '${widget.clave}|${_ls.length}|${'${widget.letra['texto'] ?? ''}'.length}';
+    if (clave == _pedida) return;
+    _pedida = clave;
+    Traductor.traducir(clave, _textos).then((t) {
+      if (!mounted || _pedida != clave) return;
+      setState(() => _trad = t == null || t.mismoIdioma ? const [] : t.lineas);
+    });
+  }
+
+  String _traduccionDe(int i) => i < _trad.length ? _trad[i] : '';
+
+  /// La traduccion bajo la linea, mas pequena y del mismo tono.
+  Widget _conTraduccion(Widget linea, int i, Color color) {
+    final t = _traduccionDe(i);
+    if (t.isEmpty) return linea;
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+      linea,
+      const SizedBox(height: 2),
+      AnimatedDefaultTextStyle(
+        duration: const Duration(milliseconds: 260),
+        style: TextStyle(fontSize: widget.compacta ? 14 : 17, fontWeight: FontWeight.w600, height: 1.25,
+            color: color.withValues(alpha: color.a * 0.78)),
+        child: Text(t),
+      ),
+    ]);
   }
 
   @override
@@ -710,12 +765,15 @@ class _VistaLetraState extends State<_VistaLetra> {
       _ls = _lineas(widget.letra);
       _llaves = List.generate(_ls.length, (_) => GlobalKey());
       _actual = -1;
+      _trad = const [];
+      _traducirSiToca();
     }
   }
 
   @override
   void dispose() {
     _r?.posicion.removeListener(_alAvanzar);
+    _ajustes?.removeListener(_traducirSiToca);
     _scroll.dispose();
     super.dispose();
   }
@@ -753,9 +811,19 @@ class _VistaLetraState extends State<_VistaLetra> {
   @override
   Widget build(BuildContext context) {
     if (_ls.isEmpty) {
+      final estilo = TextStyle(fontSize: widget.compacta ? 18 : 22, fontWeight: FontWeight.w800, height: 1.5);
+      if (_trad.isEmpty) {
+        return SingleChildScrollView(child: Text('${widget.letra['texto'] ?? ''}', style: estilo));
+      }
+      final textos = _textos;
       return SingleChildScrollView(
-        child: Text('${widget.letra['texto'] ?? ''}',
-            style: TextStyle(fontSize: widget.compacta ? 18 : 22, fontWeight: FontWeight.w800, height: 1.5)),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          for (var i = 0; i < textos.length; i++)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 4),
+              child: _conTraduccion(Text(textos[i], style: estilo), i, Colors.white),
+            ),
+        ]),
       );
     }
     return NotificationListener<UserScrollNotification>(
@@ -806,13 +874,52 @@ class _VistaLetraState extends State<_VistaLetra> {
                 child: AnimatedOpacity(
                   opacity: estado == 0 ? 1 : (estado < 0 ? 0.72 : 1),
                   duration: const Duration(milliseconds: 320),
-                  child: linea,
+                  child: _conTraduccion(linea, i, estilo.color ?? Colors.white),
                 ),
               ),
             ),
           );
         },
       ),
+    );
+  }
+}
+
+/// Enciende o apaga la traduccion bajo la letra (se recuerda).
+class BotonTraducir extends StatelessWidget {
+  const BotonTraducir({super.key, this.compacto = false});
+  final bool compacto;
+
+  @override
+  Widget build(BuildContext context) {
+    final a = Caudal.of(context).ajustes;
+    return ListenableBuilder(
+      listenable: a,
+      builder: (context, _) {
+        final on = a.sino('traducir_letra');
+        return Tooltip(
+          message: on ? 'Quitar la traducción' : 'Traducir la letra',
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => a.poner('traducir_letra', !on),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 200),
+              padding: EdgeInsets.symmetric(horizontal: compacto ? 8 : 12, vertical: compacto ? 4 : 6),
+              decoration: BoxDecoration(
+                color: on ? Colors.white : Colors.white.withValues(alpha: 0.16),
+                borderRadius: BorderRadius.circular(20),
+              ),
+              child: Row(mainAxisSize: MainAxisSize.min, children: [
+                Icon(Icons.translate_rounded, size: compacto ? 15 : 18,
+                    color: on ? const Color(0xFF06070A) : Colors.white),
+                const SizedBox(width: 5),
+                Text('Traducir', style: TextStyle(fontSize: compacto ? 12 : 14, fontWeight: FontWeight.w800,
+                    color: on ? const Color(0xFF06070A) : Colors.white)),
+              ]),
+            ),
+          ),
+        );
+      },
     );
   }
 }

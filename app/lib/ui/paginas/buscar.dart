@@ -295,7 +295,7 @@ class _BuscarPaginaState extends State<BuscarPagina> with AutomaticKeepAliveClie
     if (_foco.hasFocus && texto.isNotEmpty && _esEnlace(texto)) {
       return ListView(padding: EdgeInsets.zero, children: [
         ListTile(
-          leading: const Icon(Icons.link_rounded, color: C.acento),
+          leading: Icon(Icons.link_rounded, color: C.acento),
           title: const Text('Abrir este enlace', style: TextStyle(fontWeight: FontWeight.w700)),
           subtitle: Text(texto, maxLines: 1, overflow: TextOverflow.ellipsis, style: estiloSecundario),
           onTap: () => _buscar(texto),

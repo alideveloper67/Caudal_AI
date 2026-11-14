@@ -4,27 +4,78 @@ import 'package:flutter/material.dart';
 import 'plataforma.dart';
 
 /// La paleta de Caudal (la misma que el escritorio): oscuro profundo y un solo
-/// acento, el cian del icono.
+/// acento. El acento y el fondo se pueden cambiar en Ajustes → Aspecto
+/// ([Aspecto.aplicar]); por eso no son constantes.
 class C {
-  static const fondo = Color(0xFF06070A);
-  static const panel = Color(0xFF101217);
-  static const superficie = Color(0xFF14171D);
-  static const superficie2 = Color(0xFF1B1F27);
-  static const superficie3 = Color(0xFF252A35);
-  static const borde = Color(0xFF222731);
+  static Color fondo = const Color(0xFF06070A);
+  static Color panel = const Color(0xFF101217);
+  static Color superficie = const Color(0xFF14171D);
+  static Color superficie2 = const Color(0xFF1B1F27);
+  static Color superficie3 = const Color(0xFF252A35);
+  static Color borde = const Color(0xFF222731);
   static const texto = Color(0xFFF3F5F9);
   static const texto2 = Color(0xFFA9B1C0);
   static const texto3 = Color(0xFF6F788A);
-  static const acento = Color(0xFF22D3EE);
-  static const acentoAlto = Color(0xFF67E8F9);
-  static const acentoTexto = Color(0xFF03222B);
+  static Color acento = const Color(0xFF22D3EE);
+  static Color acentoAlto = const Color(0xFF67E8F9);
+  static Color acentoTexto = const Color(0xFF03222B);
   static const violeta = Color(0xFF7C5CFF);
   static const error = Color(0xFFF2555A);
   static const exito = Color(0xFF2BD576);
+
+  /// El degradado de arriba del Inicio (sale del acento).
+  static Color get cabecera => Color.lerp(acento, fondo, 0.78)!;
+}
+
+/// Los colores y fondos que se pueden elegir.
+class Aspecto {
+  Aspecto._();
+
+  /// nombre -> (acento, alto, texto sobre el acento)
+  static const acentos = <String, (String, Color, Color, Color)>{
+    'cian': ('Cian', Color(0xFF22D3EE), Color(0xFF67E8F9), Color(0xFF03222B)),
+    'violeta': ('Violeta', Color(0xFF8B6CFF), Color(0xFFB4A1FF), Color(0xFF14093D)),
+    'rosa': ('Rosa', Color(0xFFFF5C8A), Color(0xFFFF93B1), Color(0xFF3D0716)),
+    'verde': ('Verde', Color(0xFF2BD576), Color(0xFF6EE7A3), Color(0xFF032412)),
+    'naranja': ('Naranja', Color(0xFFFF8A3D), Color(0xFFFFB27F), Color(0xFF3A1600)),
+    'rojo': ('Rojo', Color(0xFFF2555A), Color(0xFFF78A8D), Color(0xFF3B0608)),
+    'azul': ('Azul', Color(0xFF4C8DFF), Color(0xFF8DB5FF), Color(0xFF051A40)),
+    'dorado': ('Dorado', Color(0xFFF5C542), Color(0xFFF9DB85), Color(0xFF332400)),
+  };
+
+  /// nombre -> (fondo, panel, superficie, superficie2, superficie3, borde)
+  static const fondos = <String, (String, List<Color>)>{
+    'oscuro': ('Oscuro', [Color(0xFF06070A), Color(0xFF101217), Color(0xFF14171D), Color(0xFF1B1F27),
+      Color(0xFF252A35), Color(0xFF222731)]),
+    'negro': ('Negro puro', [Color(0xFF000000), Color(0xFF0A0A0A), Color(0xFF101010), Color(0xFF171717),
+      Color(0xFF222222), Color(0xFF1C1C1C)]),
+    'noche': ('Azul noche', [Color(0xFF070B18), Color(0xFF0E1426), Color(0xFF131A30), Color(0xFF1A2340),
+      Color(0xFF243052), Color(0xFF1F2946)]),
+    'uva': ('Morado', [Color(0xFF0D0716), Color(0xFF160E24), Color(0xFF1C122E), Color(0xFF251A3B),
+      Color(0xFF32244E), Color(0xFF2B2042)]),
+    'bosque': ('Bosque', [Color(0xFF050D0A), Color(0xFF0C1813), Color(0xFF111F19), Color(0xFF172A22),
+      Color(0xFF20372D), Color(0xFF1C3027)]),
+    'grafito': ('Grafito', [Color(0xFF121316), Color(0xFF1A1C20), Color(0xFF202227), Color(0xFF282B31),
+      Color(0xFF33373E), Color(0xFF2E3138)]),
+  };
+
+  static void aplicar(String acento, String fondo) {
+    final a = acentos[acento] ?? acentos['cian']!;
+    C.acento = a.$2;
+    C.acentoAlto = a.$3;
+    C.acentoTexto = a.$4;
+    final f = (fondos[fondo] ?? fondos['oscuro']!).$2;
+    C.fondo = f[0];
+    C.panel = f[1];
+    C.superficie = f[2];
+    C.superficie2 = f[3];
+    C.superficie3 = f[4];
+    C.borde = f[5];
+  }
 }
 
 ThemeData temaCaudal() {
-  const esquema = ColorScheme.dark(
+  final esquema = ColorScheme.dark(
     primary: C.acento,
     onPrimary: C.acentoTexto,
     secondary: C.acento,
@@ -65,7 +116,7 @@ ThemeData temaCaudal() {
             size: 26,
           )),
     ),
-    bottomSheetTheme: const BottomSheetThemeData(
+    bottomSheetTheme: BottomSheetThemeData(
       backgroundColor: C.superficie2,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
       showDragHandle: true,
@@ -85,7 +136,7 @@ ThemeData temaCaudal() {
       contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
       focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10), borderSide: const BorderSide(color: C.acento, width: 2)),
+          borderRadius: BorderRadius.circular(10), borderSide: BorderSide(color: C.acento, width: 2)),
     ),
     sliderTheme: const SliderThemeData(
       trackHeight: 3.5,
@@ -104,7 +155,7 @@ ThemeData temaCaudal() {
       TargetPlatform.android: PredictiveBackPageTransitionsBuilder(),
       TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
     }),
-    dividerTheme: const DividerThemeData(color: C.borde, thickness: 1, space: 1),
+    dividerTheme: DividerThemeData(color: C.borde, thickness: 1, space: 1),
     listTileTheme: const ListTileThemeData(
       iconColor: C.texto2,
       subtitleTextStyle: estiloSecundario,

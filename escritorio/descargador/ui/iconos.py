@@ -518,6 +518,29 @@ def _dibujar_extra(p, nombre, e, color):
         p.drawPolyline([QPointF(7.5 * e, 8 * e), QPointF(12 * e, 3.5 * e), QPointF(16.5 * e, 8 * e)])
         p.drawPolyline([QPointF(7 * e, 11 * e), QPointF(4.5 * e, 11 * e), QPointF(4.5 * e, 20.5 * e),
                         QPointF(19.5 * e, 20.5 * e), QPointF(19.5 * e, 11 * e), QPointF(17 * e, 11 * e)])
+    elif nombre == "chat":
+        # bocadillo de conversacion
+        ruta = QPainterPath()
+        ruta.addRoundedRect(QRectF(3 * e, 4 * e, 18 * e, 13 * e), 4 * e, 4 * e)
+        p.drawPath(ruta)
+        p.drawPolyline([QPointF(8 * e, 17 * e), QPointF(7 * e, 21 * e), QPointF(12 * e, 17 * e)])
+    elif nombre == "estrella":
+        # destello de cuatro puntas (recomendaciones)
+        ruta = QPainterPath()
+        ruta.moveTo(12 * e, 3 * e)
+        ruta.quadTo(13 * e, 11 * e, 21 * e, 12 * e)
+        ruta.quadTo(13 * e, 13 * e, 12 * e, 21 * e)
+        ruta.quadTo(11 * e, 13 * e, 3 * e, 12 * e)
+        ruta.quadTo(11 * e, 11 * e, 12 * e, 3 * e)
+        p.drawPath(ruta)
+    elif nombre == "idioma":
+        # traducir: una "A" y unas lineas de otro alfabeto, como el simbolo de siempre
+        p.drawPolyline([QPointF(11 * e, 20.5 * e), QPointF(15.5 * e, 10 * e), QPointF(20 * e, 20.5 * e)])
+        p.drawLine(QPointF(12.6 * e, 17 * e), QPointF(18.4 * e, 17 * e))
+        p.drawLine(QPointF(3 * e, 5.5 * e), QPointF(12 * e, 5.5 * e))
+        p.drawLine(QPointF(7.5 * e, 3.5 * e), QPointF(7.5 * e, 5.5 * e))
+        p.drawPolyline([QPointF(10.5 * e, 5.5 * e), QPointF(8 * e, 11 * e), QPointF(4 * e, 14.5 * e)])
+        p.drawLine(QPointF(6 * e, 8.5 * e), QPointF(11 * e, 13 * e))
     else:
         # desconocido: un punto, para no romper nada
         lleno()

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
@@ -43,7 +44,7 @@ Future<void> main() async {
     return true;
   };
   MediaKit.ensureInitialized();
-  SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
+  SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
     statusBarIconBrightness: Brightness.light,
     // iOS no mira statusBarIconBrightness: con fondo "oscuro" pone la hora y la
@@ -171,6 +172,18 @@ class _CaudalAppState extends State<CaudalApp> {
     Catalogo.fijarRegion(ajustes.texto('region'));
     MotorLocal.bitrateMp3 = ajustes.texto('bitrate_mp3');
     ajustes.addListener(() => MotorLocal.bitrateMp3 = ajustes.texto('bitrate_mp3'));
+    // el aspecto elegido (color y fondo); al cambiarlo se repinta toda la app
+    var aspecto = '${ajustes.texto('acento')}|${ajustes.texto('fondo')}';
+    Aspecto.aplicar(ajustes.texto('acento'), ajustes.texto('fondo'));
+    ajustes.addListener(() {
+      final nuevo = '${ajustes.texto('acento')}|${ajustes.texto('fondo')}';
+      if (nuevo == aspecto) return;
+      aspecto = nuevo;
+      Aspecto.aplicar(ajustes.texto('acento'), ajustes.texto('fondo'));
+      if (mounted) setState(() {});
+      // los widgets que leen los colores directamente se vuelven a construir
+      WidgetsBinding.instance.reassembleApplication();
+    });
     Diagnostico.marcar('biblioteca');
     final coleccion = await _paso('biblioteca', Coleccion.abrir(c.id));
     Diagnostico.marcar('reproductor');
@@ -292,6 +305,10 @@ class _CaudalAppState extends State<CaudalApp> {
       title: 'Caudal',
       debugShowCheckedModeBanner: false,
       theme: temaCaudal(),
+      // calendario, menus y botones del sistema en español
+      locale: const Locale('es'),
+      supportedLocales: const [Locale('es'), Locale('en')],
+      localizationsDelegates: GlobalMaterialLocalizations.delegates,
       navigatorKey: _navegador,
       scaffoldMessengerKey: _mensajero,
       home: AnimatedSwitcher(
@@ -352,7 +369,7 @@ class _FalloArranque extends StatelessWidget {
             padding: const EdgeInsets.all(28),
             child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-              const Icon(Icons.wifi_tethering_error_rounded, size: 56, color: C.acento),
+              Icon(Icons.wifi_tethering_error_rounded, size: 56, color: C.acento),
               const SizedBox(height: 18),
               const Text('No pudimos abrir tu música', textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
@@ -384,7 +401,7 @@ class _Arranque extends StatelessWidget {
             width: 74, height: 74,
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(22),
-              gradient: const LinearGradient(colors: [C.acento, C.violeta],
+              gradient: LinearGradient(colors: [C.acento, C.violeta],
                   begin: Alignment.topLeft, end: Alignment.bottomRight),
             ),
             child: const Icon(Icons.waves_rounded, size: 40, color: Colors.white),
@@ -404,7 +421,7 @@ class _PantallaTraba extends StatelessWidget {
         backgroundColor: C.fondo,
         body: SafeArea(
           child: ListView(padding: const EdgeInsets.fromLTRB(24, 40, 24, 24), children: [
-            const Icon(Icons.healing_rounded, size: 52, color: C.acento),
+            Icon(Icons.healing_rounded, size: 52, color: C.acento),
             const SizedBox(height: 16),
             const Text('Caudal se trabó al abrir', textAlign: TextAlign.center,
                 style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),

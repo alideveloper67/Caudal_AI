@@ -9,6 +9,7 @@ import '../nucleo/coleccion.dart';
 import '../nucleo/cuentas.dart';
 import '../nucleo/descargas.dart';
 import '../nucleo/modelos.dart';
+import '../nucleo/recomendador.dart';
 import '../nucleo/sincronizacion.dart';
 import '../nucleo/streams.dart';
 import '../reproduccion/reproductor.dart';
@@ -16,6 +17,7 @@ import 'comunes.dart';
 import 'paginas/artista.dart';
 import 'paginas/coleccion_pagina.dart';
 import 'paginas/genero.dart';
+import 'paginas/mensajes_pagina.dart';
 import 'paginas/reproductor_pagina.dart';
 import 'plataforma.dart';
 import 'tema.dart';
@@ -151,6 +153,9 @@ class Servicios {
         return _comoPistas((await Catalogo.radio(playlistId: '${el['id']}'))['pistas']);
       case 'mix':
         return _comoPistas(el['pistas']);       // los mixes diarios ya traen sus canciones
+      case 'similares':
+        final pista = el['pista'] is Map ? Map<String, dynamic>.from(el['pista'] as Map) : <String, dynamic>{};
+        return _comoPistas((await Recomendador.similares(coleccion, pista))['pistas']);
       case 'artista':
         final a = await Catalogo.artista('${el['id']}');
         return [
@@ -185,7 +190,7 @@ class Servicios {
         return;
       case 'artista':
         pagina = ArtistaPagina(id: '${el['id']}');
-      case 'album' || 'lista' || 'mi_lista' || 'me_gusta' || 'descargados' || 'mix':
+      case 'album' || 'lista' || 'mi_lista' || 'me_gusta' || 'descargados' || 'mix' || 'similares':
         pagina = ColeccionPagina(elemento: el);
       case 'genero' || 'pagina':
         if ('${el['id'] ?? ''}'.isEmpty) return;
@@ -230,7 +235,7 @@ class Servicios {
             child: Text('Añadir a una lista', style: estiloTituloSeccion),
           ),
           ListTile(
-            leading: const CircleAvatar(backgroundColor: C.superficie3, child: Icon(Icons.add, color: C.texto)),
+            leading: CircleAvatar(backgroundColor: C.superficie3, child: Icon(Icons.add, color: C.texto)),
             title: const Text('Nueva lista', style: TextStyle(fontWeight: FontWeight.w700)),
             onTap: () => Navigator.pop(ctx, -1),
           ),
@@ -366,6 +371,11 @@ class Servicios {
               if (vid.isNotEmpty)
                 _opcion(Icons.radio_rounded, 'Iniciar radio', () => hacer(() => reproductor.iniciarRadio(pista))),
               if (vid.isNotEmpty)
+                _opcion(Icons.auto_awesome_rounded, 'Canciones similares', () => hacer(() => abrirElemento(context, {
+                      'tipo': 'similares', 'id': vid, 'titulo': 'Similares a «${pista['titulo']}»',
+                      'miniatura': '${pista['miniatura'] ?? ''}', 'pista': pista,
+                    }))),
+              if (vid.isNotEmpty)
                 _opcion(Icons.download_rounded, coleccion.estaDescargada(pista) ? 'Descargar otra vez (otro formato)' : 'Descargar',
                     () => hacer(() => hojaDescargar(context, [pista]))),
               for (final a in artistas)
@@ -373,6 +383,8 @@ class Servicios {
                     () => hacer(() => irAArtista(context, '${a['id']}'))),
               if ('${album['id'] ?? ''}'.isNotEmpty)
                 _opcion(Icons.album_rounded, 'Ir al álbum', () => hacer(() => irAAlbum(context, '${album['id']}'))),
+              if (vid.isNotEmpty)
+                _opcion(Icons.send_rounded, 'Enviar en un chat', () => hacer(() => enviarPistaAChat(context, pista))),
               if (enlace.isNotEmpty)
                 _opcion(Icons.share_rounded, 'Compartir', () => hacer(() => SharePlus.instance
                     .share(ShareParams(text: '${pista['titulo']} — ${pista['artista']}\n$enlace')))),

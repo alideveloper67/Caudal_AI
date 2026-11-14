@@ -187,14 +187,14 @@ class FilaPista extends StatelessWidget {
                   const SizedBox(height: 3),
                   Row(children: [
                     if (descargada) ...[
-                      const Icon(Icons.download_for_offline_rounded, size: 14, color: C.acento),
+                      Icon(Icons.download_for_offline_rounded, size: 14, color: C.acento),
                       const SizedBox(width: 4),
                     ],
                     if (pista['explicito'] == true) ...[
                       Container(
                         padding: const EdgeInsets.symmetric(horizontal: 3),
                         decoration: BoxDecoration(color: C.texto2, borderRadius: BorderRadius.circular(2)),
-                        child: const Text('E', style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w900, color: C.panel)),
+                        child: Text('E', style: TextStyle(fontSize: 9.5, fontWeight: FontWeight.w900, color: C.panel)),
                       ),
                       const SizedBox(width: 5),
                     ],
@@ -210,7 +210,7 @@ class FilaPista extends StatelessWidget {
                   ]),
                 ]),
               ),
-              if (gusta) const Padding(
+              if (gusta) Padding(
                 padding: EdgeInsets.only(left: 6),
                 child: Icon(Icons.favorite_rounded, color: C.acento, size: 18),
               ),

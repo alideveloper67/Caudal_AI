@@ -1,0 +1,253 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Caudal — Entiende lo que cantas</title>
+<meta name="description" content="Caudal es un reproductor de música y videos con letras traducidas línea a línea, mezclas con tus amigos y recomendaciones que aprenden de ti. Android, iPhone y Windows.">
+<meta property="og:title" content="Caudal — Entiende lo que cantas">
+<meta property="og:description" content="Letras traducidas, mezclas con amigos y música que aprende de ti. Android, iPhone y Windows.">
+<meta property="og:image" content="https://caudal-musica.netlify.app/icono.png">
+<meta name="theme-color" content="#061A2B">
+<link rel="icon" href="favicon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=Figtree:wght@400;500;600;700&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="estilos.css">
+<link rel="stylesheet" href="inicio.css">
+</head>
+<body class="inicio">
+
+<header class="barra">
+  <div class="contenedor">
+    <a class="marca" href="#"><img src="icono.png" alt="">Caudal</a>
+    <nav>
+      <a href="#amigos">Con amigos</a>
+      <a href="#descubrir">Descubrir</a>
+      <a href="#descargar">Descargar</a>
+    </nav>
+    <a class="boton" href="#descargar">Descargar gratis</a>
+  </div>
+</header>
+
+<main>
+  <!-- ===================== portada: la letra viva ===================== -->
+  <section class="portada">
+    <svg class="rio" viewBox="0 0 1440 560" preserveAspectRatio="none" aria-hidden="true">
+      <path d="M0 380 C 240 330, 420 430, 720 380 S 1200 320, 1440 370" />
+      <path d="M0 420 C 260 380, 460 470, 760 420 S 1220 360, 1440 410" />
+      <path d="M0 460 C 280 430, 500 510, 800 460 S 1240 400, 1440 450" />
+    </svg>
+    <div class="contenedor portada-rejilla">
+      <div class="portada-texto">
+        <p class="antetitulo">Reproductor de música para Android, iPhone y Windows</p>
+        <h1>Entiende<br>lo que <span class="subrayado">cantas</span>.</h1>
+        <p class="lema">La letra sigue a la canción y, debajo de cada línea, su traducción al español. Además, mezclas con tus amigos, recomendaciones que aprenden de lo que saltas y la misma cuenta en el teléfono y en la computadora.</p>
+        <div class="acciones">
+          <a class="boton grande" href="#descargar">Descargar gratis</a>
+          <a class="enlace-flecha" href="#amigos">Ver qué más hace →</a>
+        </div>
+      </div>
+
+      <figure class="letra-viva" aria-label="Ejemplo de letra con traducción">
+        <div class="letra-cabecera">
+          <div class="disco" aria-hidden="true"></div>
+          <div>
+            <strong>Running Out of River</strong>
+            <span>Canción de ejemplo</span>
+          </div>
+          <span class="chip-traducir">Traducir</span>
+        </div>
+        <ol class="versos" id="versos">
+          <li data-t="0:41"><span class="ori">We were the river</span><span class="tra">Éramos el río</span></li>
+          <li data-t="0:44"><span class="ori">running out of time</span><span class="tra">quedándonos sin tiempo</span></li>
+          <li data-t="0:48"><span class="ori">you sang it louder</span><span class="tra">tú lo cantaste más fuerte</span></li>
+          <li data-t="0:51"><span class="ori">and the night was mine</span><span class="tra">y la noche era mía</span></li>
+          <li data-t="0:55"><span class="ori">hold on to the current</span><span class="tra">aférrate a la corriente</span></li>
+        </ol>
+        <div class="letra-pie">
+          <span class="tiempo" id="tiempo">0:41</span>
+          <div class="barra-tiempo"><i id="avance"></i></div>
+          <span class="tiempo">3:28</span>
+        </div>
+      </figure>
+    </div>
+  </section>
+
+  <!-- ===================== con amigos ===================== -->
+  <section class="amigos" id="amigos">
+    <div class="contenedor amigos-rejilla">
+      <div class="amigos-texto">
+        <p class="antetitulo">Con tus amigos</p>
+        <h2>Pásale la canción. Descubran en qué se parecen.</h2>
+        <p>Escríbele a cualquiera por su usuario de Caudal y mándale lo que estás oyendo: lo escucha con un toque. Con <strong>Mezcla</strong>, Caudal junta lo que más escuchan los dos en una sola lista y les dice cuánto coinciden.</p>
+        <p>¿Están lejos? Abran una sala en <strong>Escuchar juntos</strong>: suena lo mismo, al mismo segundo, en todos los teléfonos y computadoras, con chat y reacciones.</p>
+      </div>
+
+      <div class="escena-chat" aria-hidden="true">
+        <div class="chat-cab"><span class="avatar">V</span><div><b>Valeria</b><small>@vale.rios</small></div><span class="pastilla">Mezcla</span></div>
+        <div class="burbuja suya">¿ya escuchaste lo nuevo? 🔥</div>
+        <div class="burbuja mia cancion">
+          <span class="tapa t1"></span>
+          <span><b>Marea Alta</b><small>Los Delfines del Sur</small></span>
+          <span class="play">▶</span>
+        </div>
+        <div class="burbuja suya">ponla en la sala 😂 ya entro</div>
+        <div class="mezcla">
+          <div class="anillo-caja"><div class="anillo" style="--p:72"></div><span>72%</span></div>
+          <div>
+            <b>Tu mezcla con Valeria</b>
+            <small>Coinciden en un 72 % · Los dos escuchan cumbia y rock en español</small>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== descubrir ===================== -->
+  <section class="descubrir" id="descubrir">
+    <div class="contenedor">
+      <div class="descubrir-cab">
+        <p class="antetitulo">Hecho a tu medida</p>
+        <h2>Cuanto más escuchas, mejor te conoce.</h2>
+      </div>
+      <div class="escenas">
+        <article class="escena">
+          <div class="vineta pila" aria-hidden="true">
+            <span class="tapa t2"></span><span class="tapa t3"></span><span class="tapa t4"></span>
+          </div>
+          <h3>Descubre para ti</h3>
+          <p>Cada día, canciones que todavía no has oído, elegidas por lo que escuchas. Si saltas algo antes de los 30 segundos, Caudal lo aprende.</p>
+        </article>
+        <article class="escena">
+          <div class="vineta tiempo-linea" aria-hidden="true">
+            <span><b>Hace un año</b>nov 2025</span>
+            <span><b>Hace seis meses</b>may 2026</span>
+            <span class="ahora"><b>Hoy</b>nov 2026</span>
+          </div>
+          <h3>Máquina del tiempo</h3>
+          <p>Vuelve a lo que sonaba en tu vida hace un mes, tres, seis o un año, con las canciones que más repetías entonces.</p>
+        </article>
+        <article class="escena">
+          <div class="vineta similares" aria-hidden="true">
+            <svg viewBox="0 0 300 190" preserveAspectRatio="xMidYMid meet">
+              <path d="M110 95 C 150 95, 160 45, 205 45" /><path d="M110 95 L 205 95" /><path d="M110 95 C 150 95, 160 145, 205 145" />
+            </svg>
+            <span class="tapa semilla t1"></span>
+            <span class="tapa hija h1 t2"></span><span class="tapa hija h2 t3"></span><span class="tapa hija h3 t4"></span>
+          </div>
+          <h3>Canciones similares</h3>
+          <p>Desde cualquier canción, una lista de otras que suenan parecido: mezcla varias radios y prioriza lo que encaja con tu gusto.</p>
+        </article>
+      </div>
+
+      <ul class="lista-mas">
+        <li><b>Trae tus listas</b> de Spotify, Apple Music y YouTube Music con su enlace.</li>
+        <li><b>Importa tu música</b>: las canciones que ya tienes en el teléfono o en la PC.</li>
+        <li><b>Descarga</b> en MP3, M4A o FLAC, y videos hasta 4K, para oír sin internet.</li>
+        <li><b>Ecualizador, súper volumen</b> y transiciones como un DJ.</li>
+        <li><b>Temporizador para dormir</b> que baja el volumen poco a poco.</li>
+        <li><b>Tu estilo</b>: ocho colores y seis fondos para la app.</li>
+      </ul>
+    </div>
+  </section>
+
+  <!-- ===================== descargar ===================== -->
+  <section class="descargar" id="descargar">
+    <div class="contenedor">
+      <h2>Descárgala gratis.</h2>
+      <p class="sub" id="sugerencia">Una sola cuenta para el teléfono y la computadora. Sin anuncios.</p>
+      <div class="plataformas">
+        <a class="plataforma" data-so="android" href="https://github.com/alideveloper67/Caudal_AI/releases?q=movil&expanded=true">
+          <span class="so">Android</span>
+          <span class="detalle">Android 7 o superior · archivo «arm64-v8a»</span>
+          <span class="ir">Descargar →</span>
+        </a>
+        <a class="plataforma" data-so="windows" href="https://github.com/alideveloper67/Caudal_AI/releases?q=escritorio&expanded=true">
+          <span class="so">Windows</span>
+          <span class="detalle">Windows 10 y 11 · «CaudalInstalador.exe»</span>
+          <span class="ir">Descargar →</span>
+        </a>
+        <a class="plataforma" data-so="ios" href="https://github.com/alideveloper67/Caudal_AI/releases?q=movil&expanded=true">
+          <span class="so">iPhone</span>
+          <span class="detalle">iOS 15 o superior · pronto en el App Store</span>
+          <span class="ir">Ver la versión →</span>
+        </a>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===================== preguntas ===================== -->
+  <section class="preguntas-sec">
+    <div class="contenedor preguntas-rejilla">
+      <h2>Lo que suelen preguntar</h2>
+      <div>
+        <details>
+          <summary>¿Cuesta algo?</summary>
+          <p>No. Caudal es gratis y no muestra anuncios.</p>
+        </details>
+        <details>
+          <summary>¿Para qué necesito una cuenta?</summary>
+          <p>Para que tus listas, tus me gusta y tu historial estén iguales en el teléfono y en la computadora, y para chatear con tus amigos.</p>
+        </details>
+        <details>
+          <summary>¿Qué hacen con mis datos?</summary>
+          <p>Los usamos para que la app funcione y para recomendarte música. Compartir estadísticas anónimas es opcional y lo puedes quitar cuando quieras. Está todo en la <a href="privacidad.html">Política de privacidad</a>.</p>
+        </details>
+        <details>
+          <summary>¿Cómo borro mi cuenta?</summary>
+          <p>En la app, en Ajustes → Privacidad → «Eliminar mi cuenta», o desde <a href="eliminar-cuenta.html">esta página</a>. Se borra todo al momento.</p>
+        </details>
+      </div>
+    </div>
+  </section>
+</main>
+
+<footer class="pie">
+  <div class="contenedor">
+    <a class="marca" href="#"><img src="icono.png" alt="">Caudal</a>
+    <span>© 2026 Caudal</span>
+    <nav>
+      <a href="terminos.html">Términos y condiciones</a>
+      <a href="privacidad.html">Política de privacidad</a>
+      <a href="eliminar-cuenta.html">Eliminar mi cuenta</a>
+      <a href="https://github.com/alideveloper67/Caudal_AI/issues">Soporte</a>
+    </nav>
+  </div>
+</footer>
+
+<script>
+// La letra viva: cada línea se va llenando y la siguiente toma el relevo.
+(function () {
+  const versos = [...document.querySelectorAll('#versos li')];
+  const tiempo = document.getElementById('tiempo');
+  const avance = document.getElementById('avance');
+  const quieto = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let i = 0;
+  function cantar() {
+    versos.forEach((v, k) => v.className = k < i ? 'cantado' : k === i ? 'sonando' : '');
+    tiempo.textContent = versos[i].dataset.t;
+    const [m, s] = versos[i].dataset.t.split(':').map(Number);
+    avance.style.width = ((m * 60 + s) / 208 * 100).toFixed(1) + '%';
+    i = (i + 1) % versos.length;
+  }
+  if (quieto) { i = 1; cantar(); return; }
+  cantar();
+  setInterval(cantar, 2600);
+})();
+
+// Recomienda la descarga de tu sistema.
+(function () {
+  const ua = navigator.userAgent;
+  const so = /android/i.test(ua) ? 'android' : /iphone|ipad|ipod/i.test(ua) ? 'ios' : /windows/i.test(ua) ? 'windows' : '';
+  const nombres = { android: 'Android', ios: 'iPhone', windows: 'Windows' };
+  if (!so) return;
+  const tarjeta = document.querySelector(`.plataforma[data-so="${so}"]`);
+  tarjeta.classList.add('tuya');
+  tarjeta.parentNode.prepend(tarjeta);
+  document.getElementById('sugerencia').textContent =
+    `Estás en ${nombres[so]}: te dejamos su versión primero. Una sola cuenta para todo, sin anuncios.`;
+})();
+</script>
+</body>
+</html>

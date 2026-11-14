@@ -234,6 +234,62 @@ class Contexto(QObject):
         else:
             self.aviso.emit(f"Añadido a «{lista.get('nombre', '')}»")
 
+    def importar_de_pc(self):
+        """Traer canciones que ya tienes en la PC: quedan en «En tu disco» y,
+        si quieres, en una lista nueva o en una de las tuyas."""
+        from pathlib import Path
+        from PySide6.QtWidgets import QFileDialog
+        from ..coleccion import pista_de_descarga
+        rutas, _f = QFileDialog.getOpenFileNames(
+            self.ventana, "Elige tus canciones", str(Path.home() / "Music"),
+            "Audio (*.mp3 *.m4a *.aac *.flac *.wav *.ogg *.opus *.wma *.webm *.aiff);;Todos (*.*)")
+        if not rutas:
+            return
+        pistas = []
+        for ruta in rutas:
+            titulo, artista, duracion = Path(ruta).stem, "", 0
+            try:
+                import mutagen
+                m = mutagen.File(ruta, easy=True)
+                if m is not None:
+                    titulo = (m.get("title") or [titulo])[0] or titulo
+                    artista = (m.get("artist") or m.get("albumartist") or [""])[0]
+                    duracion = int(getattr(m.info, "length", 0) or 0)
+            except Exception:  # noqa: BLE001
+                pass
+            if not artista and " - " in titulo:
+                artista, titulo = [x.strip() for x in titulo.split(" - ", 1)]
+            ya = self.historial.con.execute(
+                "SELECT * FROM descargas WHERE archivo = ? AND estado = 'completada'", (ruta,)).fetchone()
+            if ya is None:
+                ident = self.historial.agregar(Path(ruta).as_uri(), titulo, "En tu PC", ruta,
+                                               tamano=os.path.getsize(ruta), duracion=duracion,
+                                               calidad=Path(ruta).suffix.lstrip(".").upper(),
+                                               es_audio=True, autor=artista)
+                ya = self.historial.con.execute("SELECT * FROM descargas WHERE id = ?", (ident,)).fetchone()
+            pistas.append(pista_de_descarga(dict(ya)))
+        self.coleccion.invalidar_indice()
+        self.descargas_cambio.emit()
+        caja = QMessageBox(self.ventana)
+        caja.setWindowTitle("Caudal")
+        caja.setText(f"{len(pistas)} {'canción importada' if len(pistas) == 1 else 'canciones importadas'}. "
+                     "Ya están en «En tu disco». ¿Dónde más las pones?")
+        nueva = caja.addButton("En una lista nueva solo con ellas", QMessageBox.AcceptRole)
+        existente = caja.addButton("En una de mis listas", QMessageBox.ActionRole)
+        caja.addButton("Así está bien", QMessageBox.RejectRole)
+        caja.exec()
+        if caja.clickedButton() is nueva:
+            self.anadir_a_lista(pistas, None)
+        elif caja.clickedButton() is existente:
+            listas = self.coleccion.listas()
+            if not listas:
+                self.anadir_a_lista(pistas, None)
+                return
+            nombres = [l["nombre"] for l in listas]
+            elegida, ok = QInputDialog.getItem(self.ventana, "Caudal", "¿En qué lista?", nombres, 0, False)
+            if ok:
+                self.anadir_a_lista(pistas, listas[nombres.index(elegida)]["id"])
+
     def crear_lista(self):
         nombre = self.coleccion.nombre_libre()
         try:
@@ -323,6 +379,20 @@ class Contexto(QObject):
             sub.addAction(l["nombre"], lambda i=l["id"]: self.anadir_a_lista(pistas, i))
         return sub
 
+    def abrir_similares(self, pista):
+        from .. import recomendador as rc
+        from ..hilos import en_segundo_plano
+        self.aviso.emit("Buscando canciones similares…")
+        en_segundo_plano(rc.similares, self.coleccion, pista,
+                         ok=lambda m: self.navegar({"pagina": "mix", "id": m["id"], "el": m})
+                         if m.get("pistas") else self.aviso.emit("No se encontraron canciones parecidas."),
+                         error=lambda _e: self.aviso.emit("No se pudo conectar. Revisa tu internet."),
+                         dueno=self)
+
+    def enviar_a_chat(self, pista):
+        from .paginas.mensajes import enviar_pista_a_chat
+        enviar_pista_a_chat(self, pista)
+
     def menu_pista(self, pista, pos, extra=None):
         menu = QMenu(self.ventana)
         r = self.reproductor
@@ -335,6 +405,10 @@ class Contexto(QObject):
         if pista.get("video_id"):
             menu.addAction(iconos.icono("radio", 16, C["texto2"]), "Iniciar radio de la canción",
                            lambda: r.iniciar_radio(pista))
+            menu.addAction(iconos.icono("estrella", 16, C["texto2"]), "Canciones similares",
+                           lambda: self.abrir_similares(pista))
+            menu.addAction(iconos.icono("compartir", 16, C["texto2"]), "Enviar en un chat…",
+                           lambda: self.enviar_a_chat(pista))
             if not pista.get("es_video") or pista.get("archivo"):
                 menu.addAction(iconos.icono("video", 16, C["texto2"]), "Ver el video",
                                lambda: self.ver_video(pista))

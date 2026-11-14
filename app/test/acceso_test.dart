@@ -36,8 +36,24 @@ void main() {
     await t.enterText(campos.at(1), 'kevin');
     await t.enterText(campos.at(2), 'secreto1');
     await t.enterText(campos.at(3), 'secreto2');
+    await t.ensureVisible(find.text('Crear mi cuenta'));
     await t.tap(find.text('Crear mi cuenta'));
     await t.pump(const Duration(milliseconds: 300));
     expect(find.text('Las dos contraseñas no coinciden.'), findsOneWidget);
+  });
+
+  testWidgets('sin fecha de nacimiento ni términos no deja crear la cuenta', (t) async {
+    await _montar(t, const Size(1080, 2400));
+    final campos = find.byType(TextField);
+    await t.enterText(campos.at(0), 'Kevin Pérez');
+    await t.enterText(campos.at(1), 'kevin');
+    await t.enterText(campos.at(2), 'secreto1');
+    await t.enterText(campos.at(3), 'secreto1');
+    await t.ensureVisible(find.text('Crear mi cuenta'));
+    await t.tap(find.text('Crear mi cuenta'));
+    await t.pump(const Duration(milliseconds: 300));
+    expect(find.text('Elige tu fecha de nacimiento.'), findsOneWidget);
+    expect(find.textContaining('Política de privacidad', findRichText: true), findsWidgets);
+    expect(find.text('Compartir mis datos de uso anónimos (opcional)'), findsOneWidget);
   });
 }

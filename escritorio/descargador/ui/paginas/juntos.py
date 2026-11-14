@@ -11,13 +11,23 @@ import random
 
 from PySide6.QtCore import (QEasingCurve, QParallelAnimationGroup, QPoint, QPropertyAnimation,
                             Qt, QObject, Signal)
-from PySide6.QtGui import QFont, QGuiApplication
-from PySide6.QtWidgets import (QFrame, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QLineEdit,
-                               QListWidget, QListWidgetItem, QMenu, QPushButton, QStackedWidget,
-                               QVBoxLayout, QWidget)
+import time
+
+from PySide6.QtGui import QFont, QGuiApplication, QIcon
+from PySide6.QtWidgets import (QFrame, QGraphicsOpacityEffect, QGridLayout, QHBoxLayout, QLabel,
+                               QLineEdit, QMenu, QPushButton, QScrollArea,
+                               QStackedWidget, QToolButton, QVBoxLayout, QWidget, QWidgetAction)
 
 from ... import juntos as J
-from ..estilos import C
+from .. import iconos
+from ..componentes import Portada, _borrar_layout
+from ..estilos import C, hoja
+
+# Los que salen al tocar el botón de emojis del chat (el teclado de Windows
+# también los tiene con Win + .).
+EMOJIS_CHAT = ["😀", "😂", "🤣", "😊", "😍", "🥰", "😘", "😎", "🤩", "🥳", "😮", "😢", "😭", "😡",
+               "🤔", "🙄", "😴", "🤯", "🙌", "👏", "👍", "👎", "🙏", "💪", "🔥", "❤️", "💔", "💯",
+               "🎵", "🎶", "🎧", "🎤", "🎸", "🥁", "🎹", "🕺", "💃", "🎉", "✨", "⭐"]
 
 
 def _nombre_por_defecto(ctx):
@@ -37,6 +47,7 @@ class GestorJuntos(QObject):
     """La sala abierta en la app (una a la vez)."""
     cambio = Signal()                     # entró, salió, cambió la lista…
     reaccion = Signal(str, str, bool)     # emoji, nombre, de_mi
+    chat = Signal(dict)                   # mensaje del chat de la sala
     error = Signal(str)
 
     def __init__(self, ctx, padre=None):
@@ -58,6 +69,7 @@ class GestorJuntos(QObject):
         s.abierta.connect(lambda err, s=s: self._abierta(s, err))
         s.cambio.connect(self.cambio.emit)
         s.reaccion.connect(self.reaccion.emit)
+        s.chat.connect(self.chat.emit)
         self.sala_qt = s
         self.abriendo = True
         self.cambio.emit()
@@ -267,20 +279,59 @@ class PaginaJuntos(QWidget):
     # ------------------------------------------------------------ sala
     def _hacer_sala(self):
         w = QWidget()
-        v = QVBoxLayout(w)
-        v.setContentsMargins(0, 0, 0, 0)
-        v.setSpacing(12)
+        h = QHBoxLayout(w)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(16)
 
-        caja = self._caja(v)
-        et = QLabel("Código de la sala")
-        et.setObjectName("ayuda")
-        caja.addWidget(et)
+        # ---- izquierda: lo que suena, quién está y las reacciones
+        izq = QVBoxLayout()
+        izq.setSpacing(12)
+        h.addLayout(izq, 3)
+
+        tarjeta = QFrame()
+        tarjeta.setObjectName("tarjeta_suena")
+        tarjeta.setStyleSheet(
+            "QFrame#tarjeta_suena{border-radius:18px;"
+            f"background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 #1f2a4a,stop:1 {C['superficie']});}}")
+        ht = QHBoxLayout(tarjeta)
+        ht.setContentsMargins(18, 18, 18, 18)
+        ht.setSpacing(16)
+        self.portada = Portada(120, radio=12)
+        ht.addWidget(self.portada)
+        vt = QVBoxLayout()
+        vt.setSpacing(4)
+        self.et_suena_eti = QLabel("AHORA SUENA")
+        self.et_suena_eti.setStyleSheet(f"color:{C['acento']};font-size:11px;font-weight:800;"
+                                        "letter-spacing:1px;background:transparent;")
+        vt.addWidget(self.et_suena_eti)
+        self.et_titulo = QLabel("")
+        self.et_titulo.setWordWrap(True)
+        self.et_titulo.setStyleSheet("font-size:22px;font-weight:900;background:transparent;")
+        vt.addWidget(self.et_titulo)
+        self.et_artista = QLabel("")
+        self.et_artista.setStyleSheet(f"color:{C['texto2']};font-size:14px;background:transparent;")
+        vt.addWidget(self.et_artista)
+        vt.addStretch(1)
+        self.et_estado = QLabel("")
+        self.et_estado.setWordWrap(True)
+        self.et_estado.setStyleSheet(f"color:{C['texto2']};font-size:12.5px;background:transparent;")
+        vt.addWidget(self.et_estado)
+        ht.addLayout(vt, 1)
+        izq.addWidget(tarjeta)
+
+        # código de la sala, compacto
+        caja = self._caja(izq)
         fila = QHBoxLayout()
+        col = QVBoxLayout()
+        col.setSpacing(0)
+        et = QLabel("Código para invitar")
+        et.setObjectName("ayuda")
+        col.addWidget(et)
         self.et_codigo = QLabel("")
         self.et_codigo.setTextInteractionFlags(Qt.TextSelectableByMouse)
-        self.et_codigo.setStyleSheet(f"font-size:34px;font-weight:700;letter-spacing:6px;"
-                                     f"color:{C['acento']};")
-        fila.addWidget(self.et_codigo)
+        self.et_codigo.setStyleSheet(f"font-size:28px;font-weight:800;letter-spacing:5px;color:{C['acento']};")
+        col.addWidget(self.et_codigo)
+        fila.addLayout(col)
         fila.addStretch(1)
         for texto, f in (("Copiar código", self._copiar_codigo), ("Copiar enlace", self._copiar_enlace)):
             b = QPushButton(texto)
@@ -289,44 +340,36 @@ class PaginaJuntos(QWidget):
             b.clicked.connect(f)
             fila.addWidget(b)
         caja.addLayout(fila)
-        self.et_estado = QLabel("")
-        self.et_estado.setObjectName("secundario")
-        self.et_estado.setWordWrap(True)
-        caja.addWidget(self.et_estado)
 
-        self.et_suena = QLabel("")
-        self.et_suena.setWordWrap(True)
-        self.et_suena.setStyleSheet("font-size:15px;")
-        v.addWidget(self.et_suena)
         self.et_aviso = QLabel("")
         self.et_aviso.setWordWrap(True)
         self.et_aviso.setStyleSheet(f"color:{C['aviso']};")
         self.et_aviso.hide()
-        v.addWidget(self.et_aviso)
+        izq.addWidget(self.et_aviso)
 
         t = QLabel("En la sala")
         t.setObjectName("titulo_seccion")
-        v.addWidget(t)
-        self.lista = QListWidget()
-        self.lista.setContextMenuPolicy(Qt.CustomContextMenu)
-        self.lista.customContextMenuRequested.connect(self._menu_miembro)
-        self.lista.setStyleSheet(f"QListWidget{{background:{C['superficie']};border:none;"
-                                 f"border-radius:10px;padding:6px;}}"
-                                 f"QListWidget::item{{padding:7px 8px;border-radius:6px;}}")
-        v.addWidget(self.lista, 1)
+        izq.addWidget(t)
+        self.caja_miembros = QWidget()
+        self.lay_miembros = QGridLayout(self.caja_miembros)
+        self.lay_miembros.setContentsMargins(0, 0, 0, 0)
+        self.lay_miembros.setHorizontalSpacing(10)
+        self.lay_miembros.setVerticalSpacing(10)
+        izq.addWidget(self.caja_miembros)
         self.et_ceder = QLabel("Clic derecho en alguien para pasarle el mando.")
         self.et_ceder.setObjectName("ayuda")
-        v.addWidget(self.et_ceder)
+        izq.addWidget(self.et_ceder)
+        izq.addStretch(1)
 
         emojis = QHBoxLayout()
         emojis.setSpacing(6)
         for e in J.EMOJIS:
             b = QPushButton(e)
             b.setCursor(Qt.PointingHandCursor)
-            b.setFixedSize(44, 40)
+            b.setFixedSize(46, 42)
             b.setToolTip("Mandar a todos")
-            b.setStyleSheet(f"QPushButton{{font-size:20px;background:{C['superficie2']};"
-                            f"border:none;border-radius:10px;}}"
+            b.setFont(_fuente_emoji(18))
+            b.setStyleSheet(f"QPushButton{{background:{C['superficie2']};border:none;border-radius:12px;}}"
                             f"QPushButton:hover{{background:{C['superficie3']};}}")
             b.clicked.connect(lambda _=False, e=e: self._reaccionar(e))
             emojis.addWidget(b)
@@ -336,8 +379,115 @@ class PaginaJuntos(QWidget):
         salir.setCursor(Qt.PointingHandCursor)
         salir.clicked.connect(self.g.salir)
         emojis.addWidget(salir)
-        v.addLayout(emojis)
+        izq.addLayout(emojis)
+
+        # ---- derecha: el chat de la sala
+        panel = QFrame()
+        panel.setObjectName("chat_sala")
+        panel.setStyleSheet(f"QFrame#chat_sala{{background:{C['panel']};border:1px solid {C['borde']};"
+                            "border-radius:16px;}")
+        panel.setMinimumWidth(300)
+        vp = QVBoxLayout(panel)
+        vp.setContentsMargins(14, 12, 14, 12)
+        vp.setSpacing(8)
+        tc = QLabel("Chat de la sala")
+        tc.setStyleSheet("font-size:16px;font-weight:800;background:transparent;")
+        vp.addWidget(tc)
+        self.scroll_chat = QScrollArea()
+        self.scroll_chat.setWidgetResizable(True)
+        self.scroll_chat.setFrameShape(QFrame.NoFrame)
+        self.scroll_chat.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.scroll_chat.setStyleSheet("background:transparent;")
+        self.interior_chat = QWidget()
+        self.interior_chat.setStyleSheet("background:transparent;")
+        self.lay_chat = QVBoxLayout(self.interior_chat)
+        self.lay_chat.setContentsMargins(0, 0, 4, 0)
+        self.lay_chat.setSpacing(6)
+        self.lay_chat.addStretch(1)
+        self.scroll_chat.setWidget(self.interior_chat)
+        vp.addWidget(self.scroll_chat, 1)
+        self.et_chat_vacio = QLabel("Aún no hay mensajes. ¡Saluda!")
+        self.et_chat_vacio.setObjectName("ayuda")
+        self.et_chat_vacio.setAlignment(Qt.AlignCenter)
+        self.lay_chat.insertWidget(0, self.et_chat_vacio)
+
+        entrada = QHBoxLayout()
+        entrada.setSpacing(6)
+        self.bt_emoji = QToolButton()
+        self.bt_emoji.setText("😊")
+        self.bt_emoji.setFont(_fuente_emoji(15))
+        self.bt_emoji.setToolTip("Emojis")
+        self.bt_emoji.setCursor(Qt.PointingHandCursor)
+        self.bt_emoji.setPopupMode(QToolButton.InstantPopup)
+        self.bt_emoji.setStyleSheet(f"QToolButton{{background:{C['superficie2']};border:none;border-radius:10px;"
+                                    "padding:6px 8px;}QToolButton::menu-indicator{image:none;}")
+        self.bt_emoji.setMenu(menu_emojis(self, lambda e: self._poner_emoji(e)))
+        entrada.addWidget(self.bt_emoji)
+        self.campo_chat = QLineEdit()
+        self.campo_chat.setPlaceholderText("Escribe a la sala…")
+        self.campo_chat.setMaxLength(J.LARGO_CHAT)
+        self.campo_chat.setFont(_fuente_emoji(10.5))
+        self.campo_chat.returnPressed.connect(self._enviar_chat)
+        entrada.addWidget(self.campo_chat, 1)
+        enviar = QPushButton("Enviar")
+        enviar.setObjectName("principal")
+        enviar.setCursor(Qt.PointingHandCursor)
+        enviar.clicked.connect(self._enviar_chat)
+        entrada.addWidget(enviar)
+        vp.addLayout(entrada)
+        h.addWidget(panel, 2)
+
+        self.g.chat.connect(self._llega_chat)
+        self._chat_de = None
         return w
+
+    # ------------------------------------------------------------ chat
+    def _poner_emoji(self, e):
+        self.campo_chat.insert(e)
+        self.campo_chat.setFocus()
+
+    def _enviar_chat(self):
+        s = self.g.sala
+        if s and s.enviar_chat(self.campo_chat.text()):
+            self.campo_chat.clear()
+
+    def _llega_chat(self, m):
+        s = self.g.sala
+        mio = bool(s) and m.get("de") == s.mi_id
+        self.et_chat_vacio.hide()
+        burbuja = QLabel()
+        burbuja.setWordWrap(True)
+        burbuja.setTextFormat(Qt.RichText)
+        burbuja.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        burbuja.setFont(_fuente_emoji(10.5))
+        hora = time.strftime("%H:%M", time.localtime((m.get("t") or 0) / 1000))
+        quien = "" if mio else f"<b style='color:{C['acento']}'>{_html(m.get('nombre'))}</b><br>"
+        burbuja.setText(f"{quien}{_html(m.get('texto'))}"
+                        f"<span style='color:{'#2A5A66' if mio else C['texto3']};font-size:10px'>  {hora}</span>")
+        burbuja.setStyleSheet(
+            f"background:{C['acento'] if mio else C['superficie2']};color:{C['acento_texto'] if mio else C['texto']};"
+            "border-radius:12px;padding:7px 10px;")
+        burbuja.setMaximumWidth(260)
+        fila = QHBoxLayout()
+        fila.setContentsMargins(0, 0, 0, 0)
+        if mio:
+            fila.addStretch(1)
+        fila.addWidget(burbuja)
+        if not mio:
+            fila.addStretch(1)
+        self.lay_chat.insertLayout(self.lay_chat.count() - 1, fila)
+        barra = self.scroll_chat.verticalScrollBar()
+        from PySide6.QtCore import QTimer
+        QTimer.singleShot(30, lambda: barra.setValue(barra.maximum()))
+
+    def _vaciar_chat(self):
+        while self.lay_chat.count() > 2:
+            it = self.lay_chat.takeAt(1)
+            if it.layout():
+                _borrar_layout(it.layout())
+            elif it.widget():
+                it.widget().deleteLater()
+        self.et_chat_vacio.show()
 
     def _reaccionar(self, emoji):
         s = self.g.sala
@@ -356,18 +506,13 @@ class PaginaJuntos(QWidget):
             QGuiApplication.clipboard().setText(s.enlace)
             self.ctx.aviso.emit("Enlace copiado: ábrelo en el teléfono con Caudal")
 
-    def _menu_miembro(self, pos):
+    def _menu_miembro(self, caja, pos, mid, nombre):
         s = self.g.sala
-        it = self.lista.itemAt(pos)
-        if not s or it is None or not s.soy_anfitrion:
-            return
-        mid = it.data(Qt.UserRole)
-        if mid == s.mi_id:
+        if not s or not s.soy_anfitrion or mid == s.mi_id:
             return
         menu = QMenu(self)
-        menu.addAction(f"Pasarle el mando a {it.data(Qt.UserRole + 1)}",
-                       lambda: s.ceder_anfitrion(mid))
-        menu.exec(self.lista.viewport().mapToGlobal(pos))
+        menu.addAction(f"Pasarle el mando a {nombre}", lambda: s.ceder_anfitrion(mid))
+        menu.exec(caja.mapToGlobal(pos))
 
     # ------------------------------------------------------------ pintar
     def _pintar(self):
@@ -382,42 +527,71 @@ class PaginaJuntos(QWidget):
                 self.et_error.hide()
             return
         self.pilas.setCurrentIndex(1)
+        if self._chat_de is not s:
+            # otra sala: el chat empieza de cero (con lo que ya hubiera en esta)
+            self._chat_de = s
+            self._vaciar_chat()
+            for m in list(s.chat):
+                self._llega_chat(m)
         self.et_codigo.setText(s.codigo)
         anf = s.anfitrion
         if not s.conectado:
             estado = "Sin conexión con la sala: reconectando…"
         elif s.soy_anfitrion:
-            estado = "Tú pones la música: los demás oyen lo mismo que tú."
+            estado = "🎧 Tú pones la música: los demás oyen lo mismo que tú."
         elif anf is not None:
-            estado = f"Pone la música {anf.nombre}. Si tocas pausa o la barra, vuelves a su punto."
+            estado = f"🎧 Pone la música {anf.nombre}. Si tocas pausa o la barra, vuelves a su punto."
         else:
             estado = "Esperando a quien pone la música…"
         self.et_estado.setText(estado)
         p = s.pista_sala
         if p:
-            artista = p.get("artista") or ""
-            self.et_suena.setText(f"Suena: <b>{_html(p.get('titulo') or 'Sin título')}</b>"
-                                  + (f" · {_html(artista)}" if artista else ""))
+            self.et_suena_eti.setText("AHORA SUENA")
+            self.et_titulo.setText(p.get("titulo") or "Sin título")
+            self.et_artista.setText(p.get("artista") or "")
+            self.portada.set_url(p.get("miniatura") or "")
         else:
-            self.et_suena.setText("Ahora no suena nada.")
+            self.et_suena_eti.setText("EN SILENCIO")
+            self.et_titulo.setText("Ahora no suena nada")
+            self.et_artista.setText("Quien pone la música elige qué suena")
+            self.portada.set_url("")
         self.et_aviso.setText(s.aviso or "")
         self.et_aviso.setVisible(bool(s.aviso))
         self.et_ceder.setVisible(s.soy_anfitrion and len(s.miembros) > 1)
-        self.lista.clear()
-        for m in s.miembros:
-            texto = m.nombre
-            if m.id == s.mi_id:
-                texto += "  (tú)"
-            if m.usuario:
-                texto += f"   @{m.usuario}"
-            if m.id == s.anfitrion_id:
-                texto = "🎧  " + texto + "  · pone la música"
-            else:
-                texto = "      " + texto
-            it = QListWidgetItem(texto)
-            it.setData(Qt.UserRole, m.id)
-            it.setData(Qt.UserRole + 1, m.nombre)
-            self.lista.addItem(it)
+        _borrar_layout(self.lay_miembros)
+        for i, m in enumerate(s.miembros):
+            self.lay_miembros.addWidget(self._miembro(s, m), i // 3, i % 3)
+
+    def _miembro(self, s, m):
+        caja = QFrame()
+        caja.setObjectName("miembro")
+        es_dj = m.id == s.anfitrion_id
+        caja.setStyleSheet(f"QFrame#miembro{{background:{C['superficie']};border-radius:14px;"
+                           f"border:1px solid {C['acento'] if es_dj else C['borde']};}}")
+        caja.setContextMenuPolicy(Qt.CustomContextMenu)
+        caja.customContextMenuRequested.connect(
+            lambda pos, c=caja, mid=m.id, n=m.nombre: self._menu_miembro(c, pos, mid, n))
+        h = QHBoxLayout(caja)
+        h.setContentsMargins(10, 8, 12, 8)
+        h.setSpacing(10)
+        inicial = QLabel((m.nombre or "?")[:1].upper())
+        inicial.setFixedSize(36, 36)
+        inicial.setAlignment(Qt.AlignCenter)
+        inicial.setStyleSheet(f"background:{C['acento'] if es_dj else C['superficie3']};"
+                              f"color:{C['acento_texto'] if es_dj else C['texto']};border-radius:18px;"
+                              "font-weight:900;font-size:15px;")
+        h.addWidget(inicial)
+        col = QVBoxLayout()
+        col.setSpacing(0)
+        nombre = QLabel(m.nombre + ("  (tú)" if m.id == s.mi_id else ""))
+        nombre.setStyleSheet("font-weight:700;background:transparent;")
+        col.addWidget(nombre)
+        sub = QLabel("🎧 Pone la música" if es_dj else (f"@{m.usuario}" if m.usuario else "Escuchando"))
+        sub.setFont(_fuente_emoji(8.5))
+        sub.setStyleSheet(f"color:{C['acento'] if es_dj else C['texto3']};background:transparent;")
+        col.addWidget(sub)
+        h.addLayout(col, 1)
+        return caja
 
 
 def _html(t):
@@ -432,7 +606,13 @@ class VentanaJuntos(QWidget):
     def __init__(self, ctx, padre=None):
         super().__init__(padre, Qt.Window)
         self.setWindowTitle("Escuchar juntos · Caudal")
-        self.resize(560, 640)
+        self.setWindowIcon(QIcon(iconos.icono_app(256)))
+        # una ventana aparte no hereda el estilo de la principal: se le pone el suyo
+        self.setObjectName("raiz")
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setStyleSheet(hoja(iconos.flechas_qss()))
+        self.resize(1000, 680)
+        self.setMinimumSize(860, 600)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(0, 0, 0, 0)
         self.pagina = PaginaJuntos(ctx, self)
@@ -448,3 +628,33 @@ def abrir_ventana(ctx, padre=None):
     v.raise_()
     v.activateWindow()
     return v
+
+
+def _fuente_emoji(puntos):
+    """Texto normal y emojis a color (Segoe UI Emoji en Windows)."""
+    f = QFont()
+    f.setFamilies(["Segoe UI", "Segoe UI Emoji", "Noto Color Emoji", "Apple Color Emoji"])
+    f.setPointSizeF(puntos)
+    return f
+
+
+def menu_emojis(padre, al_elegir):
+    """Un menú con una rejilla de emojis (para el chat)."""
+    menu = QMenu(padre)
+    rejilla = QWidget()
+    lay = QGridLayout(rejilla)
+    lay.setContentsMargins(8, 8, 8, 8)
+    lay.setSpacing(2)
+    for i, e in enumerate(EMOJIS_CHAT):
+        b = QToolButton()
+        b.setText(e)
+        b.setFont(_fuente_emoji(16))
+        b.setAutoRaise(True)
+        b.setFixedSize(38, 38)
+        b.setCursor(Qt.PointingHandCursor)
+        b.clicked.connect(lambda _=False, e=e: (al_elegir(e), menu.close()))
+        lay.addWidget(b, i // 8, i % 8)
+    accion = QWidgetAction(menu)
+    accion.setDefaultWidget(rejilla)
+    menu.addAction(accion)
+    return menu

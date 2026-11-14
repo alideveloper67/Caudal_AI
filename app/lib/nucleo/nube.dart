@@ -1,7 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
+import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
 
 /// Conexion con Supabase: las cuentas y la biblioteca compartidas con Caudal
@@ -78,11 +80,14 @@ class Nube {
     return jsonDecode(r.body) == true;
   }
 
-  static Future<Sesion> registrar(String usuario, String clave, String nombre) async {
+  /// [extra]: aceptación de los términos y datos básicos (fecha de
+  /// nacimiento, país, género); el perfil los guarda al crearse.
+  static Future<Sesion> registrar(String usuario, String clave, String nombre,
+      {Map<String, dynamic> extra = const {}}) async {
     final r = await _peticion('POST', '/auth/v1/signup', cuerpo: {
       'email': correoDe(usuario),
       'password': clave,
-      'data': {'usuario': usuario.trim().toLowerCase(), 'nombre': nombre},
+      'data': {...extra, 'usuario': usuario.trim().toLowerCase(), 'nombre': nombre},
     });
     if (r.statusCode >= 300) throw _traducir(r);
     final d = jsonDecode(r.body) as Map<String, dynamic>;
@@ -96,6 +101,44 @@ class Nube {
     final r = await _peticion('POST', '/auth/v1/token?grant_type=password',
         cuerpo: {'email': correoDe(usuario), 'password': clave});
     if (r.statusCode >= 300) throw _traducir(r);
+    return Sesion.desde(jsonDecode(r.body) as Map<String, dynamic>);
+  }
+
+  // ------------------------------------------------------------ Google
+
+  /// A donde vuelve el navegador despues de elegir la cuenta de Google.
+  static const vueltaGoogle = 'caudal://acceso';
+
+  /// Codigo secreto de un solo uso (PKCE): el navegador se lleva su huella y
+  /// la app lo presenta al canjear; asi nadie mas puede usar el codigo.
+  static String nuevoVerificador() {
+    final r = Random.secure();
+    const letras = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~';
+    return List.generate(64, (_) => letras[r.nextInt(letras.length)]).join();
+  }
+
+  static Uri urlGoogle(String verificador) {
+    final huella = base64Url.encode(sha256.convert(ascii.encode(verificador)).bytes).replaceAll('=', '');
+    return Uri.parse('$url/auth/v1/authorize').replace(queryParameters: {
+      'provider': 'google',
+      'redirect_to': vueltaGoogle,
+      'code_challenge': huella,
+      'code_challenge_method': 's256',
+      'prompt': 'select_account',
+    });
+  }
+
+  /// Cambia el codigo que trae caudal://acceso?code=... por una sesion.
+  static Future<Sesion> canjearGoogle(String codigo, String verificador) async {
+    final r = await _peticion('POST', '/auth/v1/token?grant_type=pkce',
+        cuerpo: {'auth_code': codigo, 'code_verifier': verificador});
+    if (r.statusCode >= 300) {
+      final e = _traducir(r);
+      if (e.mensaje.contains('(4')) {
+        throw const ErrorNube('No se pudo terminar de entrar con Google. Vuelve a intentarlo.');
+      }
+      throw e;
+    }
     return Sesion.desde(jsonDecode(r.body) as Map<String, dynamic>);
   }
 

@@ -20,6 +20,9 @@ from .comun import Atajo, cache, guardar_cache, pintar_secciones
 _INTENTO_MIXES = {}
 
 
+_INTENTO_DESCUBRE = {}
+
+
 def saludo():
     h = time.localtime().tm_hour
     if 5 <= h < 12:
@@ -94,6 +97,8 @@ class PaginaInicio(Pagina):
                 self.zv.addWidget(Carrusel(ctx, "Volver a escuchar", recientes,
                                            subtitulo="lo último que sonó"))
             self._mixes_diarios()
+            self._descubre()
+            self._maquina_del_tiempo()
             self._banner_resumen()
             mixes = self._mixes()
             if mixes:
@@ -254,6 +259,64 @@ class PaginaInicio(Pagina):
             historial = mx.historial_para_mixes(col)
         en_segundo_plano(mx.construir, historial, mx.radio_catalogo,
                          ok=self._mixes_listos, error=lambda _e: None, dueno=self)
+
+    # ------------------------------------------------------------ hecho para ti
+
+    def _descubre(self):
+        """«Descubre para ti»: canciones nuevas elegidas por lo que escuchas."""
+        from PySide6.QtWidgets import QVBoxLayout
+        from ... import recomendador as rc
+        self.caja_descubre = QWidget()
+        self.v_descubre = QVBoxLayout(self.caja_descubre)
+        self.v_descubre.setContentsMargins(0, 0, 0, 0)
+        self.zv.addWidget(self.caja_descubre)
+        guardado = self.ctx.coleccion.estado(rc.CLAVE_DESCUBRE, None) or {}
+        from ... import mixes as mx
+        if guardado.get("dia") == mx.clave_dia(datetime.now()) and guardado.get("mix"):
+            self._pintar_descubre(guardado["mix"])
+            return
+        if time.time() - _INTENTO_DESCUBRE.get("t", 0) < 600:
+            return
+        _INTENTO_DESCUBRE["t"] = time.time()
+        en_segundo_plano(rc.descubrir, self.ctx.coleccion, ok=self._pintar_descubre,
+                         error=lambda _e: None, dueno=self)
+
+    def _pintar_descubre(self, mix):
+        if not mix:
+            return
+        try:
+            self._carrusel_de_mixes(self.v_descubre, "Hecho para ti",
+                                    "canciones que aún no has oído · se renueva cada día", [mix])
+        except RuntimeError:
+            pass
+
+    def _maquina_del_tiempo(self):
+        from ... import recomendador as rc
+        lista = rc.maquina_del_tiempo_de(self.ctx.coleccion)
+        if not lista:
+            return
+        from PySide6.QtWidgets import QVBoxLayout
+        caja = QWidget()
+        v = QVBoxLayout(caja)
+        v.setContentsMargins(0, 0, 0, 0)
+        self.zv.addWidget(caja)
+        self._carrusel_de_mixes(v, "Máquina del tiempo", "lo que escuchabas antes", lista)
+
+    def _carrusel_de_mixes(self, v, titulo, subtitulo, lista):
+        from ..componentes import _borrar_layout
+        _borrar_layout(v)
+        car = Carrusel(self.ctx, titulo, [], subtitulo=subtitulo)
+        fila = car.area.widget().layout()
+        alto = 0
+        for i, el in enumerate(lista):
+            tj = TarjetaMix(self.ctx, el)
+            tj.abrir.connect(lambda e: self.ctx.navegar({"pagina": "mix", "id": e["id"], "el": e}))
+            tj.reproducir.connect(lambda e: reproducir_mix(self.ctx, e))
+            tj.menu.connect(lambda e, pos: menu_mix(self.ctx, e, pos))
+            fila.insertWidget(i, tj)
+            alto = max(alto, tj.height())
+        car.area.setFixedHeight(alto + 2)
+        v.addWidget(car)
 
     def _mixes_listos(self, nuevos):
         from ... import mixes as mx
@@ -454,10 +517,13 @@ class PaginaMix(Pagina):
         super().__init__(ctx, padre, margen=(24, 0, 24, 32))
         from ... import mixes as mx
         self.destino = destino
-        guardados, _c = mx.guardados_de_hoy(ctx.coleccion)
-        if not guardados:
-            guardados = mx.construir(mx.historial_para_mixes(ctx.coleccion), radio=None)
-        self.el = next((m for m in guardados or [] if m.get("id") == destino.get("id")), None)
+        # «Descubre», «Similares», la máquina del tiempo o una mezcla traen ya sus canciones
+        self.el = destino.get("el")
+        if self.el is None:
+            guardados, _c = mx.guardados_de_hoy(ctx.coleccion)
+            if not guardados:
+                guardados = mx.construir(mx.historial_para_mixes(ctx.coleccion), radio=None)
+            self.el = next((m for m in guardados or [] if m.get("id") == destino.get("id")), None)
         if self.el is None:
             self.titulo = "Mix diario"
             self.error("Este mix ya no está: los mixes se renuevan cada día.",

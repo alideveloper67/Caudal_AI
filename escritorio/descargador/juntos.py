@@ -38,6 +38,22 @@ except ImportError:  # pragma: no cover - se avisa al abrir una sala
 
 DESFASE_MAXIMO_MS = 1500
 EMOJIS = ["❤️", "🔥", "😂", "😍", "👏", "🎉", "😮", "🕺"]
+
+# El chat de la sala: mensajes cortos que no se guardan en ningun sitio.
+# Quien pone la musica guarda los ultimos y se los pasa a quien entra.
+LARGO_CHAT = 500
+HISTORIAL_CHAT = 40
+
+
+def mensaje_chat_valido(d):
+    """{'de', 'nombre', 'texto', 't'} limpio, o None si no sirve."""
+    if not isinstance(d, dict):
+        return None
+    texto = str(d.get("texto") or "").strip()[:LARGO_CHAT]
+    if not texto:
+        return None
+    return {"de": str(d.get("de") or ""), "nombre": str(d.get("nombre") or "Alguien")[:40],
+            "texto": texto, "t": _entero(d.get("t"), ahora_ms())}
 ALFABETO = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"  # sin 0/O ni 1/I
 _azar = random.SystemRandom()
 
@@ -492,7 +508,8 @@ class SalaJuntos:
     """
 
     def __init__(self, codigo, control, nombre, usuario="", anfitrion=False, despachar=None,
-                 url_base=None, clave=None, al_abierta=None, al_cambio=None, al_reaccion=None):
+                 url_base=None, clave=None, al_abierta=None, al_cambio=None, al_reaccion=None,
+                 al_chat=None):
         self.codigo = codigo
         self.control = control
         self.nombre = nombre or "Alguien"
@@ -502,6 +519,8 @@ class SalaJuntos:
         self.al_abierta = al_abierta
         self.al_cambio = al_cambio
         self.al_reaccion = al_reaccion
+        self.al_chat = al_chat
+        self.chat = []
         self.canal = CanalRealtime(f"realtime:juntos-{codigo}", self.mi_id,
                                    al_mensaje=self._al_mensaje, al_presencia=self._al_presencia,
                                    al_estado_conexion=self._al_conexion,
@@ -702,9 +721,22 @@ class SalaJuntos:
         if ev == "estado":
             self._al_estado(d)
         elif ev == "hola":
-            # alguien entro: que reciba ya lo que suena
+            # alguien entro: que reciba ya lo que suena (y lo ultimo del chat)
             if self.soy_anfitrion:
                 self._env_forzado = ahora_ms() + 150
+                if self.chat:
+                    self.canal.difundir("chat_historial", {"para": d.get("de"),
+                                                           "mensajes": self.chat[-HISTORIAL_CHAT:]})
+        elif ev == "chat":
+            m = mensaje_chat_valido(d)
+            if m and m["de"] != self.mi_id:
+                self._sumar_chat(m)
+        elif ev == "chat_historial":
+            if d.get("para") == self.mi_id and not self.chat:
+                for m in d.get("mensajes") or []:
+                    m = mensaje_chat_valido(m)
+                    if m:
+                        self._sumar_chat(m)
         elif ev == "ping":
             if self.soy_anfitrion and d.get("a") == self.mi_id:
                 self.canal.difundir("pong", {"para": d.get("de"), "t0": d.get("t0"),
@@ -828,6 +860,21 @@ class SalaJuntos:
         if self.al_reaccion:
             self.al_reaccion(emoji, self.nombre, True)
 
+    def enviar_chat(self, texto):
+        texto = (texto or "").strip()[:LARGO_CHAT]
+        if self.cerrada or not texto:
+            return False
+        m = {"de": self.mi_id, "nombre": self.nombre, "texto": texto, "t": ahora_ms()}
+        self.canal.difundir("chat", m)
+        self._sumar_chat(m)
+        return True
+
+    def _sumar_chat(self, m):
+        self.chat.append(m)
+        del self.chat[:-HISTORIAL_CHAT * 3]
+        if self.al_chat:
+            self.al_chat(m)
+
     def salir(self):
         if self.cerrada:
             return
@@ -921,6 +968,7 @@ class SalaQt(QObject):
     abierta = Signal(object)            # None o el texto del error
     cambio = Signal()
     reaccion = Signal(str, str, bool)   # emoji, nombre, de_mi
+    chat = Signal(dict)                 # un mensaje del chat de la sala
 
     def __init__(self, reproductor, nombre, usuario="", codigo=None, padre=None, control=None):
         super().__init__(padre)
@@ -930,7 +978,7 @@ class SalaQt(QObject):
         self.sala = SalaJuntos(codigo or nuevo_codigo(), self.control, nombre, usuario,
                                anfitrion=codigo is None, despachar=self._puente.llega.emit,
                                al_abierta=self._al_abierta, al_cambio=self.cambio.emit,
-                               al_reaccion=self.reaccion.emit)
+                               al_reaccion=self.reaccion.emit, al_chat=self.chat.emit)
         self._tic = QTimer(self)
         self._tic.setInterval(TIC_MS)
         self._tic.timeout.connect(self.sala.tic)

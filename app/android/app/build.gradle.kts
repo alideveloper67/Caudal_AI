@@ -35,6 +35,19 @@ android {
         versionName = flutter.versionName
     }
 
+    // "directo": el APK que se reparte a mano y desde GitHub (se actualiza solo).
+    // "play": el de Google Play, sin actualizador propio ni permisos restringidos
+    // (Play no deja que una app se actualice por su cuenta).
+    buildFeatures {
+        buildConfig = true
+    }
+
+    flavorDimensions += "tienda"
+    productFlavors {
+        create("directo") { dimension = "tienda" }
+        create("play") { dimension = "tienda" }
+    }
+
     signingConfigs {
         if (clavesArchivo.exists()) {
             create("release") {

@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#061A2B">
+<title>Eliminar tu cuenta de Caudal</title>
+<link rel="icon" href="favicon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700;12..96,800&family=Figtree:wght@400;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="estilos.css">
+</head>
+<body>
+<header class="barra">
+  <div class="contenedor">
+    <a class="marca" href="index.html"><img src="icono.png" alt="">Caudal</a>
+    <nav>
+      <a href="terminos.html">Términos</a>
+      <a href="privacidad.html">Privacidad</a>
+    </nav>
+  </div>
+</header>
+<main class="contenedor">
+  <div class="documento">
+    <h1>Eliminar tu cuenta</h1>
+    <p>Se borra tu cuenta de Caudal y todo lo que guarda: tu perfil, tus listas, tus me gusta, tu historial, tus ajustes y tus mensajes. Es inmediato y no se puede deshacer.</p>
+    <p>También puedes hacerlo desde la app: <strong>Ajustes → Privacidad → Eliminar mi cuenta</strong>.</p>
+
+    <div class="tarjeta" style="margin-top:24px">
+      <form id="formulario">
+        <div class="campo">
+          <label for="usuario">Tu usuario</label>
+          <input id="usuario" autocomplete="username" required>
+        </div>
+        <div class="campo">
+          <label for="clave">Tu contraseña</label>
+          <input id="clave" type="password" autocomplete="current-password" required>
+        </div>
+        <div id="mensaje" role="status"></div>
+        <button class="boton peligro" type="submit" id="boton">Eliminar mi cuenta para siempre</button>
+      </form>
+    </div>
+    <p style="margin-top:20px">¿No recuerdas tu contraseña o entras con otro método? Escríbenos en la <a href="https://github.com/alideveloper67/Caudal_AI/issues">página de soporte</a> y la borramos por ti.</p>
+  </div>
+</main>
+<footer class="pie">
+  <div class="contenedor">
+    <span>© 2026 Caudal</span>
+    <nav>
+      <a href="index.html">Inicio</a>
+      <a href="terminos.html">Términos y condiciones</a>
+      <a href="privacidad.html">Política de privacidad</a>
+    </nav>
+  </div>
+</footer>
+<script>
+// La clave de aqui es la publica del proyecto (la misma que llevan las apps).
+// La cuenta solo se puede borrar a si misma (funcion eliminar_mi_cuenta).
+const URL_CUENTAS = "https://nztirmwqykbxadidpzzt.supabase.co";
+const CLAVE = "sb_publishable_ga4gKRk0czj044G-xPptSQ_BZ_sTZLl";
+const f = document.getElementById("formulario");
+const msj = document.getElementById("mensaje");
+const boton = document.getElementById("boton");
+
+function aviso(texto, ok) {
+  msj.className = "aviso " + (ok ? "ok" : "error");
+  msj.textContent = texto;
+}
+
+f.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const usuario = document.getElementById("usuario").value.trim().toLowerCase().replace(/^@/, "");
+  const clave = document.getElementById("clave").value;
+  if (!usuario || !clave) return;
+  if (!confirm("¿Seguro? Se borrará todo y no se puede deshacer.")) return;
+  boton.disabled = true;
+  boton.textContent = "Eliminando…";
+  try {
+    const r = await fetch(URL_CUENTAS + "/auth/v1/token?grant_type=password", {
+      method: "POST",
+      headers: { "apikey": CLAVE, "Content-Type": "application/json" },
+      body: JSON.stringify({ email: usuario + "@usuarios.caudal.app", password: clave }),
+    });
+    if (!r.ok) {
+      aviso("Usuario o contraseña incorrectos.", false);
+      return;
+    }
+    const sesion = await r.json();
+    const b = await fetch(URL_CUENTAS + "/rest/v1/rpc/eliminar_mi_cuenta", {
+      method: "POST",
+      headers: { "apikey": CLAVE, "Authorization": "Bearer " + sesion.access_token, "Content-Type": "application/json" },
+      body: "{}",
+    });
+    if (!b.ok) {
+      aviso("No se pudo eliminar ahora. Vuelve a intentarlo en un rato.", false);
+      return;
+    }
+    f.reset();
+    aviso("Listo: tu cuenta y todos tus datos se han eliminado.", true);
+  } catch (err) {
+    aviso("No hay conexión. Revisa tu internet y vuelve a probar.", false);
+  } finally {
+    boton.disabled = false;
+    boton.textContent = "Eliminar mi cuenta para siempre";
+  }
+});
+</script>
+</body>
+</html>

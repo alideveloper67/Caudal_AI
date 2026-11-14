@@ -1,13 +1,15 @@
 name: caudal
 description: "Descarga musica y videos desde su propio navegador"
 publish_to: 'none'
-version: 2.0.5+25
+version: 2.1.0+26
 
 environment:
   sdk: ^3.13.0
 
 dependencies:
   flutter:
+    sdk: flutter
+  flutter_localizations:
     sdk: flutter
 
   # red y descargas
@@ -36,9 +38,12 @@ dependencies:
   audio_service: ^0.18.19
   http: ^1.6.0
   http_parser: ^4.1.2
+  url_launcher: ^6.3.1
+  crypto: ^3.0.6
   flutter_inappwebview: ^6.1.5
   connectivity_plus: ^7.3.1
   audio_session: ^0.2.4
+  file_picker: ^11.0.3
 
 dev_dependencies:
   flutter_test:
@@ -48,3 +53,5 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/legal/

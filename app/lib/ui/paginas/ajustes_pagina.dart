@@ -11,6 +11,8 @@ import '../comunes.dart';
 import '../plataforma.dart';
 import '../servicios.dart';
 import '../tema.dart';
+import 'aspecto_pagina.dart';
+import 'privacidad_pagina.dart';
 import 'sonido.dart';
 
 class AjustesPagina extends StatefulWidget {
@@ -34,7 +36,7 @@ class _AjustesPaginaState extends State<AjustesPagina> {
         for (final (valor, texto) in opciones)
           ListTile(
             title: Text(texto),
-            trailing: valor == actual ? const Icon(Icons.check_rounded, color: C.acento) : null,
+            trailing: valor == actual ? Icon(Icons.check_rounded, color: C.acento) : null,
             onTap: () => Navigator.pop(ctx, valor),
           ),
         const SizedBox(height: 8),
@@ -123,7 +125,7 @@ class _AjustesPaginaState extends State<AjustesPagina> {
   Widget _seccion(String t) => Padding(
         padding: const EdgeInsets.fromLTRB(Esp.lado, 28, Esp.lado, 6),
         child: Text(t.toUpperCase(),
-            style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: C.acento, letterSpacing: 1)),
+            style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: C.acento, letterSpacing: 1)),
       );
 
   Widget _opcion(String titulo, String clave, List<(String, String)> opciones, {String? ayuda}) {
@@ -155,7 +157,7 @@ class _AjustesPaginaState extends State<AjustesPagina> {
             child: Row(children: [
               CircleAvatar(radius: 26, backgroundColor: C.acento,
                   child: Text(s.cuenta.inicial,
-                      style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: C.acentoTexto))),
+                      style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: C.acentoTexto))),
               const SizedBox(width: 14),
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text(s.cuenta.nombre, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
@@ -189,11 +191,12 @@ class _AjustesPaginaState extends State<AjustesPagina> {
               s.avisar('Sincronizando…');
             },
           ),
-        ListTile(
-          leading: const Icon(Icons.key_rounded, color: C.texto2),
-          title: const Text('Cambiar la contraseña'),
-          onTap: s.cuenta.sesion == null ? null : _cambiarContrasena,
-        ),
+        if (!s.cuenta.google)
+          ListTile(
+            leading: const Icon(Icons.key_rounded, color: C.texto2),
+            title: const Text('Cambiar la contraseña'),
+            onTap: s.cuenta.sesion == null ? null : _cambiarContrasena,
+          ),
         ListTile(
           leading: const Icon(Icons.logout_rounded, color: C.error),
           title: const Text('Cerrar sesión', style: TextStyle(color: C.error)),
@@ -203,6 +206,29 @@ class _AjustesPaginaState extends State<AjustesPagina> {
                 si: 'Cerrar sesión')) {
               await s.cerrarSesion();
             }
+          },
+        ),
+
+        _seccion('Privacidad'),
+        ListTile(
+          leading: const Icon(Icons.shield_outlined, color: C.texto2),
+          title: const Text('Tus datos y privacidad'),
+          subtitle: const Text('Datos anónimos, términos, política de privacidad y eliminar tu cuenta',
+              style: estiloSecundario),
+          trailing: const Icon(Icons.chevron_right_rounded, color: C.texto3),
+          onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PrivacidadPagina())),
+        ),
+
+        _seccion('Aspecto'),
+        ListTile(
+          leading: Icon(Icons.palette_outlined, color: C.acento),
+          title: const Text('Color y fondo de la app'),
+          subtitle: Text('${Aspecto.acentos[a.texto('acento')]?.$1 ?? 'Cian'} · '
+              '${Aspecto.fondos[a.texto('fondo')]?.$1 ?? 'Oscuro'}', style: estiloSecundario),
+          trailing: const Icon(Icons.chevron_right_rounded, color: C.texto3),
+          onTap: () async {
+            await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AspectoPagina()));
+            if (mounted) setState(() {});
           },
         ),
 
@@ -317,12 +343,13 @@ class _AjustesPaginaState extends State<AjustesPagina> {
         _seccion('Caudal'),
         ListTile(
           leading: const Icon(Icons.system_update_rounded, color: C.texto2),
-          title: const Text('Buscar actualizaciones'),
-          subtitle: Text('Versión $versionApp', style: estiloSecundario),
+          title: Text(actualizaLaTienda ? 'Versión de Caudal' : 'Buscar actualizaciones'),
+          subtitle: Text(actualizaLaTienda ? 'Versión $versionApp · se actualiza desde Google Play'
+              : 'Versión $versionApp', style: estiloSecundario),
           trailing: _buscandoVersion
               ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator.adaptive(strokeWidth: 2))
               : null,
-          onTap: _buscandoVersion ? null : _buscarVersion,
+          onTap: _buscandoVersion || actualizaLaTienda ? null : _buscarVersion,
         ),
         const Padding(
           padding: EdgeInsets.fromLTRB(Esp.lado, Esp.m, Esp.lado, 0),

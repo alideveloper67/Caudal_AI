@@ -336,6 +336,31 @@ class MiembroJuntos {
       );
 }
 
+/// Un mensaje del chat de la sala (no se guarda en ningún sitio: quien pone
+/// la música pasa los últimos a quien entra). Mismo formato que juntos.py.
+class MensajeSala {
+  const MensajeSala(this.de, this.nombre, this.texto, this.t);
+  final String de;
+  final String nombre;
+  final String texto;
+  final int t;
+
+  static const largo = 500;
+  static const historial = 40;
+
+  Map<String, dynamic> aJson() => {'de': de, 'nombre': nombre, 'texto': texto, 't': t};
+
+  static MensajeSala? desde(Object? d) {
+    if (d is! Map) return null;
+    var texto = '${d['texto'] ?? ''}'.trim();
+    if (texto.isEmpty) return null;
+    if (texto.length > largo) texto = texto.substring(0, largo);
+    final nombre = '${d['nombre'] ?? 'Alguien'}';
+    return MensajeSala('${d['de'] ?? ''}', nombre.length > 40 ? nombre.substring(0, 40) : nombre, texto,
+        d['t'] is num ? (d['t'] as num).toInt() : DateTime.now().millisecondsSinceEpoch);
+  }
+}
+
 class ReaccionJuntos {
   const ReaccionJuntos(this.emoji, this.nombre, this.deMi);
   final String emoji;
@@ -392,6 +417,11 @@ class SalaJuntos extends ChangeNotifier {
   String? aviso;
 
   final _reacciones = StreamController<ReaccionJuntos>.broadcast();
+
+  /// El chat de la sala (lo último que se dijo) y su aviso de mensaje nuevo.
+  final List<MensajeSala> chat = [];
+  final _chat = StreamController<MensajeSala>.broadcast();
+  Stream<MensajeSala> get mensajesChat => _chat.stream;
   Stream<ReaccionJuntos> get reacciones => _reacciones.stream;
 
   Timer? _tic;
@@ -572,8 +602,26 @@ class SalaJuntos extends ChangeNotifier {
       case 'estado':
         _alEstado(d);
       case 'hola':
-        // alguien entro: que reciba ya lo que suena
-        if (soyAnfitrion) _envForzado = _ahora() + 150;
+        // alguien entro: que reciba ya lo que suena (y lo ultimo del chat)
+        if (soyAnfitrion) {
+          _envForzado = _ahora() + 150;
+          if (chat.isNotEmpty) {
+            canal.difundir('chat_historial', {
+              'para': d['de'],
+              'mensajes': [for (final m in chat.skip(max(0, chat.length - MensajeSala.historial))) m.aJson()],
+            });
+          }
+        }
+      case 'chat':
+        final m = MensajeSala.desde(d);
+        if (m != null && m.de != miId) _sumarChat(m);
+      case 'chat_historial':
+        if (d['para'] == miId && chat.isEmpty) {
+          for (final x in (d['mensajes'] is List ? d['mensajes'] as List : const [])) {
+            final m = MensajeSala.desde(x);
+            if (m != null) _sumarChat(m);
+          }
+        }
       case 'ping':
         if (soyAnfitrion && d['a'] == miId) {
           canal.difundir('pong', {'para': d['de'], 't0': d['t0'], 'th': _ahora()});
@@ -703,6 +751,23 @@ class SalaJuntos extends ChangeNotifier {
     _reacciones.add(ReaccionJuntos(emoji, nombre, true));
   }
 
+  bool enviarChat(String texto) {
+    var t = texto.trim();
+    if (cerrada || t.isEmpty) return false;
+    if (t.length > MensajeSala.largo) t = t.substring(0, MensajeSala.largo);
+    final m = MensajeSala(miId, nombre, t, _ahora());
+    canal.difundir('chat', m.aJson());
+    _sumarChat(m);
+    return true;
+  }
+
+  void _sumarChat(MensajeSala m) {
+    chat.add(m);
+    if (chat.length > MensajeSala.historial * 3) chat.removeRange(0, chat.length - MensajeSala.historial * 3);
+    if (!_chat.isClosed) _chat.add(m);
+    notifyListeners();
+  }
+
   Future<void> salir() async {
     if (cerrada) return;
     cerrada = true;
@@ -713,6 +778,7 @@ class SalaJuntos extends ChangeNotifier {
     await canal.cerrar();
     if (identical(activa.value, this)) activa.value = null;
     await _reacciones.close();
+    await _chat.close();
     notifyListeners();
   }
 }

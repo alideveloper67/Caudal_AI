@@ -3,13 +3,18 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../nucleo/importar.dart';
+import '../nucleo/legal.dart';
 import '../reproduccion/reproductor.dart';
 import 'comunes.dart';
+import 'paginas/acceso.dart';
 import 'paginas/biblioteca.dart';
 import 'paginas/buscar.dart';
 import 'paginas/descargas_pagina.dart';
+import 'paginas/importar_pagina.dart';
 import 'paginas/inicio.dart';
 import 'paginas/juntos_pagina.dart';
+import 'paginas/legal_pagina.dart';
 import 'plataforma.dart';
 import 'reproductor/animaciones.dart';
 import 'servicios.dart';
@@ -44,6 +49,15 @@ class _ArmazonState extends State<Armazon> {
             ?.push(MaterialPageRoute(builder: (_) => JuntosPagina(codigoInicial: texto.trim())));
         return;
       }
+      // una lista de Spotify o Apple Music compartida: se trae a la biblioteca
+      final enlace = Importar.enlaceDe(texto);
+      final p = Importar.plataforma(enlace);
+      if (p == 'spotify' || p == 'apple' ||
+          (p == 'youtube' && enlace.contains('list=') && !enlace.contains('watch?'))) {
+        _navegadores[_pestana].currentState
+            ?.push(MaterialPageRoute(builder: (_) => ImportarPagina(enlace: enlace)));
+        return;
+      }
       _ir(3);
       DescargasPagina.pegar(texto);
     };
@@ -59,12 +73,40 @@ class _ArmazonState extends State<Armazon> {
         Caudal.leer(context).abrirEnlace?.call('${llamada.arguments}');
       }
     });
+    WidgetsBinding.instance.addPostFrameCallback((_) => _revisarTerminos());
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       try {
-        final inicial = await _canal.invokeMethod<String>('inicial');
+        final inicial = AccesoPagina.enlacePendiente ?? await _canal.invokeMethod<String>('inicial');
+        AccesoPagina.enlacePendiente = null;
         if (inicial != null && mounted) Caudal.leer(context).abrirEnlace?.call(inicial);
       } catch (_) {}
     });
+  }
+
+  /// Cuentas de antes de los términos (o con una versión vieja, o sin los
+  /// datos básicos): se les pide aceptar y completar antes de seguir.
+  Future<void> _revisarTerminos() async {
+    final s = Caudal.leer(context);
+    final sesion = s.cuenta.sesion;
+    if (sesion == null || sesion.acceso.isEmpty) return;
+    PerfilLegal perfil;
+    try {
+      perfil = await PerfilLegal.de(sesion);
+    } catch (_) {
+      return; // sin red: se pregunta la próxima vez
+    }
+    if ((perfil.aceptado && perfil.completo) || !mounted) return;
+    await Navigator.of(context, rootNavigator: true).push(MaterialPageRoute(
+      fullscreenDialog: true,
+      builder: (ctx) => AceptarTerminosPagina(
+        sesion: sesion,
+        perfil: perfil,
+        alSalir: () {
+          Navigator.of(ctx).pop();
+          s.cerrarSesion();
+        },
+      ),
+    ));
   }
 
   @override

@@ -9,6 +9,7 @@ import '../../nucleo/coleccion.dart';
 import '../../nucleo/juntos.dart';
 import '../../reproduccion/reproductor.dart';
 import '../comunes.dart';
+import '../emojis.dart';
 import '../servicios.dart';
 import '../tema.dart';
 
@@ -183,6 +184,7 @@ class _Flotante {
 class _VistaSalaState extends State<_VistaSala> {
   StreamSubscription<ReaccionJuntos>? _sub;
   final _flotantes = <_Flotante>[];
+  int _leidos = 0;
   final _azar = Random();
 
   @override
@@ -241,8 +243,36 @@ class _VistaSalaState extends State<_VistaSala> {
             if (mounted) Caudal.leer(context).avisar(aviso);
           });
         }
+        final sinLeer = sala.chat.length - _leidos;
         return Stack(children: [
-          ListView(padding: const EdgeInsets.fromLTRB(20, 4, 20, 120), children: [
+          DefaultTabController(
+            length: 2,
+            child: Builder(builder: (ctx) {
+              final tabs = DefaultTabController.of(ctx);
+              return Column(children: [
+                TabBar(
+                  indicatorColor: C.acento,
+                  labelColor: C.texto,
+                  unselectedLabelColor: C.texto3,
+                  dividerColor: C.borde,
+                  onTap: (i) {
+                    if (i == 1) setState(() => _leidos = sala.chat.length);
+                  },
+                  tabs: [
+                    const Tab(text: 'Sala'),
+                    Tab(child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      const Text('Chat'),
+                      if (sinLeer > 0 && tabs.index != 1) ...[
+                        const SizedBox(width: 6),
+                        Badge(label: Text('$sinLeer'), backgroundColor: C.acento, textColor: C.acentoTexto),
+                      ],
+                    ])),
+                  ],
+                ),
+                Expanded(
+                  child: TabBarView(children: [
+                    Stack(children: [
+          ListView(padding: const EdgeInsets.fromLTRB(20, 16, 20, 120), children: [
             _codigo(sala),
             const SizedBox(height: 18),
             _sonando(sala),
@@ -259,6 +289,13 @@ class _VistaSalaState extends State<_VistaSala> {
             ),
           ]),
           Positioned(left: 0, right: 0, bottom: 0, child: _barraEmojis(sala)),
+                    ]),
+                    _ChatSala(sala: sala, alLeer: () => _leidos = sala.chat.length),
+                  ]),
+                ),
+              ]);
+            }),
+          ),
           Positioned.fill(
             child: IgnorePointer(
               child: LayoutBuilder(
@@ -322,25 +359,34 @@ class _VistaSalaState extends State<_VistaSala> {
     final p = sala.pistaSala;
     final quien = sala.soyAnfitrion ? 'Tú pones la música' : 'Pone la música ${sala.anfitrion?.nombre ?? '…'}';
     return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: C.superficie, borderRadius: BorderRadius.circular(14)),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        gradient: LinearGradient(colors: [Color.lerp(C.acento, C.superficie, 0.72)!, C.superficie],
+            begin: Alignment.topLeft, end: Alignment.bottomRight),
+      ),
       child: Row(children: [
-        Portada(url: '${p?['miniatura'] ?? ''}', lado: 56, radio: 8),
-        const SizedBox(width: 12),
+        Portada(url: '${p?['miniatura'] ?? ''}', lado: 96, radio: 12),
+        const SizedBox(width: 14),
         Expanded(
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(p == null ? 'EN SILENCIO' : 'AHORA SUENA',
+                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, letterSpacing: 1, color: C.acento)),
+            const SizedBox(height: 4),
             Text(p == null ? 'Aún no suena nada' : '${p['titulo'] ?? ''}',
-                maxLines: 1, overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16)),
+                maxLines: 2, overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontWeight: FontWeight.w900, fontSize: 18, height: 1.15)),
             if (p != null && '${p['artista'] ?? ''}'.isNotEmpty)
               Text('${p['artista']}', maxLines: 1, overflow: TextOverflow.ellipsis, style: estiloSecundario),
-            const SizedBox(height: 4),
-            Text(
-              sala.soyAnfitrion
-                  ? '$quien: lo que reproduzcas lo oyen todos.'
-                  : '$quien. Tu reproductor lo sigue solo.',
-              style: const TextStyle(fontSize: 12, color: C.acento),
-            ),
+            const SizedBox(height: 8),
+            Row(children: [
+              Icon(Icons.headphones_rounded, size: 15, color: C.acento),
+              const SizedBox(width: 5),
+              Expanded(
+                child: Text(sala.soyAnfitrion ? '$quien: lo oyen todos' : quien,
+                    maxLines: 2, style: const TextStyle(fontSize: 12, color: C.texto2)),
+              ),
+            ]),
           ]),
         ),
       ]),
@@ -361,7 +407,7 @@ class _VistaSalaState extends State<_VistaSala> {
       title: Text(soyYo ? '${m.nombre} (tú)' : m.nombre),
       subtitle: m.usuario.isEmpty ? null : Text('@${m.usuario}', style: estiloSecundario),
       trailing: esAnf
-          ? const Tooltip(message: 'Pone la música', child: Icon(Icons.workspace_premium_rounded, color: C.acento))
+          ? Tooltip(message: 'Pone la música', child: Icon(Icons.workspace_premium_rounded, color: C.acento))
           : (sala.soyAnfitrion && !soyYo
               ? TextButton(onPressed: () => sala.cederAnfitrion(m.id), child: const Text('Pasar el mando'))
               : null),
@@ -476,4 +522,126 @@ class ControlReproductor implements ControlJuntos {
   void addListener(VoidCallback f) => r.addListener(f);
   @override
   void removeListener(VoidCallback f) => r.removeListener(f);
+}
+
+
+/// El chat de la sala: mensajes que solo ven los que están dentro.
+class _ChatSala extends StatefulWidget {
+  const _ChatSala({required this.sala, required this.alLeer});
+  final SalaJuntos sala;
+  final VoidCallback alLeer;
+
+  @override
+  State<_ChatSala> createState() => _ChatSalaState();
+}
+
+class _ChatSalaState extends State<_ChatSala> {
+  final _campo = TextEditingController();
+
+  @override
+  void dispose() {
+    _campo.dispose();
+    super.dispose();
+  }
+
+  void _enviar() {
+    if (widget.sala.enviarChat(_campo.text)) _campo.clear();
+  }
+
+  String _hora(int t) {
+    final d = DateTime.fromMillisecondsSinceEpoch(t);
+    return '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final sala = widget.sala;
+    widget.alLeer();
+    final mensajes = sala.chat;
+    return Column(children: [
+      Expanded(
+        child: mensajes.isEmpty
+            ? const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(32),
+                  child: Text('Aún no hay mensajes. ¡Saluda a la sala! 👋', textAlign: TextAlign.center,
+                      style: estiloSecundario),
+                ),
+              )
+            : ListView.builder(
+                reverse: true,
+                padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+                itemCount: mensajes.length,
+                itemBuilder: (_, i) {
+                  final m = mensajes[mensajes.length - 1 - i];
+                  final mio = m.de == sala.miId;
+                  return Align(
+                    alignment: mio ? Alignment.centerRight : Alignment.centerLeft,
+                    child: Container(
+                      constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.78),
+                      margin: const EdgeInsets.symmetric(vertical: 3),
+                      padding: const EdgeInsets.fromLTRB(12, 8, 12, 6),
+                      decoration: BoxDecoration(
+                        color: mio ? C.acento : C.superficie2,
+                        borderRadius: BorderRadius.only(
+                          topLeft: const Radius.circular(18), topRight: const Radius.circular(18),
+                          bottomLeft: Radius.circular(mio ? 18 : 4), bottomRight: Radius.circular(mio ? 4 : 18)),
+                      ),
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+                        if (!mio)
+                          Text(m.nombre, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: C.acento)),
+                        Text(m.texto, style: TextStyle(fontSize: 15.5, height: 1.3, color: mio ? C.acentoTexto : C.texto)),
+                        Align(
+                          alignment: Alignment.centerRight,
+                          child: Text(_hora(m.t), style: TextStyle(fontSize: 10.5,
+                              color: mio ? C.acentoTexto.withValues(alpha: 0.6) : C.texto3)),
+                        ),
+                      ]),
+                    ),
+                  );
+                },
+              ),
+      ),
+      SafeArea(
+        top: false,
+        child: Container(
+          padding: const EdgeInsets.all(8),
+          decoration: BoxDecoration(color: C.panel, border: Border(top: BorderSide(color: C.borde))),
+          child: Row(children: [
+            IconButton(
+              tooltip: 'Emojis',
+              icon: const Icon(Icons.emoji_emotions_outlined),
+              onPressed: () => elegirEmoji(context, (e) => insertarEnCampo(_campo, e)),
+            ),
+            Expanded(
+              child: TextField(
+                controller: _campo,
+                minLines: 1,
+                maxLines: 4,
+                maxLength: MensajeSala.largo,
+                textCapitalization: TextCapitalization.sentences,
+                decoration: InputDecoration(
+                  hintText: 'Escribe a la sala…',
+                  counterText: '',
+                  filled: true,
+                  fillColor: C.superficie2,
+                  isDense: true,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(22), borderSide: BorderSide.none),
+                ),
+                onSubmitted: (_) => _enviar(),
+              ),
+            ),
+            const SizedBox(width: 6),
+            IconButton.filled(
+              tooltip: 'Enviar',
+              style: IconButton.styleFrom(backgroundColor: C.acento, foregroundColor: C.acentoTexto),
+              onPressed: _enviar,
+              icon: const Icon(Icons.send_rounded),
+            ),
+          ]),
+        ),
+      ),
+    ]);
+  }
 }

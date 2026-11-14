@@ -1,3 +1,4 @@
+import 'package:flutter/services.dart' show appFlavor;
 // Avisar de versiones nuevas y, en Android, instalarlas sin salir de la app.
 //
 // Las versiones se publican como releases de GitHub. Cada una lleva adjunto el
@@ -17,7 +18,11 @@ import 'package:path_provider/path_provider.dart';
 import 'plataforma.dart';
 
 /// Version que lleva esta copia. Sube tambien la de pubspec.yaml al publicar.
-const String versionApp = '2.0.5';
+const String versionApp = '2.1.0';
+
+/// Instalada desde una tienda (variante "play" de Android): las versiones
+/// nuevas llegan por la tienda, no por la propia app.
+bool get actualizaLaTienda => appFlavor == 'play';
 
 /// usuario/repositorio de GitHub donde se publican las versiones
 const String origen = 'alideveloper67/Caudal_AI';
@@ -90,6 +95,8 @@ bool hayNovedad(String instalada, String publicada) {
 /// Pregunta a GitHub si hay algo mas nuevo. Devuelve null si ya estas al dia
 /// o si no se pudo comprobar: quedarse callado es mejor que dar un error.
 Future<Novedad?> buscarActualizacion({Duration espera = const Duration(seconds: 12)}) async {
+  // la version de Google Play se actualiza desde la tienda (Play no deja otra via)
+  if (actualizaLaTienda) return null;
   try {
     final dio = Dio(BaseOptions(
       connectTimeout: espera,

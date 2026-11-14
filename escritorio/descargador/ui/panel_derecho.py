@@ -8,7 +8,7 @@ from PySide6.QtGui import QColor, QFont
 from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea,
                                QVBoxLayout, QWidget)
 
-from .. import catalogo
+from .. import catalogo, traductor
 from ..hilos import en_segundo_plano
 from . import iconos, imagenes
 from .componentes import BotonIcono, FilaPista, Portada, _borrar_layout, fuente
@@ -467,10 +467,35 @@ class VistaLetras(QScrollArea):
         if clave == self.clave:
             self._pintar(datos)
 
+    def _boton_traducir(self):
+        on = bool(self.ctx.ajustes["traducir_letra"])
+        b = QPushButton("  Traducir")
+        b.setIcon(iconos.icono("idioma", 15, "#06070A" if on else "#FFFFFF"))
+        b.setCursor(Qt.PointingHandCursor)
+        b.setToolTip("Quitar la traducción" if on else "Traducir la letra")
+        b.setStyleSheet(
+            "QPushButton{border:none;border-radius:13px;padding:5px 12px;font-size:12.5px;"
+            "font-weight:800;" + ("background:#FFFFFF;color:#06070A;}" if on else
+                                  "background:rgba(255,255,255,0.16);color:#FFFFFF;}"))
+        b.clicked.connect(self._alternar_traduccion)
+        fila = QHBoxLayout()
+        fila.addStretch(1)
+        fila.addWidget(b)
+        return fila
+
+    def _alternar_traduccion(self):
+        self.ctx.ajustes["traducir_letra"] = not self.ctx.ajustes["traducir_letra"]
+        self.ctx.ajustes.guardar()
+        if self.clave in _CACHE_LETRAS:
+            self._pintar(_CACHE_LETRAS[self.clave])
+
     def _pintar(self, datos):
         _borrar_layout(self.v)
         self.lineas, self.tiempos, self.actual = [], [], -1
+        self.traducciones = []
+        textos = []
         if datos.get("sincronizada") and datos.get("lineas"):
+            self.v.addLayout(self._boton_traducir())
             for ms, texto in datos["lineas"]:
                 et = _Linea(texto, ms)
                 et.pulsada.connect(lambda ms: self.ctx.reproductor.buscar(ms / 1000))
@@ -478,15 +503,30 @@ class VistaLetras(QScrollArea):
                 self.v.addWidget(et)
                 self.lineas.append(et)
                 self.tiempos.append(ms)
+                textos.append(texto or "")
+                tr = QLabel("")
+                tr.setWordWrap(True)
+                tr.hide()
+                self.v.addWidget(tr)
+                self.traducciones.append(tr)
         elif datos.get("texto"):
-            et = QLabel(datos["texto"])
-            et.setWordWrap(True)
-            et.setTextInteractionFlags(Qt.TextSelectableByMouse)
-            et.setStyleSheet("font-size:19px;font-weight:700;color:#FFFFFF;line-height:150%;")
-            self.v.addWidget(et)
+            self.v.addLayout(self._boton_traducir())
             nota = QLabel("Esta letra no está sincronizada.")
             nota.setStyleSheet("color:rgba(255,255,255,0.6);font-size:12px;")
-            self.v.insertWidget(0, nota)
+            self.v.addWidget(nota)
+            for texto in datos["texto"].split("\n"):
+                et = QLabel(texto)
+                et.setWordWrap(True)
+                et.setTextInteractionFlags(Qt.TextSelectableByMouse)
+                et.setStyleSheet("font-size:19px;font-weight:700;color:#FFFFFF;")
+                self.v.addWidget(et)
+                textos.append(texto)
+                tr = QLabel("")
+                tr.setWordWrap(True)
+                tr.hide()
+                tr.setStyleSheet("font-size:15px;font-weight:600;color:rgba(255,255,255,0.72);")
+                self.v.addWidget(tr)
+                self.traducciones.append(tr)
         else:
             self._mensaje("No hay letra para esta canción.\n\nA veces aparece con el nombre "
                           "exacto del artista; prueba desde el álbum oficial.")
@@ -497,6 +537,21 @@ class VistaLetras(QScrollArea):
             self.v.addWidget(f)
         self.v.addStretch(1)
         self._posicion(self.ctx.reproductor._posicion)
+        if self.ctx.ajustes["traducir_letra"] and textos:
+            clave = self.clave
+            en_segundo_plano(traductor.traducir, clave, textos,
+                             ok=lambda t, c=clave: self._llego_traduccion(c, t), dueno=self)
+
+    def _llego_traduccion(self, clave, t):
+        if clave != self.clave or not isinstance(t, list):
+            return  # otra cancion, ya en español o sin conexion
+        for tr, texto in zip(self.traducciones, t):
+            if texto:
+                tr.setText(texto)
+                tr.show()
+        for et in self.lineas:  # recolorea tambien la traduccion de cada linea
+            estado, et.estado = et.estado, None
+            self._estilo(et, estado or "futura")
 
     def _estilo(self, et, estado):
         if et.estado == estado:
@@ -505,6 +560,14 @@ class VistaLetras(QScrollArea):
         color = {"actual": "#FFFFFF", "pasada": "rgba(255,255,255,0.62)",
                  "futura": "rgba(6,7,10,0.82)"}[estado]
         et.setStyleSheet(f"font-size:22px;font-weight:800;color:{color};background:transparent;")
+        # su traduccion, debajo, mas pequena y del mismo tono
+        i = self.lineas.index(et) if et in self.lineas else -1
+        trs = getattr(self, "traducciones", [])
+        if 0 <= i < len(trs):
+            tono = {"actual": "rgba(255,255,255,0.85)", "pasada": "rgba(255,255,255,0.5)",
+                    "futura": "rgba(6,7,10,0.62)"}[estado]
+            trs[i].setStyleSheet(f"font-size:16px;font-weight:600;color:{tono};"
+                                 "background:transparent;")
 
     def _posicion(self, seg):
         if not self.tiempos or not self.isVisible():

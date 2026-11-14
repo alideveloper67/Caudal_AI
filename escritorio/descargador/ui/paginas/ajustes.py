@@ -154,12 +154,30 @@ class PaginaAjustes(Pagina):
                self.region)
         self.cuerpo.addWidget(s)
 
+        # ---------------- aspecto
+        from ..estilos import ACENTOS, FONDOS
+        s = Seccion("Aspecto")
+        self.acento = _combo([(v[0], k) for k, v in ACENTOS.items()], a["acento"], 200)
+        self._conectar(self.acento, "acento", self._aspecto_cambiado)
+        s.fila("Color de la app", "Botones, lo que suena y los detalles de la app.", self.acento)
+        self.fondo = _combo([(v[0], k) for k, v in FONDOS.items()], a["fondo"], 200)
+        self._conectar(self.fondo, "fondo", self._aspecto_cambiado)
+        s.fila("Fondo de la app", "Del negro puro al azul noche.", self.fondo)
+        self.bt_reiniciar = QPushButton("Reiniciar Caudal para verlo")
+        self.bt_reiniciar.setObjectName("principal")
+        self.bt_reiniciar.setCursor(Qt.PointingHandCursor)
+        self.bt_reiniciar.clicked.connect(lambda: getattr(ctx, "reiniciar", lambda: None)())
+        self.bt_reiniciar.hide()
+        s.fila("", "El nuevo aspecto se ve al volver a abrir Caudal (no se pierde nada).",
+               self.bt_reiniciar)
+        self.cuerpo.addWidget(s)
+
         # ---------------- sonido
         s = Seccion("Sonido")
         self.normalizar = _interruptor(a["normalizar"])
         self._conectar(self.normalizar, "normalizar", ctx.reproductor.aplicar_sonido)
-        s.fila("Normalizar el volumen", "Todas las canciones suenan igual de fuertes "
-                                        "(-14 LUFS, el mismo criterio que Spotify).",
+        s.fila("Igualar el volumen entre canciones", "Las canciones suaves y las fuertes suenan "
+                                        "parecido, sin tocar los cambios de volumen de cada una.",
                self.normalizar)
         from ...reproduccion import NOMBRES_SUPER_VOLUMEN
         self.super = _combo([(n, k) for k, n in NOMBRES_SUPER_VOLUMEN.items()],
@@ -412,6 +430,9 @@ class PaginaAjustes(Pagina):
         elif isinstance(widget, QComboBox):
             widget.currentIndexChanged.connect(
                 lambda _i: (self._poner(clave, widget.currentData()), despues and despues()))
+
+    def _aspecto_cambiado(self):
+        self.bt_reiniciar.show()
 
     def _fundido(self, v, guardar=True):
         self.et_fundido.setText(f"{v} s" if v else "Sin fundido")

@@ -119,6 +119,10 @@ class _Campo(QWidget):
         return self.e.text()
 
 
+# Se enciende cuando Google este configurado en Supabase (cuentas.con_google ya funciona).
+CON_GOOGLE = False
+
+
 class VentanaAcceso(QWidget):
     """Se cierra emitiendo `entro(cuenta, recordar)`."""
 
@@ -190,13 +194,26 @@ class VentanaAcceso(QWidget):
         v2 = QVBoxLayout(p2)
         v2.setContentsMargins(0, 6, 0, 0)
         v2.setSpacing(10)
-        self.n_nombre = _Campo("¿Cómo te llamamos?", "tu nombre (opcional)")
+        self.n_nombre = _Campo("Tu nombre y apellido", "como aparece en tu documento")
         self.n_usuario = _Campo("Usuario", "de 3 a 30 letras o números, sin espacios")
         self.n_clave = _Campo("Contraseña", "al menos 6 caracteres", clave=True)
         self.n_clave2 = _Campo("Repite la contraseña", "la misma de arriba", clave=True)
         for w in (self.n_nombre, self.n_usuario, self.n_clave, self.n_clave2):
             v2.addWidget(w)
-        self.pila.addWidget(p2)
+        from .legal_ui import CamposPerfil, CasillasLegales
+        self.n_perfil = CamposPerfil(p2)
+        v2.addWidget(self.n_perfil)
+        self.n_legal = CasillasLegales(p2)
+        v2.addWidget(self.n_legal)
+        # el formulario de registro es largo: va con barra si la ventana es baja
+        from PySide6.QtWidgets import QScrollArea
+        envoltura = QScrollArea()
+        envoltura.setWidgetResizable(True)
+        envoltura.setFrameShape(QFrame.NoFrame)
+        envoltura.setWidget(p2)
+        envoltura.setStyleSheet("QScrollArea{background:transparent;}")
+        p2.setStyleSheet("background:transparent;")
+        self.pila.addWidget(envoltura)
         vc.addWidget(self.pila)
 
         self.recordar = QCheckBox("Mantener la sesión iniciada")
@@ -223,6 +240,26 @@ class VentanaAcceso(QWidget):
             f"QPushButton:pressed{{background:{C['acento_bajo']};}}")
         self.bt_accion.clicked.connect(self._enviar)
         vc.addWidget(self.bt_accion)
+
+        separador = QLabel("o")
+        separador.setObjectName("ayuda")
+        separador.setAlignment(Qt.AlignCenter)
+        vc.addWidget(separador)
+
+        self.bt_google = QPushButton("  Continuar con Google")
+        self.bt_google.setIcon(QIcon(_icono_google()))
+        self.bt_google.setFixedHeight(46)
+        self.bt_google.setCursor(Qt.PointingHandCursor)
+        self.bt_google.setStyleSheet(
+            "QPushButton{background:#FFFFFF;color:#1F1F1F;border:none;border-radius:23px;"
+            "font-size:15px;font-weight:700;}"
+            "QPushButton:hover{background:#ECEFF3;}"
+            "QPushButton:pressed{background:#DADFE6;}")
+        self.bt_google.clicked.connect(self._google)
+        vc.addWidget(self.bt_google)
+        # entrar con Google: listo pero apagado hasta configurar el proveedor en Supabase
+        separador.setVisible(CON_GOOGLE)
+        self.bt_google.setVisible(CON_GOOGLE)
 
         pie = QLabel("La misma cuenta sirve en Windows y en Android. Lo que descargas "
                      "se queda en cada equipo.")
@@ -274,6 +311,52 @@ class VentanaAcceso(QWidget):
         self.et_error.setText(texto)
         self.et_error.show()
 
+    def _entrada_lista(self, cuenta):
+        self._ocupado = False
+        self._entro = True
+        recordar = self.recordar.isChecked()
+        if recordar:
+            self.cuentas.recordar(cuenta)
+        else:
+            self.cuentas.olvidar()
+        self.cuentas.anotar_ultimo(cuenta["usuario"])
+        self.entro.emit(cuenta, recordar)
+
+    def _google(self):
+        # mientras se espera al navegador, el mismo boton cancela
+        if getattr(self, "_esperando_google", False):
+            self._cancelar_google = True
+            return
+        if getattr(self, "_ocupado", False):
+            return
+        self._ocupado = True
+        self._esperando_google = True
+        self._cancelar_google = False
+        self.et_error.hide()
+        self.bt_accion.setEnabled(False)
+        self.bt_google.setText("  Elige tu cuenta en el navegador…  (cancelar)")
+
+        def terminar():
+            self._ocupado = False
+            self._esperando_google = False
+            self.bt_accion.setEnabled(True)
+            self.bt_google.setText("  Continuar con Google")
+
+        def listo(cuenta):
+            self._esperando_google = False
+            self._entrada_lista(cuenta)
+
+        def fallo(e):
+            terminar()
+            texto = str(e) if isinstance(e, ErrorCuenta) else \
+                "No se pudo conectar. Revisa tu internet y vuelve a probar."
+            if texto:
+                self._error(texto)
+
+        from ..hilos import en_segundo_plano
+        en_segundo_plano(self.cuentas.con_google, lambda: self._cancelar_google,
+                         ok=listo, error=fallo, dueno=self)
+
     def _enviar(self):
         if getattr(self, "_ocupado", False):
             return
@@ -288,8 +371,20 @@ class VentanaAcceso(QWidget):
             if self.n_clave.texto() != self.n_clave2.texto():
                 self._error("Las dos contraseñas no coinciden.")
                 return
+            from .. import legal
+            x = self.n_perfil.valores()
+            problema = legal.revisar_perfil(self.n_nombre.texto(), x["nacimiento"], x["pais"],
+                                            x["permiso_tutor"])
+            if problema:
+                self._error(problema)
+                return
+            if not self.n_legal.acepta.isChecked():
+                self._error("Para crear tu cuenta tienes que aceptar los Términos y la Política de privacidad.")
+                return
+            extra = legal.extra_registro(x["nacimiento"], x["pais"], x["genero"],
+                                         self.n_legal.comparte.isChecked(), x["permiso_tutor"])
             funcion, args = self.cuentas.crear, (self.n_usuario.texto(), self.n_clave.texto(),
-                                                 self.n_nombre.texto())
+                                                 self.n_nombre.texto(), extra)
         # la red va en segundo plano: la ventana no se congela
         self._ocupado = True
         self.et_error.hide()
@@ -298,15 +393,7 @@ class VentanaAcceso(QWidget):
         self.bt_accion.setEnabled(False)
 
         def listo(cuenta):
-            self._ocupado = False
-            self._entro = True
-            recordar = self.recordar.isChecked()
-            if recordar:
-                self.cuentas.recordar(cuenta)
-            else:
-                self.cuentas.olvidar()
-            self.cuentas.anotar_ultimo(cuenta["usuario"])
-            self.entro.emit(cuenta, recordar)
+            self._entrada_lista(cuenta)
 
         def fallo(e):
             self._ocupado = False
@@ -317,6 +404,33 @@ class VentanaAcceso(QWidget):
 
         from ..hilos import en_segundo_plano
         en_segundo_plano(funcion, *args, ok=listo, error=fallo, dueno=self)
+
+
+def _icono_google(lado=20):
+    """La "G" de Google con sus cuatro colores, dibujada (sin imagenes)."""
+    from PySide6.QtCore import QPointF
+    from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
+    px = QPixmap(lado * 2, lado * 2)
+    px.fill(Qt.transparent)
+    p = QPainter(px)
+    p.setRenderHint(QPainter.Antialiasing)
+    t = lado * 2
+    grosor = t * 0.18
+    r = QRectF(t * 0.12, t * 0.12, t * 0.76, t * 0.76)
+
+    def arco(desde, cuanto, color):
+        p.setPen(QPen(QColor(color), grosor))
+        p.drawArc(r, int(desde * 16), int(cuanto * 16))
+
+    arco(45, 90, "#EA4335")
+    arco(135, 99, "#FBBC05")
+    arco(234, 99, "#34A853")
+    arco(333, 63, "#4285F4")
+    p.setPen(QPen(QColor("#4285F4"), grosor))
+    p.drawLine(QPointF(t / 2, t / 2), QPointF(t * 0.88, t / 2))
+    p.end()
+    px.setDevicePixelRatio(2)
+    return px
 
 
 def _sin_usar():  # pragma: no cover

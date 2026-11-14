@@ -1437,7 +1437,7 @@ class _Cargando extends StatelessWidget {
   const _Cargando();
 
   @override
-  Widget build(BuildContext context) => const Center(
+  Widget build(BuildContext context) => Center(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           SizedBox(width: 36, height: 36, child: CircularProgressIndicator(strokeWidth: 3, color: C.acento)),
           SizedBox(height: 16),

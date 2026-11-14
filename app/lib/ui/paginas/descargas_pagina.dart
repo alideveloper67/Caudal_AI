@@ -164,7 +164,7 @@ class _DescargasPaginaState extends State<DescargasPagina> with AutomaticKeepAli
                       prefixIcon: const Icon(Icons.link_rounded, color: C.texto2),
                       suffixIcon: IconButton(
                         tooltip: 'Pegar',
-                        icon: const Icon(Icons.content_paste_rounded, color: C.acento),
+                        icon: Icon(Icons.content_paste_rounded, color: C.acento),
                         onPressed: _pegar,
                       ),
                     ),
@@ -229,7 +229,7 @@ class _DondeQuedaIOS extends StatelessWidget {
         margin: const EdgeInsets.only(top: 10),
         padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
         decoration: BoxDecoration(color: C.superficie2, borderRadius: BorderRadius.circular(10)),
-        child: const Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Icon(Icons.folder_rounded, size: 20, color: C.acento),
           SizedBox(width: 10),
           Expanded(
@@ -331,10 +331,10 @@ class _FilaDescarga extends StatelessWidget {
                         value: v,
                         minHeight: 4,
                         backgroundColor: C.superficie3,
-                        valueColor: const AlwaysStoppedAnimation(C.acento),
+                        valueColor: AlwaysStoppedAnimation(C.acento),
                       ),
                     )
-                  : const LinearProgressIndicator(
+                  : LinearProgressIndicator(
                       minHeight: 4,
                       backgroundColor: C.superficie3,
                       valueColor: AlwaysStoppedAnimation(C.acento),
@@ -350,7 +350,7 @@ class _FilaDescarga extends StatelessWidget {
           IconButton(icon: const Icon(Icons.refresh_rounded, color: C.texto2), tooltip: 'Reintentar',
               onPressed: () => s.descargas.reanudar(d.id))
         else if (d.estado == EstadoDescarga.completada)
-          IconButton(icon: const Icon(Icons.play_circle_fill_rounded, color: C.acento, size: 30),
+          IconButton(icon: Icon(Icons.play_circle_fill_rounded, color: C.acento, size: 30),
               onPressed: () async {
                 final todas = await s.coleccion.descargadas();
                 final p = todas.where((x) => x['archivo'] == d.archivo).firstOrNull;

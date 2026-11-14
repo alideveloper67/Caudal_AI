@@ -42,6 +42,8 @@ PRESETS_EQ = {
 
 # super volumen: sonoridad objetivo en LUFS (Spotify normal = -14)
 NIVELES_SUPER_VOLUMEN = {1: -11, 2: -9, 3: -7, 4: -5}
+# subida fija (dB) de cada nivel del super volumen
+GANANCIA_SUPER_VOLUMEN = {1: 3, 2: 5, 3: 7, 4: 9}
 NOMBRES_SUPER_VOLUMEN = {0: "Apagado", 1: "Fuerte", 2: "Muy fuerte", 3: "Fiesta", 4: "Máximo"}
 
 CATEGORIAS_MUSICA = ["music_offtopic"]
@@ -609,14 +611,18 @@ class Reproductor(QObject):
                 # margen para que al subir bandas no sature
                 partes.insert(0, f"volume={-max(bandas) * 0.6:.1f}dB")
         nivel = int(self.ajustes["super_volumen"] or 0)
+        # Igualar el volumen entre canciones SIN tocar el de dentro de cada una.
+        # Antes iba con loudnorm, que corrige cada pocos segundos: subia las
+        # partes suaves y bajaba las fuertes, y se oia como si el volumen
+        # bajara y volviera a subir. dynaudnorm con una ventana de ~30 segundos
+        # pone una ganancia casi fija por cancion (medido: conserva los 15,6 dB
+        # entre estrofa y estribillo; loudnorm los dejaba en 6,9).
+        if self.ajustes["normalizar"] or nivel > 0:
+            partes.append("dynaudnorm=f=500:g=61:p=0.9:m=4")
         if nivel > 0:
-            # mas sonoridad sin saturar: se sube el volumen percibido (LUFS) y un
-            # limitador de pico real impide que la onda se recorte
-            objetivo = NIVELES_SUPER_VOLUMEN.get(nivel, -9)
-            partes.append(f"loudnorm=I={objetivo}:TP=-1.0:LRA=7")
-            partes.append("alimiter=limit=0.96:attack=3:release=60:level=disabled")
-        elif self.ajustes["normalizar"]:
-            partes.append("loudnorm=I=-14:TP=-1.5:LRA=11")
+            # mas fuerte de forma fija y un limitador rapido para los picos
+            partes.append(f"volume={GANANCIA_SUPER_VOLUMEN.get(nivel, 5)}dB")
+            partes.append("alimiter=limit=0.95:attack=5:release=80:level=disabled")
         if not partes:
             return ""
         return "lavfi=[" + ",".join(partes) + "]"
@@ -873,6 +879,15 @@ class Reproductor(QObject):
     def siguiente(self, automatico=False):
         if self.actual is None:
             return
+        # saltar antes de que cuente como escuchada: el recomendador lo aprende
+        if (not automatico and not self._escucha_registrada and self._posicion < 30
+                and self.actual.get("video_id") and not self.actual.get("archivo")):
+            try:
+                from . import recomendador
+                recomendador.anotar_salto(self.coleccion, self.actual)
+                self._gusto = None
+            except Exception:  # noqa: BLE001
+                pass
         if automatico and self.repetir == "una":
             self._cargar(self.actual)
             return
@@ -936,7 +951,16 @@ class Reproductor(QObject):
             self._buscando_radio = False
             nuevas = []
             vistos = {p.get("video_id") for p in self.secuencia}
-            for p in datos.get("pistas") or []:
+            candidatas = datos.get("pistas") or []
+            # sin lo que sueles saltar ni lo que ya sonó estos días
+            try:
+                from . import recomendador
+                if getattr(self, "_gusto", None) is None:
+                    self._gusto = recomendador.gusto(self.coleccion)
+                candidatas = recomendador.limpiar_radio(candidatas, self._gusto)
+            except Exception:  # noqa: BLE001
+                pass
+            for p in candidatas:
                 if p.get("video_id") and p["video_id"] not in vistos:
                     p["_auto"] = True
                     nuevas.append(p)
@@ -1334,6 +1358,11 @@ class Reproductor(QObject):
             if self._posicion >= umbral:
                 self._escucha_registrada = True
                 self.coleccion.registrar_escucha(self.actual, self.contexto)
+                try:
+                    from . import recomendador
+                    recomendador.perdonar(self.coleccion, self.actual)
+                except Exception:  # noqa: BLE001
+                    pass
         # temporizador "al terminar esta cancion": baja poco a poco al final
         if self._apagar_al_final and self.ajustes["apagado_suave"] and self._duracion > 0:
             quedan = (self._fin_musica() or self._duracion) - self._posicion

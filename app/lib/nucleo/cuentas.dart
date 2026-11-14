@@ -8,13 +8,16 @@ import 'nube.dart';
 /// con la sesion guardada (la biblioteca local funciona igual).
 class Cuenta {
   Cuenta({required this.id, required this.usuario, required this.nombre, this.sesion,
-      this.sinConexion = false});
+      this.sinConexion = false, this.google = false});
 
   final String id;
   final String usuario;
   final String nombre;
   final Sesion? sesion;
   final bool sinConexion;
+
+  /// Entro con Google: no tiene contraseña de Caudal que cambiar.
+  final bool google;
 
   String get inicial => (nombre.isNotEmpty ? nombre : usuario).substring(0, 1).toUpperCase();
 }
@@ -33,7 +36,8 @@ class Cuentas {
 
   static final _patron = RegExp(r'^[a-z0-9._-]{3,30}$');
 
-  static Future<Cuenta> crear(String usuario, String clave, String nombre) async {
+  static Future<Cuenta> crear(String usuario, String clave, String nombre,
+      {Map<String, dynamic> extra = const {}}) async {
     usuario = usuario.trim().toLowerCase();
     if (!_patron.hasMatch(usuario)) {
       throw const ErrorCuenta('El usuario debe tener de 3 a 30 letras o números '
@@ -47,7 +51,7 @@ class Cuentas {
       if (!await Nube.usuarioLibre(usuario)) {
         throw const ErrorCuenta('Ese usuario ya existe. Inicia sesión o elige otro.');
       }
-      final s = await Nube.registrar(usuario, clave, nombreFinal);
+      final s = await Nube.registrar(usuario, clave, nombreFinal, extra: extra);
       return Cuenta(id: s.userId, usuario: usuario, nombre: nombreFinal, sesion: s);
     } on ErrorNube catch (e) {
       throw ErrorCuenta(e.mensaje);
@@ -66,6 +70,31 @@ class Cuentas {
         nombre: '${perfil['nombre'] ?? usuario}',
         sesion: s,
       );
+    } on ErrorNube catch (e) {
+      throw ErrorCuenta(e.mensaje);
+    }
+  }
+
+  /// Entrar (o registrarse, es lo mismo) con la cuenta de Google. [enlace]
+  /// es el caudal://acceso?... con el que vuelve el navegador.
+  static Future<Cuenta> conGoogle(String enlace, String verificador) async {
+    final u = Uri.tryParse(enlace);
+    final q = {...?u?.queryParameters, ...Uri.splitQueryString(u?.fragment ?? '')};
+    final codigo = q['code'] ?? '';
+    if (codigo.isEmpty) {
+      final motivo = (q['error_description'] ?? q['error'] ?? '').toLowerCase();
+      if (motivo.contains('denied') || motivo.contains('cancel')) {
+        throw const ErrorCuenta('Cancelaste la entrada con Google.');
+      }
+      throw const ErrorCuenta('Google no dejó entrar. Vuelve a intentarlo.');
+    }
+    try {
+      final s = await Nube.canjearGoogle(codigo, verificador);
+      final perfil = await s.perfil();
+      final usuario = '${perfil['usuario'] ?? ''}';
+      final nombre = '${perfil['nombre'] ?? ''}'.trim();
+      return Cuenta(id: s.userId, usuario: usuario, nombre: nombre.isEmpty ? usuario : nombre,
+          sesion: s, google: true);
     } on ErrorNube catch (e) {
       throw ErrorCuenta(e.mensaje);
     }
@@ -94,6 +123,7 @@ class Cuentas {
     final p = await SharedPreferences.getInstance();
     await p.setString(_claveSesion, jsonEncode({
       'id': c.id, 'usuario': c.usuario, 'nombre': c.nombre, 'refresh': c.sesion!.refresh,
+      if (c.google) 'google': true,
     }));
   }
 
@@ -117,14 +147,14 @@ class Cuentas {
     try {
       final s = await Nube.renovar('${g['refresh']}');
       final c = Cuenta(id: '${g['id']}', usuario: '${g['usuario']}', nombre: '${g['nombre']}',
-          sesion: s);
+          sesion: s, google: g['google'] == true);
       await recordar(c);
       return c;
     } on SinConexion {
       // sin internet se entra igual: se sincroniza cuando vuelva la red
       final s = Sesion('${g['id']}', '', '${g['refresh']}', DateTime(2000));
       return Cuenta(id: '${g['id']}', usuario: '${g['usuario']}', nombre: '${g['nombre']}',
-          sesion: s, sinConexion: true);
+          sesion: s, sinConexion: true, google: g['google'] == true);
     } on ErrorNube {
       await olvidar();
       return null;

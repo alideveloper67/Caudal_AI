@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../nucleo/recomendador.dart';
 import '../../nucleo/catalogo.dart';
 import '../../nucleo/coleccion.dart';
 import '../comunes.dart';
@@ -65,6 +66,13 @@ class _ColeccionPaginaState extends State<ColeccionPagina> {
         case 'mix':
           // un mix diario ya trae sus canciones: no se pide nada a internet
           d = Map<String, dynamic>.from(widget.elemento);
+        case 'similares':
+          final pista = widget.elemento['pista'] is Map
+              ? Map<String, dynamic>.from(widget.elemento['pista'] as Map)
+              : <String, dynamic>{};
+          final clave = 'similares|${widget.elemento['id']}';
+          d = _cache[clave] ?? await Recomendador.similares(col, pista);
+          _cache[clave] = d;
         case 'me_gusta':
           final p = await col.listaMeGusta();
           d = {'titulo': 'Tus me gusta', 'pistas': p, 'especial': true};
@@ -292,7 +300,7 @@ class _ColeccionPaginaState extends State<ColeccionPagina> {
                   onChanged: (t) => setState(() => _filtro = t),
                   decoration: InputDecoration(hintText: 'Buscar en la lista', isDense: true,
                       prefixIcon: const Icon(Icons.search_rounded, color: C.texto3),
-                      suffixIcon: _filtro.isEmpty ? null : const Icon(Icons.filter_list_rounded, color: C.acento)),
+                      suffixIcon: _filtro.isEmpty ? null : Icon(Icons.filter_list_rounded, color: C.acento)),
                 ),
               ),
             ),
