@@ -17,7 +17,7 @@ import 'package:path_provider/path_provider.dart';
 import 'plataforma.dart';
 
 /// Version que lleva esta copia. Sube tambien la de pubspec.yaml al publicar.
-const String versionApp = '2.0.4';
+const String versionApp = '2.0.5';
 
 /// usuario/repositorio de GitHub donde se publican las versiones
 const String origen = 'alideveloper67/Caudal_AI';

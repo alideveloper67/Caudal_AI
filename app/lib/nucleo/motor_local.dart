@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
 import 'formato.dart';
+import 'innertube.dart';
 import 'modelos.dart';
 import 'plataforma.dart';
 
@@ -20,6 +21,9 @@ class MotorLocal {
   MotorLocal();
 
   final YoutubeExplode _yt = YoutubeExplode();
+
+  /// El camino principal para las pistas (ver [Innertube]).
+  final Innertube _vision = Innertube();
 
   /// Con que aplicaciones nos hacemos pasar ante YouTube.
   ///
@@ -53,6 +57,13 @@ class MotorLocal {
     final orden = [
       for (var i = 0; i < _clientes.length; i++) _clientes[(i + empezarEn) % _clientes.length],
     ];
+    // primero el cliente que da enlaces completos; los de la libreria quedan
+    // de respaldo (sus enlaces se cortan a los pocos segundos sin token)
+    try {
+      return await _vision.manifiesto(id.value);
+    } catch (e) {
+      ultimoFallo = e;
+    }
     for (var vuelta = 0; vuelta < 2; vuelta++) {
       for (final cliente in orden) {
         try {
@@ -853,7 +864,10 @@ class MotorLocal {
     return ruta;
   }
 
-  void cerrar() => _yt.close();
+  void cerrar() {
+    _yt.close();
+    _vision.cerrar();
+  }
 }
 
 class _Cancelado implements Exception {}

@@ -45,6 +45,15 @@ const _superVolumenIos = {1: 2.0, 2: 4.0, 3: 6.0, 4: 8.0};
 /// salida `audiounit` desactiva la AVAudioSession al cerrarse.
 bool get _ios => defaultTargetPlatform == TargetPlatform.iOS;
 
+/// El libmpv de Android (media_kit_libs_android_*) trae el mismo ffmpeg minimo:
+/// de los filtros de sonido solo `equalizer`, `aresample` y `scaletempo`.
+/// Pedirle `loudnorm`, `alimiter`, `volume` o `astats` no da error al ponerlo:
+/// falla al abrir la cancion, mpv apaga el sonido ("Audio filter initialized
+/// failed") y la cancion no suena. Asi fallaban todas en la 2.0.0-2.0.5, porque
+/// "normalizar" viene encendido. En los dos telefonos el sonido va como en iPhone.
+bool get _filtrosMinimos =>
+    defaultTargetPlatform == TargetPlatform.iOS || defaultTargetPlatform == TargetPlatform.android;
+
 enum EstadoRepro { parado, cargando, sonando, pausa }
 
 /// Uno de los dos motores (libmpv via media_kit) con su pantalla de video.
@@ -85,7 +94,7 @@ class _Motor {
       'ytdl': 'no',
       'audio-buffer': '0.3',
       // en iPhone el ecualizador y el super volumen van por el volumen de mpv
-      if (_ios) 'volume-max': '200',
+      if (_filtrosMinimos) 'volume-max': '200',
     };
     for (final e in opciones.entries) {
       try {
@@ -207,6 +216,10 @@ class Reproductor extends ChangeNotifier {
   (String, List<Tramo>)? _tramosSiguiente;
   /// Si este telefono acepto el filtro que mide el nivel (`astats`).
   bool _filtroNivel = true;
+
+  /// Se enciende si un filtro de sonido no existe en este telefono (ver [_alError]):
+  /// desde ahi suena sin filtros en vez de no sonar.
+  bool _sinFiltros = false;
   final _silencioFinal = DetectorSilencio();
   final _silencioEntrada = DetectorSilencio(umbralDb: -50, minimo: const Duration(milliseconds: 300));
   final Set<_Motor> _midiendo = {};
@@ -217,12 +230,12 @@ class Reproductor extends ChangeNotifier {
 
   /// En iPhone no hay limitador ni normalizador: el super volumen sube sin
   /// limitar y "normalizar" no hace nada.
-  bool get sonidoLimitado => _ios;
+  bool get sonidoLimitado => _filtrosMinimos;
 
   /// Multiplicador del volumen que piden el ecualizador (margen) y el super
   /// volumen en iPhone. En Android eso lo hacen los filtros y vale 1.
   double get _factorSalida {
-    if (!_ios) return 1;
+    if (!_filtrosMinimos) return 1;
     var db = 0.0;
     if (ajustes.sino('ecualizador')) {
       final maximo = ajustes.bandasEq.take(10).fold<int>(0, max);
@@ -244,8 +257,9 @@ class Reproductor extends ChangeNotifier {
   }
 
   String cadenaFiltros() {
+    if (_sinFiltros) return '';
     final partes = <String>[];
-    if (_ios) {
+    if (_filtrosMinimos) {
       if (!ajustes.sino('ecualizador')) return '';
       final bandas = ajustes.bandasEq;
       for (var i = 0; i < min(10, bandas.length); i++) {
@@ -279,7 +293,7 @@ class Reproductor extends ChangeNotifier {
   }
 
   /// Solo en Android: el libmpv de iPhone no trae `astats`.
-  bool get medirNivel => !_ios;
+  bool get medirNivel => !_filtrosMinimos;
 
   Future<void> aplicarSonido() async {
     var af = cadenaFiltros();
@@ -299,7 +313,7 @@ class Reproductor extends ChangeNotifier {
       }
       await m.player.setRate(velocidad);
     }
-    if (_ios && _fundido == null && _traspaso == null && _activo.fuente != null) {
+    if (_filtrosMinimos && _fundido == null && _traspaso == null && _activo.fuente != null) {
       await _activo.player.setVolume(_salida);
     }
   }
@@ -995,6 +1009,24 @@ class Reproductor extends ChangeNotifier {
     if (!_esActual(m) || m.fuente == null) return;
     debugPrint('mpv: ${e.length > 160 ? '${e.substring(0, 160)}…' : e}');
     final pista = actual;
+    // un filtro de sonido que este telefono no tiene: mpv calla el audio.
+    // Se quitan los filtros y la misma cancion vuelve a sonar donde iba.
+    if (e.toLowerCase().contains('filter') && !_sinFiltros) {
+      _sinFiltros = true;
+      unawaited(() async {
+        for (final x in [_a, _b]) {
+          try {
+            await x.nativo?.setProperty('af', '');
+          } catch (_) {}
+        }
+        if (pista != null && identical(pista, actual)) {
+          await _cargar(pista, inicio: posicion.value, mismo: true,
+              pausado: estado == EstadoRepro.pausa, intento: _reintentos);
+        }
+      }());
+      return;
+    }
+    if (e.toLowerCase().contains('filter')) return;
     if (pista == null || m.fuente!.local) return;
     // YouTube a veces da un enlace que luego no abre: se pide otro, con otro
     // cliente, sin perder el punto. Si tampoco abre, se avisa y se sigue.
