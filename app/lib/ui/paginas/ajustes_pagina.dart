@@ -5,6 +5,7 @@ import '../../nucleo/ajustes.dart';
 import '../../nucleo/catalogo.dart';
 import '../../nucleo/cuentas.dart';
 import '../../nucleo/formato.dart';
+import '../../nucleo/mixes.dart';
 import '../../nucleo/version.dart';
 import '../comunes.dart';
 import '../plataforma.dart';
@@ -24,7 +25,7 @@ class _AjustesPaginaState extends State<AjustesPagina> {
 
   Future<void> _elegir(String clave, String titulo, List<(String, String)> opciones) async {
     final s = Caudal.leer(context);
-    final actual = '${s.ajustes.texto(clave)}';
+    final actual = _leer(s.ajustes, clave);
     final r = await showModalBottomSheet<String>(
       context: context,
       useRootNavigator: true,
@@ -40,11 +41,15 @@ class _AjustesPaginaState extends State<AjustesPagina> {
       ])),
     );
     if (r == null || r == actual) return;
-    await s.ajustes.poner(clave, r);
+    // los ajustes numericos (p. ej. el espacio de la descarga inteligente) se guardan como numero
+    await s.ajustes.poner(clave, Ajustes.defectos[clave] is int ? int.parse(r) : r);
     if (clave == 'region') Catalogo.fijarRegion(r);
     s.sincronizador?.pronto();
     if (mounted) setState(() {});
   }
+
+  static String _leer(Ajustes a, String clave) =>
+      Ajustes.defectos[clave] is int ? '${a.entero(clave)}' : a.texto(clave);
 
   Future<void> _sino(String clave, bool v) async {
     final s = Caudal.leer(context);
@@ -123,7 +128,7 @@ class _AjustesPaginaState extends State<AjustesPagina> {
 
   Widget _opcion(String titulo, String clave, List<(String, String)> opciones, {String? ayuda}) {
     final a = Caudal.leer(context).ajustes;
-    final v = '${a.texto(clave)}';
+    final v = _leer(a, clave);
     final texto = opciones.where((o) => o.$1 == v).map((o) => o.$2).firstOrNull ?? v;
     return ListTile(
       title: Text(titulo),
@@ -225,6 +230,18 @@ class _AjustesPaginaState extends State<AjustesPagina> {
           value: a.sino('autoplay'), onChanged: (v) => _sino('autoplay', v),
         ),
         SwitchListTile.adaptive(
+          title: const Text('Transiciones como un DJ'),
+          subtitle: const Text('Recorta los silencios al pasar de canción para que la siguiente entre justo a tiempo',
+              style: estiloSecundario),
+          value: a.sino('transicion_dj'), onChanged: (v) => _sino('transicion_dj', v),
+        ),
+        SwitchListTile.adaptive(
+          title: const Text('Apagar la música poco a poco'),
+          subtitle: const Text('Con el temporizador para dormir, el volumen baja en los últimos 30 segundos',
+              style: estiloSecundario),
+          value: a.sino('apagado_suave'), onChanged: (v) => _sino('apagado_suave', v),
+        ),
+        SwitchListTile.adaptive(
           title: const Text('Preferir lo descargado'),
           subtitle: const Text('Si la tienes en el teléfono, suena desde ahí (sin gastar datos)', style: estiloSecundario),
           value: a.sino('preferir_descargado'), onChanged: (v) => _sino('preferir_descargado', v),
@@ -268,6 +285,16 @@ class _AjustesPaginaState extends State<AjustesPagina> {
           title: const Text('Descargar solo con wifi'),
           value: a.sino('solo_wifi_descargas'), onChanged: (v) => _sino('solo_wifi_descargas', v),
         ),
+        SwitchListTile.adaptive(
+          title: const Text('Bajar sola tu música favorita'),
+          subtitle: const Text('Descarga con wifi tus me gusta y lo que más escuchas, para que suene sin internet',
+              style: estiloSecundario),
+          value: a.sino('descarga_inteligente'), onChanged: (v) => _sino('descarga_inteligente', v),
+        ),
+        if (a.sino('descarga_inteligente'))
+          _opcion('Espacio máximo', 'descarga_inteligente_gb', const [
+            ('1', '1 GB'), ('2', '2 GB'), ('5', '5 GB'), ('10', '10 GB'), ('20', '20 GB'), ('50', '50 GB'),
+          ], ayuda: 'cuando se llena deja de bajar'),
 
         _seccion('General'),
         _opcion('País del catálogo', 'region', const [
@@ -281,6 +308,7 @@ class _AjustesPaginaState extends State<AjustesPagina> {
             if (await confirmar(context, 'Borrar el historial', '¿Borrar lo escuchado y lo buscado?')) {
               await s.coleccion.borrarEscuchas();
               await s.coleccion.borrarBusquedas();
+              await Mixes.olvidar(s.coleccion);
               s.avisar('Historial borrado');
             }
           },
