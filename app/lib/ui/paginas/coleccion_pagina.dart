@@ -23,23 +23,17 @@ class _ColeccionPaginaState extends State<ColeccionPagina> {
   String? _error;
   Color _color = C.superficie3;
   String _filtro = '';
-  final _scroll = ScrollController();
-  bool _mostrarTitulo = false;
   Coleccion? _col;
   bool _salido = false;
   int _vuelta = 0;
 
   String get _tipo => '${widget.elemento['tipo']}';
   int? get _idLista => Servicios.idLista(widget.elemento['id']);
-  bool get _local => const ['mi_lista', 'me_gusta', 'descargados'].contains(_tipo);
+  bool get _local => const ['mi_lista', 'me_gusta', 'descargados', 'mix'].contains(_tipo);
 
   @override
   void initState() {
     super.initState();
-    _scroll.addListener(() {
-      final m = _scroll.offset > 230;
-      if (m != _mostrarTitulo) setState(() => _mostrarTitulo = m);
-    });
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _col = Caudal.leer(context).coleccion;
       if (_local) _col!.addListener(_cargar);
@@ -50,7 +44,6 @@ class _ColeccionPaginaState extends State<ColeccionPagina> {
   @override
   void dispose() {
     _col?.removeListener(_cargar);
-    _scroll.dispose();
     super.dispose();
   }
 
@@ -69,6 +62,9 @@ class _ColeccionPaginaState extends State<ColeccionPagina> {
     try {
       Map<String, dynamic> d;
       switch (_tipo) {
+        case 'mix':
+          // un mix diario ya trae sus canciones: no se pide nada a internet
+          d = Map<String, dynamic>.from(widget.elemento);
         case 'me_gusta':
           final p = await col.listaMeGusta();
           d = {'titulo': 'Tus me gusta', 'pistas': p, 'especial': true};
@@ -136,13 +132,28 @@ class _ColeccionPaginaState extends State<ColeccionPagina> {
 
   @override
   Widget build(BuildContext context) {
-    final s = Caudal.of(context);
-    if (_error != null) {
-      return Scaffold(appBar: AppBar(), body: Vacio(icono: Icons.wifi_off_rounded, titulo: 'No se pudo abrir',
-          texto: _error!, accion: OutlinedButton(onPressed: _cargar, child: const Text('Reintentar'))));
-    }
     final d = _datos;
-    if (d == null) return Scaffold(appBar: AppBar(), body: const Esqueleto(filas: true));
+    final Widget pagina;
+    final String estado;
+    if (_error != null) {
+      estado = 'error';
+      pagina = Scaffold(appBar: AppBar(), body: Vacio(icono: Icons.wifi_off_rounded, titulo: 'No se pudo abrir',
+          error: true, texto: explicarError(_error), alAccion: _cargar));
+    } else if (d == null) {
+      estado = 'cargando';
+      // con la misma forma que la pagina: portada, titulo, botones y canciones
+      pagina = Scaffold(extendBodyBehindAppBar: true,
+          appBar: AppBar(backgroundColor: Colors.transparent),
+          body: const Esqueleto(forma: FormaEsqueleto.coleccion));
+    } else {
+      estado = 'listo';
+      pagina = _pagina(context, d);
+    }
+    return AnimatedSwitcher(duration: Mov.normal, child: KeyedSubtree(key: ValueKey(estado), child: pagina));
+  }
+
+  Widget _pagina(BuildContext context, Map<String, dynamic> d) {
+    final s = Caudal.of(context);
     final visibles = _visibles;
     final ancho = MediaQuery.sizeOf(context).width;
     final lado = ancho * 0.58;
@@ -152,28 +163,24 @@ class _ColeccionPaginaState extends State<ColeccionPagina> {
     ];
 
     return Scaffold(
-      body: CustomScrollView(
-        controller: _scroll,
+      body: Escalonado(
+        child: CustomScrollView(
         cacheExtent: 900,
         slivers: [
-          SliverAppBar(
-            pinned: true,
-            backgroundColor: Color.lerp(_color, Colors.black, _mostrarTitulo ? 0.4 : 1),
-            title: AnimatedOpacity(opacity: _mostrarTitulo ? 1 : 0, duration: const Duration(milliseconds: 180),
-                child: Text('${d['titulo']}', maxLines: 1, overflow: TextOverflow.ellipsis)),
-            actions: [
+          CabeceraPlegable(
+            titulo: '${d['titulo']}',
+            color: _color,
+            degradado: true,
+            alto: kToolbarHeight + 8 + lado + 8,
+            acciones: [
               if (_tipo == 'mi_lista')
-                IconButton(icon: const Icon(Icons.edit_outlined), onPressed: _editar),
+                IconButton(tooltip: 'Cambiar el nombre', icon: const Icon(Icons.edit_outlined), onPressed: _editar),
             ],
-          ),
-          SliverToBoxAdapter(
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 500),
-              decoration: BoxDecoration(gradient: LinearGradient(
-                  colors: [_color, C.fondo], begin: Alignment.topCenter, end: Alignment.bottomCenter)),
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 6),
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Center(
+            fondo: Align(
+              alignment: Alignment.bottomCenter,
+              child: Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: PortadaPlegable(
                   child: Container(
                     decoration: const BoxDecoration(boxShadow: [
                       BoxShadow(color: Color(0x88000000), blurRadius: 30, offset: Offset(0, 10)),
@@ -184,8 +191,20 @@ class _ColeccionPaginaState extends State<ColeccionPagina> {
                             icono: _tipo == 'descargados' ? Icons.download_for_offline_rounded : Icons.queue_music_rounded),
                   ),
                 ),
-                const SizedBox(height: 18),
-                Text('${d['titulo']}', style: const TextStyle(fontSize: 25, fontWeight: FontWeight.w900, height: 1.1)),
+              ),
+            ),
+          ),
+          SliverToBoxAdapter(
+            child: AnimatedContainer(
+              duration: Mov.color,
+              curve: Mov.curva,
+              decoration: BoxDecoration(gradient: LinearGradient(
+                  colors: [CabeceraPlegable.colorMedio(_color), C.fondo],
+                  begin: Alignment.topCenter, end: Alignment.bottomCenter)),
+              padding: const EdgeInsets.fromLTRB(Esp.lado, Esp.m, Esp.lado, 6),
+              child: Entrada(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('${d['titulo']}', style: const TextStyle(fontSize: 25, fontWeight: FontWeight.w900, height: 1.1,
+                    letterSpacing: -0.4)),
                 if ('${d['descripcion'] ?? ''}'.isNotEmpty) ...[
                   const SizedBox(height: 6),
                   Text('${d['descripcion']}', maxLines: 3, overflow: TextOverflow.ellipsis, style: estiloSecundario),
@@ -209,7 +228,7 @@ class _ColeccionPaginaState extends State<ColeccionPagina> {
                 const SizedBox(height: 8),
                 ListenableBuilder(
                   listenable: Listenable.merge([s.coleccion, s.reproductor]),
-                  builder: (_, __) {
+                  builder: (_, _) {
                     // dentro del builder: cambia en cuanto termina una descarga
                     final todoDescargado = _pistas.isNotEmpty && _pistas.take(200).every(s.coleccion.estaDescargada);
                     final guardado = !_local && s.coleccion.guardado(_tipo, '${widget.elemento['id']}');
@@ -262,7 +281,7 @@ class _ColeccionPaginaState extends State<ColeccionPagina> {
                     ]);
                   },
                 ),
-              ]),
+              ])),
             ),
           ),
           if (_pistas.length > 12)
@@ -271,10 +290,16 @@ class _ColeccionPaginaState extends State<ColeccionPagina> {
                 padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
                 child: TextField(
                   onChanged: (t) => setState(() => _filtro = t),
-                  decoration: const InputDecoration(hintText: 'Buscar en la lista', isDense: true,
-                      prefixIcon: Icon(Icons.search_rounded, color: C.texto3)),
+                  decoration: InputDecoration(hintText: 'Buscar en la lista', isDense: true,
+                      prefixIcon: const Icon(Icons.search_rounded, color: C.texto3),
+                      suffixIcon: _filtro.isEmpty ? null : const Icon(Icons.filter_list_rounded, color: C.acento)),
                 ),
               ),
+            ),
+          if (_pistas.isNotEmpty && visibles.isEmpty)
+            SliverToBoxAdapter(
+              child: Vacio(icono: Icons.search_off_rounded, titulo: 'Nada con «${_filtro.trim()}»',
+                  texto: 'Ninguna canción de aquí coincide con lo que escribiste.'),
             ),
           if (_pistas.isEmpty)
             SliverToBoxAdapter(
@@ -292,13 +317,24 @@ class _ColeccionPaginaState extends State<ColeccionPagina> {
                   'mi_lista' => 'Busca una canción y, en su menú, «Añadir a una lista».',
                   _ => '',
                 },
+                textoAccion: switch (_tipo) {
+                  'descargados' => 'Descargar un enlace',
+                  'me_gusta' || 'mi_lista' => 'Buscar canciones',
+                  _ => null,
+                },
+                iconoAccion: _tipo == 'descargados' ? Icons.link_rounded : Icons.search_rounded,
+                alAccion: switch (_tipo) {
+                  'descargados' => () => s.irAPestana?.call(3),
+                  'me_gusta' || 'mi_lista' => () => s.irAPestana?.call(1),
+                  _ => null,
+                },
               ),
             ),
           SliverList.builder(
             itemCount: visibles.length,
             itemBuilder: (_, i) {
               final p = visibles[i];
-              return FilaPista(
+              return Entrada(indice: 1 + i, desplazamiento: 10, child: FilaPista(
                 pista: p,
                 numero: _tipo == 'album' ? i + 1 : null,
                 mostrarPortada: _tipo != 'album',
@@ -316,11 +352,12 @@ class _ColeccionPaginaState extends State<ColeccionPagina> {
                       },
                     ),
                 ],
-              );
+              ));
             },
           ),
           const SliverToBoxAdapter(child: SizedBox(height: espacioInferior + 16)),
         ],
+      ),
       ),
     );
   }

@@ -3,3 +3,4 @@ yt-dlp>=2025.1.1
 requests>=2.31
 ytmusicapi>=1.12
 python-mpv>=1.0.8
+websocket-client>=0.56

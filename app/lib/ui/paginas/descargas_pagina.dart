@@ -135,12 +135,12 @@ class _DescargasPaginaState extends State<DescargasPagina> with AutomaticKeepAli
     return Scaffold(
       body: ListenableBuilder(
         listenable: s.descargas,
-        builder: (_, __) {
+        builder: (_, _) {
           final lista = s.descargas.lista;
-          return CustomScrollView(slivers: [
+          return CustomScrollView(key: const PageStorageKey('descargas'), slivers: [
             SliverToBoxAdapter(
               child: Padding(
-                padding: EdgeInsets.fromLTRB(16, MediaQuery.paddingOf(context).top + 14, 16, 6),
+                padding: EdgeInsets.fromLTRB(Esp.lado, MediaQuery.paddingOf(context).top + 14, Esp.lado, 6),
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   const Text('Descargar', style: estiloTituloPagina),
                   const SizedBox(height: 4),
@@ -170,13 +170,25 @@ class _DescargasPaginaState extends State<DescargasPagina> with AutomaticKeepAli
                     ),
                   ),
                   if (_errorFicha != null)
-                    Padding(padding: const EdgeInsets.only(top: 8),
-                        child: Text(_errorFicha!, style: const TextStyle(color: C.error))),
-                  if (_url.isNotEmpty) ...[
-                    const SizedBox(height: 14),
-                    _Previa(url: _url, ficha: _ficha, consultando: _consultando, alDescargar: _descargar,
-                        alEscuchar: () => _escuchar(false), alVer: () => _escuchar(true)),
-                  ],
+                    Aparecer(child: Padding(padding: const EdgeInsets.only(top: 8),
+                        child: Row(children: [
+                          const Icon(Icons.error_outline_rounded, color: C.error, size: 18),
+                          const SizedBox(width: 6),
+                          Expanded(child: Text(_errorFicha!, style: const TextStyle(color: C.error))),
+                        ]))),
+                  // la ficha del enlace se abre con suavidad, sin empujar de golpe la lista
+                  AnimatedSize(
+                    duration: Mov.normal,
+                    curve: Mov.curva,
+                    alignment: Alignment.topCenter,
+                    child: _url.isEmpty
+                        ? const SizedBox(width: double.infinity)
+                        : Padding(
+                            padding: const EdgeInsets.only(top: 14),
+                            child: Aparecer(child: _Previa(url: _url, ficha: _ficha, consultando: _consultando,
+                                alDescargar: _descargar, alEscuchar: () => _escuchar(false), alVer: () => _escuchar(true))),
+                          ),
+                  ),
                 ]),
               ),
             ),
@@ -193,10 +205,12 @@ class _DescargasPaginaState extends State<DescargasPagina> with AutomaticKeepAli
                 ),
               ),
             if (lista.isEmpty && _url.isEmpty)
-              const SliverToBoxAdapter(child: Vacio(icono: Icons.download_for_offline_outlined,
+              SliverToBoxAdapter(child: Vacio(icono: Icons.download_for_offline_outlined,
                   titulo: 'Nada descargándose',
-                  texto: 'También puedes descargar desde el menú ⋮ de cualquier canción, álbum o lista.')),
-            SliverList.builder(itemCount: lista.length, itemBuilder: (_, i) => _FilaDescarga(d: lista[i])),
+                  texto: 'También puedes descargar desde el menú ⋮ de cualquier canción, álbum o lista.',
+                  textoAccion: 'Pegar un enlace', iconoAccion: Icons.content_paste_rounded, alAccion: _pegar)),
+            SliverList.builder(itemCount: lista.length,
+                itemBuilder: (_, i) => Entrada(indice: i, desplazamiento: 10, child: _FilaDescarga(d: lista[i]))),
             const SliverToBoxAdapter(child: SizedBox(height: espacioInferior + 10)),
           ]);
         },
@@ -288,7 +302,7 @@ class _FilaDescarga extends StatelessWidget {
     final s = Caudal.leer(context);
     final activa = d.estado.activa;
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+      padding: const EdgeInsets.symmetric(horizontal: Esp.lado, vertical: 6),
       child: Row(children: [
         Portada(url: d.miniatura, lado: 52, radio: 6,
             icono: d.esAudio ? Icons.music_note_rounded : Icons.movie_rounded),
@@ -307,12 +321,24 @@ class _FilaDescarga extends StatelessWidget {
             const SizedBox(height: 6),
             ClipRRect(
               borderRadius: BorderRadius.circular(3),
-              child: LinearProgressIndicator(
-                value: d.progreso > 0 ? d.progreso / 100 : null,
-                minHeight: 4,
-                backgroundColor: C.superficie3,
-                valueColor: const AlwaysStoppedAnimation(C.acento),
-              ),
+              // el avance llega a saltos: la barra se desliza entre uno y otro
+              child: d.progreso > 0
+                  ? TweenAnimationBuilder<double>(
+                      tween: Tween(end: d.progreso / 100),
+                      duration: const Duration(milliseconds: 350),
+                      curve: Curves.easeOut,
+                      builder: (_, v, _) => LinearProgressIndicator(
+                        value: v,
+                        minHeight: 4,
+                        backgroundColor: C.superficie3,
+                        valueColor: const AlwaysStoppedAnimation(C.acento),
+                      ),
+                    )
+                  : const LinearProgressIndicator(
+                      minHeight: 4,
+                      backgroundColor: C.superficie3,
+                      valueColor: AlwaysStoppedAnimation(C.acento),
+                    ),
             ),
           ],
         ])),

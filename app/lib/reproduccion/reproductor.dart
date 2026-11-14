@@ -10,6 +10,7 @@ import '../nucleo/catalogo.dart';
 import '../nucleo/coleccion.dart';
 import '../nucleo/red.dart';
 import '../nucleo/streams.dart';
+import '../nucleo/transiciones.dart';
 
 const frecuenciasEq = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
 const presetsEq = <String, List<int>>{
@@ -136,7 +137,7 @@ class Reproductor extends ChangeNotifier {
     velocidad = ajustes.decimal('velocidad');
     aleatorio = ajustes.sino('aleatorio');
     repetir = ajustes.texto('repetir');
-    _relojApagado = Timer.periodic(const Duration(seconds: 1), (_) => _ticApagado());
+    _relojApagado = Timer.periodic(const Duration(milliseconds: 500), (_) => _ticApagado());
     aplicarSonido();
   }
 
@@ -187,6 +188,22 @@ class Reproductor extends ChangeNotifier {
   Timer? _relojApagado;
   DateTime _ultimoGuardado = DateTime(2000);
 
+  /// Lo que queda del volumen mientras el temporizador para dormir lo baja.
+  double _factorDormir = 1;
+
+  // transiciones DJ
+  /// Tramos "sin musica" de lo que suena (para saber donde acaba de verdad).
+  List<Tramo> _tramosDj = [];
+  /// Los de la siguiente, pedidos por adelantado: (video_id, tramos).
+  (String, List<Tramo>)? _tramosSiguiente;
+  /// Si este telefono acepto el filtro que mide el nivel (`astats`).
+  bool _filtroNivel = true;
+  final _silencioFinal = DetectorSilencio();
+  final _silencioEntrada = DetectorSilencio(umbralDb: -50, minimo: const Duration(milliseconds: 300));
+  final Set<_Motor> _midiendo = {};
+
+  bool get _dj => ajustes.sino('transicion_dj');
+
   // ------------------------------------------------------------ sonido
 
   /// En iPhone no hay limitador ni normalizador: el super volumen sube sin
@@ -208,7 +225,7 @@ class Reproductor extends ChangeNotifier {
   }
 
   /// Volumen que se le da al motor (el de la app por el factor de iPhone).
-  double get _salida => volumen * _factorSalida;
+  double get _salida => volumen * _factorSalida * _factorDormir;
 
   /// En iPhone el VP9 no tiene decodificador por hardware y el AV1 de este
   /// libmpv tampoco: H.264 (videotoolbox) gasta mucho menos bateria.
@@ -244,15 +261,31 @@ class Reproductor extends ChangeNotifier {
     } else if (ajustes.sino('normalizar')) {
       partes.add('loudnorm=I=-14:TP=-1.5:LRA=11');
     }
-    return partes.isEmpty ? '' : 'lavfi=[${partes.join(',')}]';
+    final base = partes.isEmpty ? '' : 'lavfi=[${partes.join(',')}]';
+    if (!medirNivel || !_dj || !_filtroNivel) return base;
+    // transiciones DJ: mide el nivel de lo que sale (no cambia el sonido) para
+    // notar el silencio del final; se lee en `af-metadata/caudal`
+    const medidor = '@caudal:lavfi=[astats=metadata=1:reset=1]';
+    return base.isEmpty ? medidor : '$base,$medidor';
   }
 
+  /// Solo en Android: el libmpv de iPhone no trae `astats`.
+  bool get medirNivel => !_ios;
+
   Future<void> aplicarSonido() async {
-    final af = cadenaFiltros();
+    var af = cadenaFiltros();
     for (final m in [_a, _b]) {
       try {
         await m.nativo?.setProperty('af', af);
       } catch (_) {
+        if (af.contains('@caudal:')) {
+          // sin el medidor de nivel: se queda el resto y el DJ tira de SponsorBlock
+          _filtroNivel = false;
+          af = cadenaFiltros();
+          try {
+            await m.nativo?.setProperty('af', af);
+          } catch (_) {}
+        }
         // si el filtro no esta disponible en este telefono, suena sin el
       }
       await m.player.setRate(velocidad);
@@ -634,6 +667,8 @@ class Reproductor extends ChangeNotifier {
     if (cambio) {
       _escuchaContada = false;
       _segmentos = [];
+      _tramosDj = _tramosGuardados(pista);
+      _silencioFinal.reiniciar();
       _calidadForzada = null;
       duracion.value = Duration(seconds: (pista['duracion'] as num?)?.toInt() ?? 0);
       posicion.value = inicio;
@@ -753,18 +788,23 @@ class Reproductor extends ChangeNotifier {
     final pista = actual;
     if (pista == null) return;
     final vid = '${pista['video_id'] ?? ''}';
-    if (vid.isNotEmpty && ajustes.sino('sponsorblock')) {
-      final cats = modo == 'video' && ajustes.sino('sponsorblock_videos')
+    final saltar = ajustes.sino('sponsorblock');
+    if (vid.isNotEmpty && (saltar || _dj)) {
+      final cats = saltar && modo == 'video' && ajustes.sino('sponsorblock_videos')
           ? ['sponsor', 'selfpromo', 'interaction', 'music_offtopic']
           : ['music_offtopic'];
       Catalogo.segmentosASaltar(vid, cats).then((lista) {
         if (gen != _gen) return;
         final dur = duracion.value.inSeconds;
-        _segmentos = [
-          for (final s in lista)
-            if (dur == 0 || (s[1] - s[0]) < dur * 0.6)
-              ((s[0] as num).toDouble(), (s[1] as num).toDouble(), '${s[2]}')
-        ];
+        final tramos = _aTramos(lista);
+        // las transiciones DJ usan los tramos aunque no se salten
+        _tramosDj = tramos.where((t) => t.$3 == 'music_offtopic').toList();
+        if (saltar) {
+          _segmentos = [
+            for (final s in tramos)
+              if (dur == 0 || (s.$2 - s.$1) < dur * 0.6) s
+          ];
+        }
       }).catchError((_) {});
     }
     Timer(const Duration(seconds: 4), () {
@@ -785,6 +825,12 @@ class Reproductor extends ChangeNotifier {
     final sig = _mirarSiguiente();
     if (sig == null || identical(sig, actual)) return;
     final vid = '${sig['video_id'] ?? ''}';
+    if (vid.isNotEmpty && _dj && _tramosSiguiente?.$1 != vid) {
+      // donde empieza la musica de la siguiente, para entrar justo ahi
+      Catalogo.segmentosASaltar(vid, ['music_offtopic'])
+          .then((lista) => _tramosSiguiente = (vid, _aTramos(lista)))
+          .catchError((_) => _tramosSiguiente = (vid, <Tramo>[]));
+    }
     if (vid.isEmpty || coleccion.estaDescargada(sig)) return;
     streams.resolver(vid, video: modo == 'video',
         calidad: modo == 'video' ? ajustes.texto('calidad_video') : ajustes.texto('calidad_audio'),
@@ -840,9 +886,24 @@ class Reproductor extends ChangeNotifier {
     }
     final cf = ajustes.entero('crossfade');
     final dur = duracion.value.inMilliseconds / 1000.0;
-    if (modo == 'audio' && _fundido == null && cf > 0 && dur > 20 && repetir != 'una' &&
-        dur - seg <= cf && estado == EstadoRepro.sonando) {
-      _empezarFundido();
+    // con "al terminar la cancion" no se funde con la siguiente: se apaga
+    if (modo == 'audio' && _fundido == null && dur > 20 && repetir != 'una' && !_apagarAlFinal &&
+        estado == EstadoRepro.sonando) {
+      if (_dj) {
+        final largo = duracionFundidoDj(cf);
+        if (finDeMusica(_tramosDj, dur) - seg <= largo) {
+          _empezarFundido(largo: largo);
+        } else if (dur - seg <= 25 && medirNivel && _filtroNivel) {
+          // el final se ha quedado en silencio: entra ya la siguiente
+          _medirNivelDe(m, (db) {
+            if (_silencioFinal.medir(db, DateTime.now()) && _fundido == null && identical(m, _activo)) {
+              _empezarFundido(largo: 1.0);
+            }
+          });
+        }
+      } else if (cf > 0 && dur - seg <= cf) {
+        _empezarFundido();
+      }
     }
     if (DateTime.now().difference(_ultimoGuardado) > const Duration(seconds: 15)) {
       guardarSesion();
@@ -899,7 +960,7 @@ class Reproductor extends ChangeNotifier {
     if (!_esActual(m) || m.fuente == null) return;
     if (_apagarAlFinal) {
       _apagarAlFinal = false;
-      detener();
+      detener().whenComplete(() => _ponerFactorDormir(1));
       _aviso('Temporizador: música detenida');
       notifyListeners();
       return;
@@ -926,7 +987,26 @@ class Reproductor extends ChangeNotifier {
 
   // ------------------------------------------------------------ fundido
 
-  Future<void> _empezarFundido() async {
+  /// Tramos ya pedidos para [pista] (la "siguiente" que ahora pasa a sonar).
+  List<Tramo> _tramosGuardados(Json pista) {
+    final t = _tramosSiguiente;
+    return t != null && t.$1 == '${pista['video_id'] ?? ''}' ? t.$2 : [];
+  }
+
+  static List<Tramo> _aTramos(List<List<dynamic>> lista) => [
+        for (final s in lista)
+          if (s.length >= 3) ((s[0] as num).toDouble(), (s[1] as num).toDouble(), '${s[2]}')
+      ];
+
+  /// Lee el nivel que mide el filtro `@caudal` de un motor (sin solaparse).
+  void _medirNivelDe(_Motor m, void Function(double?) usar) {
+    final n = m.nativo;
+    if (n == null || !_midiendo.add(m)) return;
+    n.getProperty('af-metadata/caudal').then((t) => usar(nivelDeMetadatos(t))).catchError((_) {})
+        .whenComplete(() => _midiendo.remove(m));
+  }
+
+  Future<void> _empezarFundido({double? largo}) async {
     final sig = _mirarSiguiente();
     if (sig == null) return;
     Fuente? f;
@@ -946,13 +1026,22 @@ class Reproductor extends ChangeNotifier {
     if (objetivoPista == null) return;
     _gen++;
     _usaA = identical(entrante, _a);
+    final dj = largo != null;
+    final tramos = dj ? _tramosGuardados(objetivoPista) : <Tramo>[];
+    final durSig = ((objetivoPista['duracion'] as num?) ?? 0).toDouble();
+    // DJ: la siguiente entra donde empieza su musica, sin la intro muda
+    final inicio = dj ? inicioDeMusica(tramos, durSig) : 0.0;
     _fundido = {'saliente': saliente, 'entrante': entrante, 'inicio': DateTime.now(),
-      'dur': ajustes.entero('crossfade').toDouble()};
-    await entrante.abrir(f, volumen: 0, velocidad: velocidad);
+      'dur': largo ?? ajustes.entero('crossfade').toDouble(), 'dj': dj, 'saltos': 0};
+    _silencioEntrada.reiniciar();
+    _silencioFinal.reiniciar();
+    await entrante.abrir(f, volumen: 0, velocidad: velocidad,
+        inicio: Duration(milliseconds: (inicio * 1000).round()));
     fuente = f;
     actual = objetivoPista;
     _escuchaContada = false;
     _segmentos = [];
+    _tramosDj = tramos;
     duracion.value = Duration(seconds: (objetivoPista['duracion'] as num?)?.toInt() ?? 0);
     posicion.value = Duration.zero;
     notifyListeners();
@@ -968,7 +1057,22 @@ class Reproductor extends ChangeNotifier {
     }
     final t = DateTime.now().difference(f['inicio'] as DateTime).inMilliseconds / 1000.0;
     final avance = min(1.0, t / max(0.5, f['dur'] as double));
-    (f['entrante'] as _Motor).player.setVolume(_salida * sin(avance * pi / 2));
+    final entrante = f['entrante'] as _Motor;
+    if (f['dj'] == true && medirNivel && _filtroNivel && (f['saltos'] as int) < 8) {
+      // la siguiente empieza callada (sin tramo en SponsorBlock): se adelanta
+      // a saltitos hasta su primer sonido, mientras aun no se oye
+      final p = entrante.player.state.position;
+      if (p > const Duration(milliseconds: 300) && p < const Duration(seconds: 15) &&
+          entrante.player.state.playing && !entrante.player.state.buffering) {
+        _medirNivelDe(entrante, (db) {
+          if (!identical(_fundido, f) || !_silencioEntrada.medir(db, DateTime.now())) return;
+          f['saltos'] = (f['saltos'] as int) + 1;
+          _silencioEntrada.reiniciar();
+          entrante.player.seek(entrante.player.state.position + const Duration(seconds: 1));
+        });
+      }
+    }
+    entrante.player.setVolume(_salida * sin(avance * pi / 2));
     (f['saliente'] as _Motor).player.setVolume(_salida * cos(avance * pi / 2));
     if (avance >= 1) {
       _apagar(f['saliente'] as _Motor);
@@ -992,6 +1096,7 @@ class Reproductor extends ChangeNotifier {
   void programarApagado({int? minutos, bool alTerminar = false}) {
     _apagarAlFinal = alTerminar;
     _apagarEn = minutos == null ? null : DateTime.now().add(Duration(minutes: minutos));
+    _ponerFactorDormir(1);
     if (minutos != null) {
       _aviso('La música se detendrá en $minutos min');
     } else if (alTerminar) {
@@ -1009,10 +1114,38 @@ class Reproductor extends ChangeNotifier {
     return max(0, _apagarEn!.difference(DateTime.now()).inSeconds);
   }
 
+  /// Segundos que faltan para que el temporizador apague (null = no hay).
+  double? get _faltaParaDormir {
+    if (_apagarEn != null) return _apagarEn!.difference(DateTime.now()).inMilliseconds / 1000.0;
+    if (_apagarAlFinal && duracion.value > Duration.zero) {
+      return (duracion.value - posicion.value).inMilliseconds / 1000.0;
+    }
+    return null;
+  }
+
+  /// Pone el volumen que toca segun el temporizador para dormir.
+  void _ponerFactorDormir(double factor) {
+    if (factor == _factorDormir) return;
+    _factorDormir = factor;
+    if (_fundido == null && _traspaso == null && _activo.fuente != null) {
+      _activo.player.setVolume(_salida);
+    }
+  }
+
+  bool _pausandoParaDormir = false;
+
   void _ticApagado() {
+    if (_pausandoParaDormir) return;
+    // los ultimos 30 s el volumen baja poco a poco en vez de cortar de golpe
+    _ponerFactorDormir(ajustes.sino('apagado_suave') ? factorApagado(_faltaParaDormir) : 1);
     if (_apagarEn != null && DateTime.now().isAfter(_apagarEn!)) {
       _apagarEn = null;
-      pausar();
+      // ya callada: se pausa y se devuelve el volumen para cuando vuelva a sonar
+      _pausandoParaDormir = true;
+      pausar().whenComplete(() {
+        _pausandoParaDormir = false;
+        _ponerFactorDormir(1);
+      });
       _aviso('Temporizador: música en pausa. ¡Buenas noches!');
       notifyListeners();
     }

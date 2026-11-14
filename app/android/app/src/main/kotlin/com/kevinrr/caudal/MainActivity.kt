@@ -36,6 +36,9 @@ class MainActivity : AudioServiceActivity() {
         }
         pendiente = textoDe(intent)
 
+        // widget de la pantalla de inicio (CaudalWidget.kt)
+        CaudalWidget.Puente.registrar(flutterEngine, applicationContext)
+
         canalPip = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "caudal/pip")
         canalPip?.setMethodCallHandler { llamada, resultado ->
             if (llamada.method == "permitir") {
@@ -54,9 +57,11 @@ class MainActivity : AudioServiceActivity() {
         canal?.invokeMethod("compartido", texto) ?: run { pendiente = texto }
     }
 
-    private fun textoDe(intent: Intent?): String? {
-        if (intent?.action != Intent.ACTION_SEND) return null
-        return intent.getStringExtra(Intent.EXTRA_TEXT)
+    /** Texto compartido (ACTION_SEND) o enlace caudal://... entero (ACTION_VIEW). */
+    private fun textoDe(intent: Intent?): String? = when (intent?.action) {
+        Intent.ACTION_SEND -> intent.getStringExtra(Intent.EXTRA_TEXT)
+        Intent.ACTION_VIEW -> intent.data?.toString()
+        else -> null
     }
 
     // ---------- ventanita flotante ----------

@@ -148,6 +148,8 @@ class Servicios {
         return _comoPistas((await Catalogo.lista('${el['id']}'))['pistas']);
       case 'radio':
         return _comoPistas((await Catalogo.radio(playlistId: '${el['id']}'))['pistas']);
+      case 'mix':
+        return _comoPistas(el['pistas']);       // los mixes diarios ya traen sus canciones
       case 'artista':
         final a = await Catalogo.artista('${el['id']}');
         return [
@@ -182,7 +184,7 @@ class Servicios {
         return;
       case 'artista':
         pagina = ArtistaPagina(id: '${el['id']}');
-      case 'album' || 'lista' || 'mi_lista' || 'me_gusta' || 'descargados':
+      case 'album' || 'lista' || 'mi_lista' || 'me_gusta' || 'descargados' || 'mix':
         pagina = ColeccionPagina(elemento: el);
       case 'genero' || 'pagina':
         if ('${el['id'] ?? ''}'.isEmpty) return;

@@ -12,6 +12,12 @@ import 'inicio.dart';
 class BuscarPagina extends StatefulWidget {
   const BuscarPagina({super.key});
 
+  static final ValueNotifier<int> _enfocar = ValueNotifier(0);
+
+  /// Tocar la pestana Buscar estando ya en ella: el campo se enfoca y el
+  /// teclado sale (como en Spotify). Lo llama la barra de abajo.
+  static void enfocar() => _enfocar.value++;
+
   @override
   State<BuscarPagina> createState() => _BuscarPaginaState();
 }
@@ -47,6 +53,14 @@ class _BuscarPaginaState extends State<BuscarPagina> with AutomaticKeepAliveClie
       if (_explorar == null) await _cargarExplorar();
     });
     _foco.addListener(_alCambiarFoco);
+    BuscarPagina._enfocar.addListener(_alPedirFoco);
+  }
+
+  void _alPedirFoco() {
+    if (!mounted) return;
+    // si habia una pagina abierta encima, la barra ya volvio a la raiz
+    _campo.selection = TextSelection(baseOffset: 0, extentOffset: _campo.text.length);
+    _foco.requestFocus();
   }
 
   bool _explorarFallo = false;
@@ -69,6 +83,7 @@ class _BuscarPaginaState extends State<BuscarPagina> with AutomaticKeepAliveClie
   @override
   void dispose() {
     _espera?.cancel();
+    BuscarPagina._enfocar.removeListener(_alPedirFoco);
     _foco.removeListener(_alCambiarFoco);
     _campo.dispose();
     _foco.dispose();
@@ -191,8 +206,16 @@ class _BuscarPaginaState extends State<BuscarPagina> with AutomaticKeepAliveClie
           color: C.fondo,
           padding: EdgeInsets.fromLTRB(16, arriba + 12, 16, 8),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            if (!_foco.hasFocus && _consulta.isEmpty)
-              const Padding(padding: EdgeInsets.only(bottom: 12), child: Text('Buscar', style: estiloTituloPagina)),
+            // el titulo se recoge con suavidad al escribir (sin que el campo salte)
+            AnimatedSize(
+              duration: Mov.normal,
+              curve: Mov.curva,
+              alignment: Alignment.topLeft,
+              child: !_foco.hasFocus && _consulta.isEmpty
+                  ? const Padding(padding: EdgeInsets.only(bottom: Esp.m),
+                      child: SizedBox(width: double.infinity, child: Text('Buscar', style: estiloTituloPagina)))
+                  : const SizedBox(width: double.infinity),
+            ),
             TextField(
               controller: _campo,
               focusNode: _foco,
@@ -214,40 +237,56 @@ class _BuscarPaginaState extends State<BuscarPagina> with AutomaticKeepAliveClie
               ),
               cursorColor: C.acento,
             ),
-            if (_consulta.isNotEmpty && _sugerencias.isEmpty && !_foco.hasFocus)
-              Padding(
-                padding: const EdgeInsets.only(top: 10),
-                child: SingleChildScrollView(
-                  scrollDirection: Axis.horizontal,
-                  child: Row(children: [
-                    for (final (clave, texto) in const [('todo', 'Todo'), ('canciones', 'Canciones'),
-                      ('videos', 'Videos'), ('albumes', 'Álbumes'), ('artistas', 'Artistas'), ('listas', 'Listas')])
-                      Padding(
-                        padding: const EdgeInsets.only(right: 8),
-                        child: ChoiceChip(
-                          label: Text(texto),
-                          selected: _filtro == clave,
-                          showCheckmark: false,
-                          selectedColor: C.acento,
-                          labelStyle: TextStyle(fontWeight: FontWeight.w600,
-                              color: _filtro == clave ? C.acentoTexto : C.texto),
-                          backgroundColor: C.superficie2,
-                          side: BorderSide.none,
-                          shape: const StadiumBorder(),
-                          onSelected: (_) {
-                            setState(() => _filtro = clave);
-                            _cargarFiltro();
-                          },
-                        ),
+            AnimatedSize(
+              duration: Mov.normal,
+              curve: Mov.curva,
+              alignment: Alignment.topLeft,
+              child: _consulta.isNotEmpty && _sugerencias.isEmpty && !_foco.hasFocus
+                  ? Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: SingleChildScrollView(
+                        key: const PageStorageKey('buscar|filtros'),
+                        scrollDirection: Axis.horizontal,
+                        child: Row(children: [
+                          for (final (clave, texto) in const [('todo', 'Todo'), ('canciones', 'Canciones'),
+                            ('videos', 'Videos'), ('albumes', 'Álbumes'), ('artistas', 'Artistas'), ('listas', 'Listas')])
+                            Pildora(texto: texto, activa: _filtro == clave, alPulsar: () => _elegirFiltro(clave)),
+                        ]),
                       ),
-                  ]),
-                ),
-              ),
+                    )
+                  : const SizedBox(width: double.infinity),
+            ),
           ]),
         ),
-        Expanded(child: _cuerpo()),
+        Expanded(
+          // de un estado a otro (explorar, sugerencias, cargando, resultados) con un fundido
+          child: AnimatedSwitcher(
+            duration: Mov.normal,
+            switchInCurve: Mov.curva,
+            switchOutCurve: Curves.easeIn,
+            layoutBuilder: (actual, previos) => Stack(alignment: Alignment.topCenter, children: [...previos, ?actual]),
+            child: KeyedSubtree(key: ValueKey(_estado()), child: _cuerpo()),
+          ),
+        ),
       ]),
     );
+  }
+
+  void _elegirFiltro(String clave) {
+    if (clave == _filtro) return;
+    setState(() => _filtro = clave);
+    _cargarFiltro();
+  }
+
+  /// Que se esta viendo; al cambiar, el cuerpo cambia con un fundido.
+  String _estado() {
+    final texto = _campo.text.trim();
+    if (_foco.hasFocus && texto.isNotEmpty && _esEnlace(texto)) return 'enlace';
+    if (_sugerencias.isNotEmpty && _foco.hasFocus) return 'sugerencias';
+    if (_consulta.isEmpty) return 'explorar';
+    if (_error != null) return 'error';
+    if (_buscando) return 'buscando|$_filtro';
+    return 'resultados|$_consulta|$_filtro';
   }
 
   Widget _cuerpo() {
@@ -283,8 +322,8 @@ class _BuscarPaginaState extends State<BuscarPagina> with AutomaticKeepAliveClie
     }
     if (_consulta.isEmpty) return _explorarTodo();
     if (_error != null) {
-      return Vacio(icono: Icons.wifi_off_rounded, titulo: 'No se pudo buscar', texto: _error!,
-          accion: OutlinedButton(onPressed: _cargarFiltro, child: const Text('Reintentar')));
+      return Vacio(icono: Icons.wifi_off_rounded, titulo: 'No se pudo buscar', texto: explicarError(_error),
+          error: true, alAccion: _cargarFiltro);
     }
     if (_buscando) return const Esqueleto(filas: true);
     if (_filtro == 'todo') {
@@ -297,59 +336,80 @@ class _BuscarPaginaState extends State<BuscarPagina> with AutomaticKeepAliveClie
       ];
       if (principal == null && secciones.isEmpty) {
         return Vacio(icono: Icons.search_off_rounded, titulo: 'Sin resultados para «$_consulta»',
-            texto: 'Revisa cómo está escrito o prueba con menos palabras.');
+            texto: 'Revisa cómo está escrito o prueba con menos palabras.',
+            textoAccion: 'Buscar otra cosa', iconoAccion: Icons.edit_rounded, alAccion: _alPedirFoco);
       }
       final canciones = secciones.where((x) => x['filtro'] == 'canciones').firstOrNull;
       final pistas = [
         for (final e in (canciones?['elementos'] is List ? canciones!['elementos'] as List : const []))
           if (e is Map) Map<String, dynamic>.from(e)
       ];
-      return ListView(padding: const EdgeInsets.only(top: 6, bottom: espacioInferior), children: [
-        if (principal != null) _Principal(el: principal),
-        if (pistas.isNotEmpty) ...[
-          const SizedBox(height: 18),
-          TituloSeccion('Canciones', alPulsarMas: () {
-            setState(() => _filtro = 'canciones');
-            _cargarFiltro();
-          }),
-          for (var i = 0; i < pistas.length && i < 5; i++)
-            FilaPista(pista: pistas[i], alPulsar: () => s.reproducirPista(context, pistas[i])),
-        ],
-        const SizedBox(height: 22),
-        for (final sec in secciones.where((x) => x['filtro'] != 'canciones')) ...[
-          Carrusel(titulo: '${sec['titulo']}', elementos: sec['elementos'] as List? ?? const [], alPulsarMas: () {
-            setState(() => _filtro = '${sec['filtro']}');
-            _cargarFiltro();
-          }),
-          const SizedBox(height: 24),
-        ],
-      ]);
+      var turno = 0;
+      return Escalonado(
+        clave: _estado(),
+        child: ListView(key: PageStorageKey('buscar|$_consulta|todo'),
+            padding: const EdgeInsets.only(top: 6, bottom: espacioInferior), children: [
+          if (principal != null) Entrada(indice: turno++, child: _Principal(el: principal)),
+          if (pistas.isNotEmpty) ...[
+            const SizedBox(height: 22),
+            Entrada(indice: turno, child: TituloSeccion('Canciones', alPulsarMas: () => _elegirFiltro('canciones'))),
+            for (var i = 0; i < pistas.length && i < 5; i++)
+              Entrada(indice: turno + i, child: FilaPista(pista: pistas[i], alPulsar: () => s.reproducirPista(context, pistas[i]))),
+          ],
+          const SizedBox(height: Esp.xl),
+          for (final (i, sec) in secciones.where((x) => x['filtro'] != 'canciones').indexed) ...[
+            Entrada(indice: turno + 3 + i, child: Carrusel(titulo: '${sec['titulo']}',
+                elementos: sec['elementos'] as List? ?? const [], alPulsarMas: () => _elegirFiltro('${sec['filtro']}'))),
+            const SizedBox(height: Esp.entreSecciones),
+          ],
+        ]),
+      );
     }
     final lista = _lista ?? [];
     if (lista.isEmpty) {
-      return Vacio(icono: Icons.search_off_rounded, titulo: 'Sin resultados', texto: 'Prueba con otras palabras.');
+      return Vacio(icono: Icons.search_off_rounded, titulo: 'Sin resultados',
+          texto: 'Aquí no salió nada. En «Todo» se busca en canciones, videos, álbumes y artistas a la vez.',
+          textoAccion: 'Ver en Todo', iconoAccion: Icons.travel_explore_rounded, alAccion: () => _elegirFiltro('todo'));
     }
+    final clave = PageStorageKey('buscar|$_consulta|$_filtro');
     if (_filtro == 'canciones' || _filtro == 'videos') {
-      return ListView.builder(
-        padding: const EdgeInsets.only(bottom: espacioInferior),
-        itemCount: lista.length,
-        itemBuilder: (_, i) => FilaPista(pista: lista[i], alPulsar: () => s.reproducirPista(context, lista[i])),
+      return Escalonado(
+        clave: _estado(),
+        child: ListView.builder(
+          key: clave,
+          padding: const EdgeInsets.only(top: 4, bottom: espacioInferior),
+          itemCount: lista.length,
+          itemBuilder: (_, i) => Entrada(indice: i,
+              child: FilaPista(pista: lista[i], alPulsar: () => s.reproducirPista(context, lista[i]))),
+        ),
       );
     }
-    return ListView.builder(
-      padding: const EdgeInsets.only(bottom: espacioInferior),
-      itemCount: lista.length,
-      itemBuilder: (_, i) {
-        final el = lista[i];
-        return ListTile(
-          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
-          leading: Portada(url: '${el['miniatura'] ?? ''}', lado: 54, radio: 4, circulo: el['tipo'] == 'artista'),
-          title: Text('${el['titulo']}', maxLines: 1, overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontWeight: FontWeight.w600)),
-          subtitle: Text('${el['subtitulo'] ?? ''}', maxLines: 1, style: estiloSecundario),
-          onTap: () => s.abrirElemento(context, el),
-        );
-      },
+    return Escalonado(
+      clave: _estado(),
+      child: ListView.builder(
+        key: clave,
+        padding: const EdgeInsets.only(top: 4, bottom: espacioInferior),
+        itemCount: lista.length,
+        itemBuilder: (_, i) {
+          final el = lista[i];
+          return Entrada(
+            indice: i,
+            child: Pulsable(
+              escala: 0.985,
+              child: ListTile(
+                contentPadding: const EdgeInsets.symmetric(horizontal: Esp.lado, vertical: 2),
+                leading: Portada(url: '${el['miniatura'] ?? ''}', lado: 54, radio: 4, circulo: el['tipo'] == 'artista',
+                    icono: el['tipo'] == 'artista' ? Icons.person_rounded
+                        : el['tipo'] == 'album' ? Icons.album_rounded : Icons.queue_music_rounded),
+                title: Text('${el['titulo']}', maxLines: 1, overflow: TextOverflow.ellipsis, style: estiloTituloFila),
+                subtitle: Text('${el['subtitulo'] ?? ''}', maxLines: 1, overflow: TextOverflow.ellipsis,
+                    style: estiloSecundario),
+                onTap: () => s.abrirElemento(context, el),
+              ),
+            ),
+          );
+        },
+      ),
     );
   }
 
@@ -361,37 +421,38 @@ class _BuscarPaginaState extends State<BuscarPagina> with AutomaticKeepAliveClie
         if (e is Map && e['tipo'] == 'genero') generos.add(Map<String, dynamic>.from(e));
       }
     }
-    return ListView(padding: const EdgeInsets.only(bottom: espacioInferior), children: [
-      if (_recientes.isNotEmpty) ...[
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 8, 4),
-          child: Row(children: [
-            const Expanded(child: Text('Búsquedas recientes', style: estiloTituloSeccion)),
-            TextButton(onPressed: () async {
-              await Caudal.leer(context).coleccion.borrarBusquedas();
-              if (mounted) setState(() => _recientes = []);
-            }, child: const Text('Borrar', style: TextStyle(color: C.texto2))),
-          ]),
-        ),
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Wrap(spacing: 8, runSpacing: 8, children: [
-            for (final r in _recientes)
-              ActionChip(label: Text(r), onPressed: () => _buscar(r), backgroundColor: C.superficie2,
-                  side: BorderSide.none, shape: const StadiumBorder()),
-          ]),
-        ),
-        const SizedBox(height: 22),
-      ],
-      if (generos.isNotEmpty)
-        RejillaTarjetas(titulo: 'Explorar todo', elementos: generos)
-      else if (_explorarFallo)
-        Vacio(icono: Icons.wifi_off_rounded, titulo: 'Sin conexión',
-            texto: 'Puedes buscar igual cuando vuelva internet.',
-            accion: OutlinedButton(onPressed: _cargarExplorar, child: const Text('Reintentar')))
-      else if (_explorar == null)
-        const Esqueleto(),
-    ]);
+    return Escalonado(
+      clave: generos.isNotEmpty,
+      child: ListView(key: const PageStorageKey('buscar|explorar'),
+          padding: const EdgeInsets.only(bottom: espacioInferior), children: [
+        if (_recientes.isNotEmpty) ...[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(Esp.lado, Esp.s, Esp.s, Esp.xs),
+            child: Row(children: [
+              const Expanded(child: Text('Búsquedas recientes', style: estiloTituloSeccion)),
+              TextButton(onPressed: () async {
+                await Caudal.leer(context).coleccion.borrarBusquedas();
+                if (mounted) setState(() => _recientes = []);
+              }, style: TextButton.styleFrom(foregroundColor: C.texto2), child: const Text('Borrar')),
+            ]),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: Esp.lado),
+            child: Wrap(children: [
+              for (final r in _recientes) Pildora(texto: r, activa: false, alPulsar: () => _buscar(r)),
+            ]),
+          ),
+          const SizedBox(height: Esp.xl),
+        ],
+        if (generos.isNotEmpty)
+          Entrada(child: RejillaTarjetas(titulo: 'Explorar todo', elementos: generos))
+        else if (_explorarFallo)
+          Vacio(icono: Icons.wifi_off_rounded, titulo: 'Sin conexión', error: true,
+              texto: 'Puedes buscar igual cuando vuelva internet.', alAccion: _cargarExplorar)
+        else if (_explorar == null)
+          const Esqueleto(forma: FormaEsqueleto.generos),
+      ]),
+    );
   }
 }
 
@@ -405,8 +466,8 @@ class _Principal extends StatelessWidget {
     final tipo = {'pista': el['es_video'] == true ? 'Video' : 'Canción', 'album': 'Álbum',
       'artista': 'Artista', 'lista': 'Lista'}[el['tipo']] ?? '';
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Material(
+      padding: const EdgeInsets.symmetric(horizontal: Esp.lado),
+      child: Pulsable(escala: 0.98, child: Material(
         color: C.superficie2,
         borderRadius: BorderRadius.circular(10),
         child: InkWell(
@@ -431,7 +492,7 @@ class _Principal extends StatelessWidget {
             ]),
           ),
         ),
-      ),
+      )),
     );
   }
 }

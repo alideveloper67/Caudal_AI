@@ -20,23 +20,11 @@ class _ArtistaPaginaState extends State<ArtistaPagina> {
   Map<String, dynamic>? _a;
   String? _error;
   Color _color = C.superficie3;
-  final _scroll = ScrollController();
-  bool _mostrarTitulo = false;
 
   @override
   void initState() {
     super.initState();
-    _scroll.addListener(() {
-      final m = _scroll.offset > 260;
-      if (m != _mostrarTitulo) setState(() => _mostrarTitulo = m);
-    });
     _cargar();
-  }
-
-  @override
-  void dispose() {
-    _scroll.dispose();
-    super.dispose();
   }
 
   Future<void> _cargar() async {
@@ -84,17 +72,32 @@ class _ArtistaPaginaState extends State<ArtistaPagina> {
 
   @override
   Widget build(BuildContext context) {
-    final s = Caudal.of(context);
+    final a = _a;
+    final Widget pagina;
+    final String estado;
     if (_error != null) {
-      return Scaffold(appBar: AppBar(), body: Vacio(icono: Icons.wifi_off_rounded,
-          titulo: 'No se pudo abrir el artista', texto: _error!,
-          accion: OutlinedButton(onPressed: () {
+      estado = 'error';
+      pagina = Scaffold(appBar: AppBar(), body: Vacio(icono: Icons.wifi_off_rounded, error: true,
+          titulo: 'No se pudo abrir el artista', texto: explicarError(_error),
+          alAccion: () {
             setState(() => _error = null);
             _cargar();
-          }, child: const Text('Reintentar'))));
+          }));
+    } else if (a == null) {
+      estado = 'cargando';
+      // el esqueleto ocupa lo mismo que la pagina, foto incluida
+      pagina = Scaffold(extendBodyBehindAppBar: true,
+          appBar: AppBar(backgroundColor: Colors.transparent),
+          body: const Esqueleto(forma: FormaEsqueleto.artista));
+    } else {
+      estado = 'listo';
+      pagina = _pagina(context, a);
     }
-    final a = _a;
-    if (a == null) return Scaffold(appBar: AppBar(), body: const Esqueleto(filas: true));
+    return AnimatedSwitcher(duration: Mov.normal, child: KeyedSubtree(key: ValueKey(estado), child: pagina));
+  }
+
+  Widget _pagina(BuildContext context, Map<String, dynamic> a) {
+    final s = Caudal.of(context);
     final populares = _populares;
     final secPopulares = _seccionPopulares;
     // el resto, tal cual (si hubiera otras secciones en filas tambien se ven)
@@ -103,31 +106,29 @@ class _ArtistaPaginaState extends State<ArtistaPagina> {
         if (x is Map && !identical(x, secPopulares)) x
     ];
     final ancho = MediaQuery.sizeOf(context).width;
+    final arriba = MediaQuery.paddingOf(context).top;
+    final contexto = {'tipo': 'artista', 'id': widget.id, 'titulo': a['titulo']};
     return Scaffold(
-      body: CustomScrollView(
-        controller: _scroll,
-        slivers: [
-          SliverAppBar(
-            pinned: true,
-            stretch: true,
-            expandedHeight: ancho * 0.82,
-            backgroundColor: Color.lerp(_color, Colors.black, 0.45),
-            title: AnimatedOpacity(opacity: _mostrarTitulo ? 1 : 0, duration: const Duration(milliseconds: 180),
-                child: Text('${a['titulo']}', maxLines: 1, overflow: TextOverflow.ellipsis)),
-            flexibleSpace: FlexibleSpaceBar(
-              stretchModes: const [StretchMode.zoomBackground],
-              background: Stack(fit: StackFit.expand, children: [
-                Portada(url: '${a['foto'] ?? ''}', lado: ancho, alto: ancho * 0.82, radio: 0,
+      body: Escalonado(
+        child: CustomScrollView(
+          cacheExtent: 900,
+          slivers: [
+            CabeceraPlegable(
+              titulo: '${a['titulo']}',
+              color: _color,
+              alto: ancho * 0.82,
+              fondo: Stack(fit: StackFit.expand, children: [
+                Portada(url: '${a['foto'] ?? ''}', lado: ancho, alto: ancho * 0.82 + arriba, radio: 0,
                     icono: Icons.person_rounded),
                 const DecoratedBox(decoration: BoxDecoration(gradient: LinearGradient(
                     colors: [Colors.transparent, Color(0xCC000000)], begin: Alignment.center,
                     end: Alignment.bottomCenter))),
                 Positioned(
-                  left: 16, right: 16, bottom: 14,
+                  left: Esp.lado, right: Esp.lado, bottom: 14,
                   child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                     Text('${a['titulo']}', maxLines: 2, overflow: TextOverflow.ellipsis,
                         style: const TextStyle(fontSize: 42, fontWeight: FontWeight.w900, height: 1.0,
-                            letterSpacing: -1)),
+                            letterSpacing: -1, shadows: [Shadow(color: Color(0x66000000), blurRadius: 12)])),
                     if ('${a['subtitulo'] ?? ''}'.isNotEmpty)
                       Padding(padding: const EdgeInsets.only(top: 6),
                           child: Text('${a['subtitulo']}', style: const TextStyle(fontWeight: FontWeight.w600))),
@@ -135,88 +136,98 @@ class _ArtistaPaginaState extends State<ArtistaPagina> {
                 ),
               ]),
             ),
-          ),
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 14, 16, 8),
-              child: ListenableBuilder(
-                listenable: s.coleccion,
-                builder: (_, __) {
-                  final seguido = s.coleccion.guardado('artista', widget.id);
-                  return Row(children: [
-                    OutlinedButton(
-                      onPressed: () => s.alternarGuardado(_elemento),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: seguido ? C.acento : C.texto,
-                        side: BorderSide(color: seguido ? C.acento : C.texto3),
-                        shape: const StadiumBorder(),
-                      ),
-                      child: Text(seguido ? 'Siguiendo' : 'Seguir'),
-                    ),
-                    IconButton(
-                      tooltip: 'Radio del artista',
-                      icon: const Icon(Icons.radio_rounded, color: C.texto2),
-                      onPressed: () {
-                        final rid = _primero([a['radio_id'], a['aleatorio_id']]);
-                        if (rid.isNotEmpty) {
-                          s.reproductor.reproducirRadioId(rid, 'Radio de ${a['titulo']}');
-                        } else if (populares.isNotEmpty) {
-                          s.reproductor.iniciarRadio(populares.first);
-                        }
-                      },
-                    ),
-                    const Spacer(),
-                    IconButton(
-                      icon: const Icon(Icons.shuffle_rounded, color: C.texto2, size: 28),
-                      onPressed: () {
-                        final rid = _primero([a['aleatorio_id']]);
-                        if (rid.isNotEmpty) {
-                          s.reproductor.reproducirRadioId(rid, '${a['titulo']}');
-                        } else {
-                          s.reproducirLista(context, populares, aleatorio: true,
-                              contexto: {'tipo': 'artista', 'id': widget.id, 'titulo': a['titulo']});
-                        }
-                      },
-                    ),
-                    const SizedBox(width: 6),
-                    BotonPlay(alPulsar: () => s.reproducirLista(context, populares,
-                        contexto: {'tipo': 'artista', 'id': widget.id, 'titulo': a['titulo']})),
-                  ]);
-                },
-              ),
-            ),
-          ),
-          if (populares.isNotEmpty) ...[
-            const SliverToBoxAdapter(child: Padding(padding: EdgeInsets.only(top: 8), child: TituloSeccion('Populares'))),
-            SliverList.builder(
-              itemCount: populares.length,
-              itemBuilder: (_, i) => FilaPista(
-                pista: populares[i],
-                numero: i + 1,
-                alPulsar: () => s.reproducirLista(context, populares, inicio: i,
-                    contexto: {'tipo': 'artista', 'id': widget.id, 'titulo': a['titulo']}),
-              ),
-            ),
-          ],
-          SliverList(delegate: SliverChildListDelegate([
-            const SizedBox(height: 24),
-            ...pintarSecciones(context, resto),
-            if ('${a['descripcion'] ?? ''}'.isNotEmpty)
-              Padding(
-                padding: const EdgeInsets.all(16),
-                child: Container(
-                  padding: const EdgeInsets.all(18),
-                  decoration: BoxDecoration(color: C.superficie2, borderRadius: BorderRadius.circular(10)),
-                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    const Text('Información', style: estiloTituloSeccion),
-                    const SizedBox(height: 10),
-                    Text('${a['descripcion']}', style: const TextStyle(color: C.texto2, height: 1.45)),
-                  ]),
+            SliverToBoxAdapter(
+              child: Entrada(
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(Esp.lado, 14, Esp.lado, Esp.s),
+                  child: ListenableBuilder(
+                    listenable: s.coleccion,
+                    builder: (_, _) {
+                      final seguido = s.coleccion.guardado('artista', widget.id);
+                      return Row(children: [
+                        Pulsable(
+                          escala: 0.94,
+                          child: OutlinedButton(
+                            onPressed: () => s.alternarGuardado(_elemento),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: seguido ? C.acento : C.texto,
+                              side: BorderSide(color: seguido ? C.acento : C.texto3),
+                              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+                            ),
+                            child: AnimatedSwitcher(
+                              duration: Mov.rapido,
+                              child: Text(seguido ? 'Siguiendo' : 'Seguir', key: ValueKey(seguido)),
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          tooltip: 'Radio del artista',
+                          icon: const Icon(Icons.radio_rounded, color: C.texto2),
+                          onPressed: () {
+                            final rid = _primero([a['radio_id'], a['aleatorio_id']]);
+                            if (rid.isNotEmpty) {
+                              s.reproductor.reproducirRadioId(rid, 'Radio de ${a['titulo']}');
+                            } else if (populares.isNotEmpty) {
+                              s.reproductor.iniciarRadio(populares.first);
+                            }
+                          },
+                        ),
+                        const Spacer(),
+                        IconButton(
+                          tooltip: 'Aleatorio',
+                          icon: const Icon(Icons.shuffle_rounded, color: C.texto2, size: 28),
+                          onPressed: () {
+                            final rid = _primero([a['aleatorio_id']]);
+                            if (rid.isNotEmpty) {
+                              s.reproductor.reproducirRadioId(rid, '${a['titulo']}');
+                            } else {
+                              s.reproducirLista(context, populares, aleatorio: true, contexto: contexto);
+                            }
+                          },
+                        ),
+                        const SizedBox(width: 6),
+                        BotonPlay(alPulsar: () => s.reproducirLista(context, populares, contexto: contexto)),
+                      ]);
+                    },
+                  ),
                 ),
               ),
-            const SizedBox(height: espacioInferior),
-          ])),
-        ],
+            ),
+            if (populares.isNotEmpty) ...[
+              const SliverToBoxAdapter(child: Entrada(indice: 1,
+                  child: Padding(padding: EdgeInsets.only(top: Esp.s), child: TituloSeccion('Populares')))),
+              SliverList.builder(
+                itemCount: populares.length,
+                itemBuilder: (_, i) => Entrada(
+                  indice: 2 + i,
+                  child: FilaPista(
+                    pista: populares[i],
+                    numero: i + 1,
+                    alPulsar: () => s.reproducirLista(context, populares, inicio: i, contexto: contexto),
+                  ),
+                ),
+              ),
+            ],
+            SliverList(delegate: SliverChildListDelegate([
+              const SizedBox(height: Esp.xl),
+              ...pintarSecciones(context, resto, desde: 4),
+              if ('${a['descripcion'] ?? ''}'.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.all(Esp.lado),
+                  child: Container(
+                    padding: const EdgeInsets.all(18),
+                    decoration: BoxDecoration(color: C.superficie2, borderRadius: BorderRadius.circular(12)),
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      const Text('Información', style: estiloTituloSeccion),
+                      const SizedBox(height: 10),
+                      Text('${a['descripcion']}', style: const TextStyle(color: C.texto2, height: 1.45)),
+                    ]),
+                  ),
+                ),
+              const SizedBox(height: espacioInferior),
+            ])),
+          ],
+        ),
       ),
     );
   }

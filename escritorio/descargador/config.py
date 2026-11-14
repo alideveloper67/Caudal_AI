@@ -137,6 +137,11 @@ DEFECTOS = {
     "teclas_multimedia": True,
     "super_volumen": 0,              # 0 apagado, 1..4 cada vez mas fuerte (sin saturar)
     "recordar_sesion": True,
+    # --- compartidos con la app movil (mismas claves en los dos lados)
+    "descarga_inteligente": False,   # bajar solo tus me gusta y lo mas escuchado
+    "descarga_inteligente_gb": 5,    # hasta cuantos GB
+    "transicion_dj": True,           # recortar silencios del final y del inicio al pasar
+    "apagado_suave": True,           # el temporizador baja el volumen en los ultimos 30 s
 }
 
 

@@ -47,6 +47,13 @@ class Ajustes extends ChangeNotifier {
     'volumen': 100,
     'guardar_publico': true,
     'descarga_fuerte': false,
+    // con wifi, baja sola tus me gusta y lo mas escuchado (ver DescargaInteligente)
+    'descarga_inteligente': false,
+    'descarga_inteligente_gb': 5, // tope de espacio, en GB
+    // fundido que recorta los silencios del final y del inicio
+    'transicion_dj': true,
+    // el temporizador para dormir baja el volumen los ultimos 30 s
+    'apagado_suave': true,
   };
 
   T _valor<T>(String clave) {
@@ -93,6 +100,7 @@ class Ajustes extends ChangeNotifier {
     'region', 'calidad_audio', 'calidad_video', 'codec_video', 'normalizar', 'super_volumen',
     'ecualizador', 'eq_bandas', 'eq_preset', 'autoplay', 'sponsorblock', 'sponsorblock_videos',
     'formato_audio', 'bitrate_mp3', 'crossfade',
+    'descarga_inteligente', 'descarga_inteligente_gb', 'transicion_dj', 'apagado_suave',
   ];
 
   // atajos que usa el gestor de descargas

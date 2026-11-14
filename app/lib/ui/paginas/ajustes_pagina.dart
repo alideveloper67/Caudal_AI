@@ -116,7 +116,7 @@ class _AjustesPaginaState extends State<AjustesPagina> {
   }
 
   Widget _seccion(String t) => Padding(
-        padding: const EdgeInsets.fromLTRB(20, 26, 20, 6),
+        padding: const EdgeInsets.fromLTRB(Esp.lado, 28, Esp.lado, 6),
         child: Text(t.toUpperCase(),
             style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: C.acento, letterSpacing: 1)),
       );
@@ -142,10 +142,10 @@ class _AjustesPaginaState extends State<AjustesPagina> {
       appBar: AppBar(title: const Text('Ajustes')),
       body: ListView(padding: const EdgeInsets.only(bottom: 40), children: [
         // ---- cuenta
-        Padding(
-          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+        Entrada(child: Padding(
+          padding: const EdgeInsets.fromLTRB(Esp.lado, Esp.s, Esp.lado, Esp.s),
           child: Container(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(Esp.lado),
             decoration: BoxDecoration(color: C.superficie2, borderRadius: BorderRadius.circular(12)),
             child: Row(children: [
               CircleAvatar(radius: 26, backgroundColor: C.acento,
@@ -160,17 +160,19 @@ class _AjustesPaginaState extends State<AjustesPagina> {
                   StreamBuilder<String>(
                     stream: sinc.cambios,
                     initialData: sinc.estado,
-                    builder: (_, e) => Text(
-                      (e.data ?? '').isEmpty ? 'Tu biblioteca se guarda en tu cuenta' : e.data!,
-                      style: const TextStyle(fontSize: 12, color: C.texto3)),
+                    builder: (_, e) => AnimatedSwitcher(
+                      duration: Mov.normal,
+                      child: Text(
+                        (e.data ?? '').isEmpty ? 'Tu biblioteca se guarda en tu cuenta' : e.data!,
+                        key: ValueKey(e.data), style: estiloDetalle),
+                    ),
                   )
                 else
-                  const Text('Sin conexión: se sincroniza cuando vuelva internet',
-                      style: TextStyle(fontSize: 12, color: C.texto3)),
+                  const Text('Sin conexión: se sincroniza cuando vuelva internet', style: estiloDetalle),
               ])),
             ]),
           ),
-        ),
+        )),
         if (sinc != null)
           ListTile(
             leading: const Icon(Icons.sync_rounded, color: C.texto2),
@@ -295,9 +297,9 @@ class _AjustesPaginaState extends State<AjustesPagina> {
           onTap: _buscandoVersion ? null : _buscarVersion,
         ),
         const Padding(
-          padding: EdgeInsets.fromLTRB(20, 12, 20, 0),
+          padding: EdgeInsets.fromLTRB(Esp.lado, Esp.m, Esp.lado, 0),
           child: Text('Sin anuncios, en segundo plano, a la máxima calidad. Tu cuenta sirve también en Caudal '
-              'para Windows.', style: TextStyle(fontSize: 12.5, color: C.texto3)),
+              'para Windows.', style: estiloDetalle),
         ),
       ]),
     );

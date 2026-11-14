@@ -9,15 +9,14 @@ import '../../nucleo/coleccion.dart';
 import '../../reproduccion/reproductor.dart';
 import '../comunes.dart';
 import '../plataforma.dart';
+import '../reproductor/animaciones.dart';
+import '../reproductor/barra_progreso.dart';
+import '../reproductor/fondo_ambiente.dart';
+import '../reproductor/linea_karaoke.dart';
+import '../reproductor/portada_deslizable.dart';
 import '../servicios.dart';
 import '../tema.dart';
 import 'sonido.dart';
-
-String _t(Duration d) {
-  final s = d.inSeconds;
-  final h = s ~/ 3600, m = (s % 3600) ~/ 60, ss = s % 60;
-  return h > 0 ? '$h:${m.toString().padLeft(2, '0')}:${ss.toString().padLeft(2, '0')}' : '$m:${ss.toString().padLeft(2, '0')}';
-}
 
 class ReproductorPagina extends StatefulWidget {
   const ReproductorPagina({super.key});
@@ -32,6 +31,26 @@ class _ReproductorPaginaState extends State<ReproductorPagina> {
   // cuanto se ha bajado la pantalla con el dedo (sin reconstruir la pagina)
   final _arrastre = ValueNotifier<double>(0);
   bool _cerrando = false;
+
+  // hacia donde se pidio el ultimo cambio de cancion (1 siguiente, -1 anterior)
+  int _pedido = 1;
+  // con el que entro la cancion que suena; las que llegan solas vienen de la derecha
+  int _direccion = 1;
+  String _claveVista = '';
+
+  // el contenido aparece un poco despues de que la portada empieza a volar
+  Animation<double>? _ruta;
+  Animation<double> _entrada = kAlwaysCompleteAnimation;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final ruta = ModalRoute.of(context)?.animation;
+    if (ruta != null && !identical(ruta, _ruta)) {
+      _ruta = ruta;
+      _entrada = ruta.drive(CurveTween(curve: const Interval(0.25, 1, curve: Curves.easeOut)));
+    }
+  }
 
   @override
   void dispose() {
@@ -86,6 +105,26 @@ class _ReproductorPaginaState extends State<ReproductorPagina> {
     return false;
   }
 
+  void _siguiente(Reproductor r) {
+    _pedido = 1;
+    r.siguiente();
+  }
+
+  void _anterior(Reproductor r) {
+    _pedido = -1;
+    r.anterior();
+  }
+
+  /// Doble toque en la portada: marca me gusta (nunca lo quita, como en las
+  /// redes); si ya estaba, solo se ve el corazon.
+  void _meGustaDobleToque(Servicios s, Json p) {
+    if (s.coleccion.meGusta('${p['clave']}')) {
+      Haptico.toque();
+      return;
+    }
+    s.alternarMeGusta(p);
+  }
+
   @override
   Widget build(BuildContext context) {
     final s = Caudal.of(context);
@@ -108,17 +147,29 @@ class _ReproductorPaginaState extends State<ReproductorPagina> {
               WidgetsBinding.instance.addPostFrameCallback((_) => _cerrar());
               return const SizedBox.shrink();
             }
-            _colorDe('${p['miniatura'] ?? ''}');
-            final gusta = s.coleccion.meGusta('${p['clave']}');
+            final url = '${p['miniatura'] ?? ''}';
+            _colorDe(url);
+            final clave = '${p['clave']}';
+            if (clave != _claveVista) {
+              // la primera vez no hay de donde venir; luego, de donde se pidio
+              _direccion = _claveVista.isEmpty ? 1 : _pedido;
+              _pedido = 1;
+              _claveVista = clave;
+            }
+            final gusta = s.coleccion.meGusta(clave);
             final ctx = r.contexto;
-            return AnimatedContainer(
-              duration: const Duration(milliseconds: 600),
-              decoration: BoxDecoration(gradient: LinearGradient(
-                  colors: [_color, Color.lerp(_color, C.fondo, 0.82)!, C.fondo],
-                  stops: const [0, 0.55, 1], begin: Alignment.topCenter, end: Alignment.bottomCenter)),
-              child: Scaffold(
+            final video = r.modo == 'video';
+            return Stack(children: [
+              // ---- modo ambiente: la portada desenfocada, moviendose despacio
+              Positioned.fill(
+                child: FondoAmbiente(url: url, color: _color,
+                    enMovimiento: !video && r.estado == EstadoRepro.sonando),
+              ),
+              Scaffold(
                 backgroundColor: Colors.transparent,
-                body: SafeArea(
+                body: FadeTransition(
+                  opacity: _entrada,
+                  child: SafeArea(
                   // en iOS rebota abajo, pero arriba el tiron llega a "bajar para cerrar"
                   child: ListView(padding: EdgeInsets.zero, physics: esIOS ? const RebotaSoloAbajo() : null,
                       children: [
@@ -141,66 +192,59 @@ class _ReproductorPaginaState extends State<ReproductorPagina> {
                     // ---- portada o video
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 22),
-                      child: r.modo == 'video'
+                      child: video
                           ? _VideoEnLinea(r: r)
-                          : GestureDetector(
-                              onHorizontalDragEnd: (d) {
-                                final v = d.primaryVelocity ?? 0;
-                                if (v.abs() > 300) Haptico.seleccion();
-                                if (v < -300) r.siguiente();
-                                if (v > 300) r.anterior();
-                              },
-                              // el Hero va por fuera: durante el cambio de cancion conviven dos
-                              // portadas y dos Hero con la misma etiqueta romperian el vuelo
-                              child: Hero(
-                                tag: 'portada-actual',
-                                child: AnimatedSwitcher(
-                                  duration: const Duration(milliseconds: 260),
-                                  child: Container(
-                                    key: ValueKey(p['clave']),
-                                    decoration: const BoxDecoration(boxShadow: [
-                                      BoxShadow(color: Color(0x66000000), blurRadius: 26, offset: Offset(0, 12)),
-                                    ]),
-                                    child: Portada(url: '${p['miniatura'] ?? ''}', lado: ancho - 44, radio: 8),
-                                  ),
-                                ),
-                              ),
+                          : PortadaDeslizable(
+                              pista: p,
+                              lado: ladoPortadaGrande(ancho),
+                              direccion: _direccion,
+                              alSiguiente: () => _siguiente(r),
+                              alAnterior: () => _anterior(r),
+                              alDobleToque: () => _meGustaDobleToque(s, p),
                             ),
                     ),
                     const SizedBox(height: 26),
                     // ---- titulo
                     Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 22),
+                      padding: const EdgeInsets.only(left: 22, right: 10),
                       child: Row(children: [
-                        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                          Text('${p['titulo'] ?? ''}', maxLines: 1, overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
-                          const SizedBox(height: 3),
-                          GestureDetector(
-                            onTap: () {
-                              final arts = [
-                                for (final a in (p['artistas'] is List ? p['artistas'] as List : const []))
-                                  if (a is Map && '${a['id'] ?? ''}'.isNotEmpty) '${a['id']}'
-                              ];
-                              if (arts.isEmpty) return;
-                              // cierra el reproductor y abre al artista en la pestana visible
-                              _cerrando = true;
-                              s.irAArtista(context, arts.first);
-                            },
-                            child: Text('${p['artista'] ?? ''}', maxLines: 1, overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(fontSize: 15, color: Color(0xCCFFFFFF))),
+                        Expanded(
+                          // el titulo tambien entra por el lado del gesto
+                          child: ClipRect(
+                            child: AnimatedSwitcher(
+                              duration: const Duration(milliseconds: 340),
+                              transitionBuilder: deslizarEn(_direccion, ValueKey(clave), distancia: 0.35),
+                              layoutBuilder: (a, previos) => Stack(alignment: Alignment.centerLeft,
+                                  children: [...previos, ?a]),
+                              child: Column(key: ValueKey(clave), crossAxisAlignment: CrossAxisAlignment.start, children: [
+                                Text('${p['titulo'] ?? ''}', maxLines: 1, overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w800, letterSpacing: -0.3)),
+                                const SizedBox(height: 3),
+                                GestureDetector(
+                                  onTap: () {
+                                    final arts = [
+                                      for (final a in (p['artistas'] is List ? p['artistas'] as List : const []))
+                                        if (a is Map && '${a['id'] ?? ''}'.isNotEmpty) '${a['id']}'
+                                    ];
+                                    if (arts.isEmpty) return;
+                                    // cierra el reproductor y abre al artista en la pestana visible
+                                    _cerrando = true;
+                                    s.irAArtista(context, arts.first);
+                                  },
+                                  child: Text('${p['artista'] ?? ''}', maxLines: 1, overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(fontSize: 15, color: Color(0xCCFFFFFF))),
+                                ),
+                              ]),
+                            ),
                           ),
-                        ])),
-                        IconButton(
-                          icon: Icon(gusta ? Icons.favorite_rounded : Icons.favorite_border_rounded,
-                              color: gusta ? C.acento : C.texto, size: 28),
-                          onPressed: () => s.alternarMeGusta(p),
                         ),
+                        CorazonAnimado(gusta: gusta, tamano: 28, alPulsar: () => s.alternarMeGusta(p)),
                       ]),
                     ),
+                    const SizedBox(height: 4),
                     // ---- progreso
                     Padding(padding: const EdgeInsets.symmetric(horizontal: 10),
-                        child: RepaintBoundary(child: _Progreso(r: r))),
+                        child: RepaintBoundary(child: BarraProgreso(r: r))),
                     // ---- controles
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 14),
@@ -212,15 +256,21 @@ class _ReproductorPaginaState extends State<ReproductorPagina> {
                             s.avisar(await r.alternarAleatorio() ? 'Aleatorio activado' : 'Aleatorio desactivado');
                           },
                         ),
-                        IconButton(iconSize: 42, icon: const Icon(Icons.skip_previous_rounded), onPressed: () {
-                          Haptico.seleccion();
-                          r.anterior();
-                        }),
+                        Hundible(
+                          escala: 0.86,
+                          child: IconButton(iconSize: 42, icon: const Icon(Icons.skip_previous_rounded), onPressed: () {
+                            Haptico.seleccion();
+                            _anterior(r);
+                          }),
+                        ),
                         _BotonGrande(r: r),
-                        IconButton(iconSize: 42, icon: const Icon(Icons.skip_next_rounded), onPressed: () {
-                          Haptico.seleccion();
-                          r.siguiente();
-                        }),
+                        Hundible(
+                          escala: 0.86,
+                          child: IconButton(iconSize: 42, icon: const Icon(Icons.skip_next_rounded), onPressed: () {
+                            Haptico.seleccion();
+                            _siguiente(r);
+                          }),
+                        ),
                         IconButton(
                           icon: Icon(r.repetir == 'una' ? Icons.repeat_one_rounded : Icons.repeat_rounded,
                               color: r.repetir == 'no' ? C.texto : C.acento),
@@ -249,7 +299,8 @@ class _ReproductorPaginaState extends State<ReproductorPagina> {
                           ),
                         const Spacer(),
                         if ('${p['video_id'] ?? ''}'.isNotEmpty || (p['archivo'] != null && p['es_audio'] != true))
-                          SegmentedButton<String>(
+                          // en un telefono estrecho se encoge en vez de desbordar la fila
+                          Flexible(child: FittedBox(fit: BoxFit.scaleDown, child: SegmentedButton<String>(
                             showSelectedIcon: false,
                             style: SegmentedButton.styleFrom(
                               visualDensity: VisualDensity.compact,
@@ -266,7 +317,7 @@ class _ReproductorPaginaState extends State<ReproductorPagina> {
                               Haptico.seleccion();
                               r.cambiarModo(sel.first);
                             },
-                          ),
+                          ))),
                         const Spacer(),
                         IconButton(
                           tooltip: 'Temporizador',
@@ -295,8 +346,9 @@ class _ReproductorPaginaState extends State<ReproductorPagina> {
                     const SizedBox(height: 24),
                   ]),
                 ),
+                ),
               ),
-            );
+            ]);
           },
         ),
       ),
@@ -342,6 +394,8 @@ class _ReproductorPaginaState extends State<ReproductorPagina> {
       );
 }
 
+/// El boton redondo de play/pausa: el icono se transforma y el boton se
+/// hunde un poco bajo el dedo.
 class _BotonGrande extends StatelessWidget {
   const _BotonGrande({required this.r});
   final Reproductor r;
@@ -349,67 +403,33 @@ class _BotonGrande extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final cargando = r.estado == EstadoRepro.cargando;
-    return Material(
-      color: C.texto,
-      shape: const CircleBorder(),
-      child: InkWell(
-        customBorder: const CircleBorder(),
-        onTap: () {
-          HapticFeedback.lightImpact();
-          r.alternar();
-        },
-        child: SizedBox(
-          width: 70, height: 70,
-          child: cargando
-              ? const Padding(padding: EdgeInsets.all(22),
-                  child: CircularProgressIndicator(strokeWidth: 3, color: C.fondo))
-              : Icon(r.estado == EstadoRepro.sonando ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                  color: C.fondo, size: 42),
+    return Hundible(
+      escala: 0.9,
+      child: Material(
+        color: C.texto,
+        shape: const CircleBorder(),
+        elevation: 6,
+        shadowColor: const Color(0x66000000),
+        child: InkWell(
+          customBorder: const CircleBorder(),
+          onTap: () {
+            HapticFeedback.lightImpact();
+            r.alternar();
+          },
+          child: SizedBox(
+            width: 70, height: 70,
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 200),
+              transitionBuilder: (hijo, a) => ScaleTransition(scale: a, child: FadeTransition(opacity: a, child: hijo)),
+              child: cargando
+                  ? const Padding(key: ValueKey('cargando'), padding: EdgeInsets.all(22),
+                      child: CircularProgressIndicator(strokeWidth: 3, color: C.fondo))
+                  : Center(key: const ValueKey('icono'),
+                      child: IconoPlayPausa(sonando: r.estado == EstadoRepro.sonando, tamano: 42, color: C.fondo)),
+            ),
+          ),
         ),
       ),
-    );
-  }
-}
-
-class _Progreso extends StatefulWidget {
-  const _Progreso({required this.r});
-  final Reproductor r;
-
-  @override
-  State<_Progreso> createState() => _ProgresoState();
-}
-
-class _ProgresoState extends State<_Progreso> {
-  double? _arrastrando;
-
-  @override
-  Widget build(BuildContext context) {
-    final r = widget.r;
-    return ValueListenableBuilder<Duration>(
-      valueListenable: r.posicion,
-      builder: (_, pos, __) {
-        final dur = r.duracion.value;
-        final max = dur.inMilliseconds.toDouble();
-        final valor = _arrastrando ?? pos.inMilliseconds.toDouble().clamp(0, max <= 0 ? 1 : max);
-        return Column(children: [
-          Slider(
-            value: max <= 0 ? 0 : valor.clamp(0, max),
-            max: max <= 0 ? 1 : max,
-            onChanged: max <= 0 ? null : (v) => setState(() => _arrastrando = v),
-            onChangeEnd: (v) {
-              r.buscar(Duration(milliseconds: v.round()));
-              setState(() => _arrastrando = null);
-            },
-          ),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14),
-            child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-              Text(_t(Duration(milliseconds: valor.round())), style: const TextStyle(fontSize: 12, color: Color(0xCCFFFFFF))),
-              Text(_t(dur), style: const TextStyle(fontSize: 12, color: Color(0xCCFFFFFF))),
-            ]),
-          ),
-        ]);
-      },
     );
   }
 }
@@ -576,6 +596,9 @@ class _TarjetaLetraState extends State<_TarjetaLetra> {
     _cargar();
     final l = _l;
     final fondo = HSVColor.fromColor(widget.color).withValue(0.62).withSaturation(0.55).toColor();
+    final abajo = Color.lerp(fondo, Colors.black, 0.22)!;
+    // el color de la tarjeta justo donde empieza la letra (34 de 280 px)
+    final arriba = Color.lerp(fondo, abajo, 34 / 280)!;
     final hay = l != null && ((l['lineas'] as List? ?? []).isNotEmpty || '${l['texto'] ?? ''}'.isNotEmpty);
     return GestureDetector(
       onTap: hay ? () => Navigator.of(context).push(MaterialPageRoute(
@@ -583,7 +606,16 @@ class _TarjetaLetraState extends State<_TarjetaLetra> {
       child: Container(
         height: 280,
         padding: const EdgeInsets.fromLTRB(18, 14, 18, 0),
-        decoration: BoxDecoration(color: fondo, borderRadius: BorderRadius.circular(12)),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          gradient: LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [fondo, abajo],
+          ),
+          boxShadow: const [BoxShadow(color: Color(0x40000000), blurRadius: 18, offset: Offset(0, 8))],
+        ),
+        clipBehavior: Clip.antiAlias,
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
             const Text('Letra', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
@@ -597,7 +629,21 @@ class _TarjetaLetraState extends State<_TarjetaLetra> {
                 : !hay
                     ? const Center(child: Text('No hay letra para esta canción.',
                         style: TextStyle(fontWeight: FontWeight.w700)))
-                    : IgnorePointer(child: _VistaLetra(letra: l, compacta: true)),
+                    : IgnorePointer(
+                        // la letra se desvanece por arriba y por abajo en vez de cortarse
+                        // (dos velos del color de la tarjeta: sin capas extra que componer)
+                        child: Stack(fit: StackFit.expand, children: [
+                          _VistaLetra(letra: l, compacta: true),
+                          Positioned(left: 0, right: 0, top: 0, height: 14,
+                              child: DecoratedBox(decoration: BoxDecoration(gradient: LinearGradient(
+                                  begin: Alignment.topCenter, end: Alignment.bottomCenter,
+                                  colors: [arriba, arriba.withValues(alpha: 0)])))),
+                          Positioned(left: 0, right: 0, bottom: 0, height: 46,
+                              child: DecoratedBox(decoration: BoxDecoration(gradient: LinearGradient(
+                                  begin: Alignment.topCenter, end: Alignment.bottomCenter,
+                                  colors: [abajo.withValues(alpha: 0), abajo])))),
+                        ]),
+                      ),
           ),
         ]),
       ),
@@ -638,6 +684,9 @@ class _VistaLetra extends StatefulWidget {
 }
 
 class _VistaLetraState extends State<_VistaLetra> {
+  // lo ya cantado queda blanco tenue; lo que viene, oscuro sobre el color
+  static const _cantada = Color(0xB3FFFFFF);
+  static const _porVenir = Color(0xB306070A);
   final _scroll = ScrollController();
   late List<(int, String)> _ls = _lineas(widget.letra);
   late List<GlobalKey> _llaves = List.generate(_ls.length, (_) => GlobalKey());
@@ -720,20 +769,45 @@ class _VistaLetraState extends State<_VistaLetra> {
         itemCount: _ls.length,
         itemBuilder: (_, i) {
           final estado = i == _actual ? 0 : (i < _actual ? -1 : 1);
+          final texto = _ls[i].$2.trim().isEmpty ? '♪' : _ls[i].$2;
+          final estilo = TextStyle(
+            fontSize: widget.compacta ? 20 : 26,
+            fontWeight: FontWeight.w800,
+            height: 1.28,
+            letterSpacing: -0.3,
+            color: estado == 0 ? Colors.white : (estado < 0 ? _cantada : _porVenir),
+          );
+          Widget linea;
+          if (estado == 0 && texto != '♪') {
+            // la que suena se va llenando de blanco al cantarse
+            final inicio = _ls[i].$1;
+            final siguiente = i + 1 < _ls.length ? _ls[i + 1].$1 : inicio + 5000;
+            final fin = inicio + (siguiente - inicio).clamp(600, 1500 + texto.length * 85);
+            linea = LineaKaraoke(texto: texto, estilo: estilo, inicio: inicio, fin: fin, r: _r!,
+                hecho: Colors.white, falta: _porVenir);
+          } else {
+            linea = AnimatedDefaultTextStyle(
+              duration: const Duration(milliseconds: 260),
+              style: estilo,
+              child: Text(texto),
+            );
+          }
           return GestureDetector(
             key: _llaves[i],
             onTap: () => _r?.buscar(Duration(milliseconds: _ls[i].$1)),
             child: Padding(
-              padding: const EdgeInsets.symmetric(vertical: 7),
-              child: AnimatedDefaultTextStyle(
-                duration: const Duration(milliseconds: 220),
-                style: TextStyle(
-                  fontSize: widget.compacta ? 20 : 25,
-                  fontWeight: FontWeight.w800,
-                  height: 1.3,
-                  color: estado == 0 ? Colors.white : (estado < 0 ? const Color(0x99FFFFFF) : const Color(0xCC06070A)),
+              padding: EdgeInsets.symmetric(vertical: widget.compacta ? 6 : 8),
+              // la que suena crece apenas; es solo pintura, no mueve las demas
+              child: AnimatedScale(
+                scale: estado == 0 ? 1 : 0.94,
+                alignment: Alignment.centerLeft,
+                duration: const Duration(milliseconds: 320),
+                curve: Curves.easeOutCubic,
+                child: AnimatedOpacity(
+                  opacity: estado == 0 ? 1 : (estado < 0 ? 0.72 : 1),
+                  duration: const Duration(milliseconds: 320),
+                  child: linea,
                 ),
-                child: Text(_ls[i].$2.isEmpty ? '♪' : _ls[i].$2),
               ),
             ),
           );

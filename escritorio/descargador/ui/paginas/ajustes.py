@@ -143,6 +143,11 @@ class PaginaAjustes(Pagina):
         self._conectar(self.letras, "letras_auto")
         s.fila("Mostrar la letra al reproducir", "Abre la letra en el panel derecho cuando "
                                                  "empieza una canción.", self.letras)
+        self.suave = _interruptor(a["apagado_suave"])
+        self._conectar(self.suave, "apagado_suave")
+        s.fila("Apagar la música poco a poco", "Con el temporizador para dormir, el volumen va "
+                                               "bajando durante los últimos 30 segundos en vez "
+                                               "de cortarse de golpe.", self.suave)
         self.region = _combo(REGIONES, a["region"], 200)
         self._conectar(self.region, "region", lambda: catalogo.fijar_region(self.a["region"]))
         s.fila("País para las recomendaciones", "Inicio, novedades y tendencias de este país.",
@@ -179,6 +184,11 @@ class PaginaAjustes(Pagina):
         self._fundido(self.fundido.value(), guardar=False)
         s.fila("Fundido entre canciones", "Una canción se funde con la siguiente, sin silencio "
                                           "entre medias.", caja_fundido)
+        self.dj = _interruptor(a["transicion_dj"])
+        self._conectar(self.dj, "transicion_dj")
+        s.fila("Transiciones como un DJ", "Al pasar de canción se recortan los silencios del "
+                                          "final y del principio, para que la siguiente entre "
+                                          "justo a tiempo. Funciona con y sin fundido.", self.dj)
         bt_eq = QPushButton("  Abrir el ecualizador")
         bt_eq.setIcon(iconos.icono("ecualizador", 16, C["texto"]))
         bt_eq.setCursor(Qt.PointingHandCursor)
@@ -286,6 +296,29 @@ class PaginaAjustes(Pagina):
         s.fila("Idiomas de los subtítulos", "Códigos separados por comas: es, en, pt", self.idiomas)
         self.cuerpo.addWidget(s)
 
+        # ---------------- descarga inteligente
+        s = Seccion("Descarga inteligente")
+        self.inteligente = _interruptor(a["descarga_inteligente"])
+        self._conectar(self.inteligente, "descarga_inteligente", self._inteligente_cambio)
+        s.fila("Bajar sola tu música favorita",
+               "Caudal descarga en segundo plano tus me gusta y lo que más escuchas, para que "
+               "suene sin internet. Va despacio y se aparta cuando ves un video o cuando algo "
+               "está cargando, para no cortar lo que suena.", self.inteligente)
+        self.inteligente_gb = QSpinBox()
+        self.inteligente_gb.setRange(1, 500)
+        self.inteligente_gb.setSuffix(" GB")
+        self.inteligente_gb.setValue(max(1, int(a["descarga_inteligente_gb"] or 5)))
+        self.inteligente_gb.valueChanged.connect(
+            lambda v: (self._poner("descarga_inteligente_gb", int(v)), self._inteligente_cambio()))
+        s.fila("Espacio máximo", "Cuando se llena, deja de bajar. Lo ya descargado no se borra.",
+               self.inteligente_gb)
+        self.et_inteligente = QLabel("")
+        self.et_inteligente.setObjectName("secundario")
+        self.et_inteligente.setWordWrap(True)
+        s.fila("Cómo va", "", self.et_inteligente)
+        self.cuerpo.addWidget(s)
+        self._preparar_inteligente()
+
         # ---------------- cuenta
         s = Seccion("Tu cuenta de YouTube (opcional)")
         nota = QLabel("Sin cuenta todo funciona. Con tu sesión de YouTube (si tienes Premium) "
@@ -384,6 +417,50 @@ class PaginaAjustes(Pagina):
         self.et_fundido.setText(f"{v} s" if v else "Sin fundido")
         if guardar:
             self._poner("crossfade", int(v))
+
+    # ------------------------------------------------------------ descarga inteligente
+
+    def _descarga_inteligente(self):
+        return getattr(self.ctx.reproductor, "descarga_inteligente", None)
+
+    def _preparar_inteligente(self):
+        self.et_inteligente.setFixedWidth(320)
+        self.et_inteligente.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+        di = self._descarga_inteligente()
+        if di is None:
+            self.et_inteligente.setText("No disponible en este equipo.")
+            return
+        if di.gestor is None:
+            di.gestor = self.ctx.gestor          # para no pisar tus descargas
+        if not getattr(di, "_avisa_biblioteca", False):
+            di._avisa_biblioteca = True
+            di.descargada.connect(lambda _p: self.ctx.descargas_cambio.emit())
+        di.cambio.connect(self._pintar_inteligente)
+        self._pintar_inteligente()
+
+    def _inteligente_cambio(self):
+        di = self._descarga_inteligente()
+        if di is not None:
+            di.ajustes_cambiaron()
+        self._pintar_inteligente()
+
+    def _pintar_inteligente(self):
+        try:
+            di = self._descarga_inteligente()
+            if di is None:
+                return
+            e = di.estado()
+            usado = formato_bytes(e["usado"]) if e["usado"] else "0 MB"
+            texto = f"Usado {usado} de {e['limite_gb']} GB"
+            if not e["activa"]:
+                texto += " · apagada"
+            elif e["bajando"]:
+                texto += f" · bajando «{e['bajando']}»"
+            elif e["motivo"]:
+                texto += " · " + e["motivo"]
+            self.et_inteligente.setText(texto)
+        except RuntimeError:
+            pass        # la pagina ya se cerro
 
     def _teclas(self):
         tm = getattr(self.ctx.ventana, "teclas_multimedia", None)
@@ -489,5 +566,7 @@ class PaginaAjustes(Pagina):
                 self.a[k] = list(v) if isinstance(v, list) else v
         self.a.guardar()
         self.ctx.reproductor.aplicar_sonido()
+        if self._descarga_inteligente() is not None:
+            self._descarga_inteligente().ajustes_cambiaron()
         self.ctx.navegar({"pagina": "ajustes"})
         self.ctx.aviso.emit("Ajustes restaurados")

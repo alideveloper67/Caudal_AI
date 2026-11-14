@@ -105,9 +105,75 @@ ThemeData temaCaudal() {
       TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
     }),
     dividerTheme: const DividerThemeData(color: C.borde, thickness: 1, space: 1),
+    listTileTheme: const ListTileThemeData(
+      iconColor: C.texto2,
+      subtitleTextStyle: estiloSecundario,
+      contentPadding: EdgeInsets.symmetric(horizontal: Esp.lado),
+    ),
+    outlinedButtonTheme: OutlinedButtonThemeData(
+      style: OutlinedButton.styleFrom(
+        foregroundColor: C.texto,
+        side: const BorderSide(color: C.texto3),
+        shape: const StadiumBorder(),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+        textStyle: const TextStyle(fontWeight: FontWeight.w700),
+      ),
+    ),
+    textButtonTheme: TextButtonThemeData(
+      style: TextButton.styleFrom(textStyle: const TextStyle(fontWeight: FontWeight.w700)),
+    ),
   );
 }
 
-const estiloTituloPagina = TextStyle(fontSize: 28, fontWeight: FontWeight.w900, letterSpacing: -0.5);
-const estiloTituloSeccion = TextStyle(fontSize: 21, fontWeight: FontWeight.w800, letterSpacing: -0.3);
-const estiloSecundario = TextStyle(fontSize: 13, color: C.texto2);
+// ---------------------------------------------------------------- jerarquia
+//
+// Una sola escala para toda la app: titulo de pagina > titulo de barra >
+// seccion > fila > secundario > detalle. Las paginas no inventan tamanos.
+
+/// "Buscar", "Descargar", "Sonido": lo primero que se lee en una pagina.
+const estiloTituloPagina = TextStyle(fontSize: 28, fontWeight: FontWeight.w900, letterSpacing: -0.6, height: 1.1);
+
+/// El saludo de Inicio y "Tu biblioteca", al lado del avatar.
+const estiloTituloBarra = TextStyle(fontSize: 23, fontWeight: FontWeight.w900, letterSpacing: -0.4, height: 1.15);
+
+/// "Volver a escuchar", "Populares"...
+const estiloTituloSeccion = TextStyle(fontSize: 21, fontWeight: FontWeight.w800, letterSpacing: -0.3, height: 1.2);
+
+/// El nombre en una fila o una tarjeta.
+const estiloTituloFila = TextStyle(fontSize: 15.5, fontWeight: FontWeight.w600, height: 1.25);
+const estiloTituloTarjeta = TextStyle(fontSize: 14, fontWeight: FontWeight.w600, height: 1.25);
+
+/// Lo que acompana: artista, numero de canciones, ayudas.
+const estiloSecundario = TextStyle(fontSize: 13, color: C.texto2, height: 1.3);
+const estiloSubTarjeta = TextStyle(fontSize: 12.5, color: C.texto2, height: 1.25);
+
+/// Notas al pie y avisos pequenos.
+const estiloDetalle = TextStyle(fontSize: 12, color: C.texto3, height: 1.35);
+
+/// Los espacios de siempre (multiplos de 4).
+class Esp {
+  Esp._();
+  static const xs = 4.0;
+  static const s = 8.0;
+  static const m = 12.0;
+  static const l = 16.0;
+  static const xl = 24.0;
+  static const xxl = 32.0;
+
+  /// El margen lateral de todas las paginas.
+  static const lado = 16.0;
+
+  /// Entre un carrusel y el siguiente.
+  static const entreSecciones = 28.0;
+}
+
+/// Las duraciones y curvas de la app: rapidas y sin rebote exagerado.
+class Mov {
+  Mov._();
+  static const rapido = Duration(milliseconds: 140);
+  static const normal = Duration(milliseconds: 260);
+  static const entrada = Duration(milliseconds: 420);
+  static const color = Duration(milliseconds: 520);
+  static const curva = Curves.easeOutCubic;
+  static const curvaEntrada = Cubic(0.2, 0.8, 0.2, 1);
+}

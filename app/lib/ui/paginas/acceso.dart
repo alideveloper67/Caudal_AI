@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../nucleo/cuentas.dart';
+import '../comunes.dart';
 import '../tema.dart';
 
 /// Entrar o crear la cuenta (la misma que en Caudal para Windows).
@@ -96,7 +97,7 @@ class _AccesoPaginaState extends State<AccesoPagina> with SingleTickerProviderSt
         // fondo vivo: dos luces que se mueven despacio
         AnimatedBuilder(
           animation: _brillo,
-          builder: (_, __) {
+          builder: (_, _) {
             final t = _brillo.value * 6.283;
             return DecoratedBox(
               decoration: BoxDecoration(gradient: RadialGradient(
@@ -117,7 +118,7 @@ class _AccesoPaginaState extends State<AccesoPagina> with SingleTickerProviderSt
                 constraints: const BoxConstraints(maxWidth: 420),
                 child: AutofillGroup(
                   child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                    Center(
+                    Entrada(child: Center(
                       child: Container(
                         width: 74, height: 74,
                         decoration: BoxDecoration(
@@ -128,10 +129,10 @@ class _AccesoPaginaState extends State<AccesoPagina> with SingleTickerProviderSt
                         ),
                         child: const Icon(Icons.waves_rounded, size: 40, color: Colors.white),
                       ),
-                    ),
+                    )),
                     const SizedBox(height: 18),
-                    const Text('Caudal', textAlign: TextAlign.center,
-                        style: TextStyle(fontSize: 34, fontWeight: FontWeight.w900, letterSpacing: -1)),
+                    const Entrada(indice: 1, child: Text('Caudal', textAlign: TextAlign.center,
+                        style: TextStyle(fontSize: 34, fontWeight: FontWeight.w900, letterSpacing: -1))),
                     const SizedBox(height: 6),
                     AnimatedSwitcher(
                       duration: const Duration(milliseconds: 220),
@@ -149,6 +150,7 @@ class _AccesoPaginaState extends State<AccesoPagina> with SingleTickerProviderSt
                         for (final (reg, texto) in const [(false, 'Entrar'), (true, 'Crear cuenta')])
                           Expanded(
                             child: GestureDetector(
+                              behavior: HitTestBehavior.opaque,
                               onTap: _ocupado ? null : () => setState(() {
                                 _registro = reg;
                                 _error = null;
@@ -243,7 +245,7 @@ class _AccesoPaginaState extends State<AccesoPagina> with SingleTickerProviderSt
                             ),
                     ),
                     const SizedBox(height: 6),
-                    SizedBox(
+                    Pulsable(escala: 0.97, child: SizedBox(
                       height: 52,
                       child: FilledButton(
                         onPressed: _ocupado ? null : _enviar,
@@ -258,7 +260,7 @@ class _AccesoPaginaState extends State<AccesoPagina> with SingleTickerProviderSt
                                 child: CircularProgressIndicator(strokeWidth: 2.6, color: C.acentoTexto))
                             : Text(_registro ? 'Crear mi cuenta' : 'Entrar'),
                       ),
-                    ),
+                    )),
                     const SizedBox(height: 16),
                     const Text('Usa el mismo usuario en Caudal para Windows y tendrás todo igual.',
                         textAlign: TextAlign.center, style: TextStyle(fontSize: 12, color: C.texto3)),

@@ -17,6 +17,7 @@ class BibliotecaPagina extends StatefulWidget {
 class _BibliotecaPaginaState extends State<BibliotecaPagina> with AutomaticKeepAliveClientMixin {
   String? _filtro;
   List<Json> _elementos = [];
+  bool _cargado = false;
   Coleccion? _col;
   int _vuelta = 0;
 
@@ -71,7 +72,12 @@ class _BibliotecaPaginaState extends State<BibliotecaPagina> with AutomaticKeepA
     if (f == null || f == 'artistas') {
       salida.addAll((await col.guardados('artista')).map((g) => {...g, 'subtitulo': 'Artista'}));
     }
-    if (mounted && vuelta == _vuelta) setState(() => _elementos = salida);
+    if (mounted && vuelta == _vuelta) {
+      setState(() {
+        _elementos = salida;
+        _cargado = true;
+      });
+    }
   }
 
   Future<void> _nuevaLista() async {
@@ -92,66 +98,86 @@ class _BibliotecaPaginaState extends State<BibliotecaPagina> with AutomaticKeepA
   Widget build(BuildContext context) {
     super.build(context);
     final s = Caudal.of(context);
+    final vacio = _cargado && _filtro != null && _elementos.isEmpty;
     return Scaffold(
-      body: CustomScrollView(slivers: [
-        SliverAppBar(
-          pinned: true,
-          backgroundColor: C.fondo,
-          titleSpacing: 16,
-          title: Row(children: [
-            GestureDetector(
-              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AjustesPagina())),
-              child: CircleAvatar(radius: 16, backgroundColor: C.acento,
-                  child: Text(s.cuenta.inicial, style: const TextStyle(color: C.acentoTexto, fontWeight: FontWeight.w900))),
-            ),
-            const SizedBox(width: 12),
-            const Text('Tu biblioteca', style: TextStyle(fontSize: 23, fontWeight: FontWeight.w900)),
-          ]),
-          actions: [IconButton(icon: const Icon(Icons.add_rounded, size: 28), onPressed: _nuevaLista)],
-          bottom: PreferredSize(
-            preferredSize: const Size.fromHeight(50),
-            child: SizedBox(
-              height: 50,
-              child: ListView(scrollDirection: Axis.horizontal, padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-                  children: [
-                if (_filtro != null)
-                  Padding(padding: const EdgeInsets.only(right: 8),
-                      child: ActionChip(label: const Icon(Icons.close_rounded, size: 16), backgroundColor: C.superficie2,
-                          side: BorderSide.none, shape: const StadiumBorder(), onPressed: () {
-                        setState(() => _filtro = null);
+      body: Escalonado(
+        clave: '$_cargado|$_filtro',
+        child: CustomScrollView(key: const PageStorageKey('biblioteca'), slivers: [
+          SliverAppBar(
+            pinned: true,
+            backgroundColor: C.fondo,
+            surfaceTintColor: Colors.transparent,
+            titleSpacing: Esp.lado,
+            title: Row(children: [
+              Pulsable(
+                escala: 0.9,
+                child: GestureDetector(
+                  onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AjustesPagina())),
+                  child: CircleAvatar(radius: 16, backgroundColor: C.acento,
+                      child: Text(s.cuenta.inicial, style: const TextStyle(color: C.acentoTexto, fontWeight: FontWeight.w900))),
+                ),
+              ),
+              const SizedBox(width: Esp.m),
+              const Text('Tu biblioteca', style: estiloTituloBarra),
+            ]),
+            actions: [
+              IconButton(tooltip: 'Nueva lista', icon: const Icon(Icons.add_rounded, size: 28), onPressed: _nuevaLista),
+            ],
+            bottom: PreferredSize(
+              preferredSize: const Size.fromHeight(50),
+              child: SizedBox(
+                height: 50,
+                child: ListView(scrollDirection: Axis.horizontal, padding: const EdgeInsets.fromLTRB(Esp.lado, 2, Esp.lado, 6),
+                    children: [
+                  if (_filtro != null)
+                    Pildora(icono: Icons.close_rounded, tooltip: 'Quitar el filtro', activa: false, alPulsar: () {
+                      setState(() => _filtro = null);
+                      _cargar();
+                    }),
+                  for (final (clave, texto) in const [('listas', 'Listas'), ('albumes', 'Álbumes'),
+                    ('artistas', 'Artistas'), ('telefono', 'En tu teléfono')])
+                    if (_filtro == null || _filtro == clave)
+                      Pildora(texto: texto, activa: _filtro == clave, alPulsar: () {
+                        setState(() => _filtro = _filtro == clave ? null : clave);
                         _cargar();
-                      })),
-                for (final (clave, texto) in const [('listas', 'Listas'), ('albumes', 'Álbumes'),
-                  ('artistas', 'Artistas'), ('telefono', 'En tu teléfono')])
-                  if (_filtro == null || _filtro == clave)
-                    Padding(
-                      padding: const EdgeInsets.only(right: 8),
-                      child: ChoiceChip(
-                        label: Text(texto),
-                        selected: _filtro == clave,
-                        showCheckmark: false,
-                        selectedColor: C.acento,
-                        labelStyle: TextStyle(fontWeight: FontWeight.w600,
-                            color: _filtro == clave ? C.acentoTexto : C.texto),
-                        backgroundColor: C.superficie2,
-                        side: BorderSide.none,
-                        shape: const StadiumBorder(),
-                        onSelected: (_) {
-                          setState(() => _filtro = _filtro == clave ? null : clave);
-                          _cargar();
-                        },
-                      ),
-                    ),
-              ]),
+                      }),
+                ]),
+              ),
             ),
           ),
-        ),
-        SliverList.builder(
-          itemCount: _elementos.length,
-          itemBuilder: (_, i) => _Item(el: _elementos[i]),
-        ),
-        const SliverToBoxAdapter(child: SizedBox(height: espacioInferior + 10)),
-      ]),
+          if (!_cargado)
+            const SliverToBoxAdapter(child: Esqueleto(filas: true))
+          else if (vacio)
+            SliverToBoxAdapter(
+              child: Vacio(
+                icono: switch (_filtro) {
+                  'albumes' => Icons.album_outlined,
+                  'artistas' => Icons.person_outline_rounded,
+                  _ => Icons.library_music_outlined,
+                },
+                titulo: switch (_filtro) {
+                  'albumes' => 'Aún no guardaste álbumes',
+                  'artistas' => 'Aún no sigues a ningún artista',
+                  _ => 'Aquí no hay nada todavía',
+                },
+                texto: switch (_filtro) {
+                  'albumes' => 'En un álbum, toca ⊕ y aparece aquí.',
+                  'artistas' => 'En la página de un artista, toca «Seguir».',
+                  _ => 'Lo que guardes aparece en tu biblioteca.',
+                },
+                textoAccion: 'Buscar',
+                iconoAccion: Icons.search_rounded,
+                alAccion: () => s.irAPestana?.call(1),
+              ),
+            )
+          else
+            SliverList.builder(
+              itemCount: _elementos.length,
+              itemBuilder: (_, i) => Entrada(indice: i, desplazamiento: 10, child: _Item(el: _elementos[i])),
+            ),
+          const SliverToBoxAdapter(child: SizedBox(height: espacioInferior + 10)),
+        ]),
+      ),
     );
   }
 }
@@ -191,9 +217,9 @@ class _Item extends StatelessWidget {
       portada = Portada(url: mini, lado: 60, radio: tipo == 'artista' ? 0 : 4, circulo: tipo == 'artista',
           icono: tipo == 'artista' ? Icons.person_rounded : Icons.queue_music_rounded);
     }
-    return ListenableBuilder(
+    return Pulsable(escala: 0.985, child: ListenableBuilder(
       listenable: s.reproductor,
-      builder: (_, __) {
+      builder: (_, _) {
         final ctx = s.reproductor.contexto;
         final sonando = ctx != null && ctx['tipo'] == tipo && '${ctx['id']}' == '${el['id'] ?? tipo}' &&
             s.reproductor.estado.name != 'parado';
@@ -201,13 +227,13 @@ class _Item extends StatelessWidget {
           onTap: () => s.abrirElemento(context, el),
           onLongPress: () => s.reproducirElemento(context, el),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
+            padding: const EdgeInsets.symmetric(horizontal: Esp.lado, vertical: 7),
             child: Row(children: [
               portada,
               const SizedBox(width: 13),
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text('${el['titulo'] ?? ''}', maxLines: 1, overflow: TextOverflow.ellipsis,
-                    style: TextStyle(fontSize: 15.5, fontWeight: FontWeight.w600, color: sonando ? C.acento : C.texto)),
+                    style: estiloTituloFila.copyWith(color: sonando ? C.acento : C.texto)),
                 const SizedBox(height: 3),
                 Row(children: [
                   if (el['fijada'] == true) const Padding(
@@ -223,6 +249,6 @@ class _Item extends StatelessWidget {
           ),
         );
       },
-    );
+    ));
   }
 }

@@ -9,7 +9,9 @@ import 'paginas/biblioteca.dart';
 import 'paginas/buscar.dart';
 import 'paginas/descargas_pagina.dart';
 import 'paginas/inicio.dart';
+import 'paginas/juntos_pagina.dart';
 import 'plataforma.dart';
+import 'reproductor/animaciones.dart';
 import 'servicios.dart';
 import 'tema.dart';
 
@@ -36,6 +38,12 @@ class _ArmazonState extends State<Armazon> {
     s.abrirEnPestana = (pagina) =>
         _navegadores[_pestana].currentState?.push(MaterialPageRoute(builder: (_) => pagina));
     s.abrirEnlace = (texto) {
+      // caudal://juntos?sala=XXXXXX entra directo a la sala de "Escuchar juntos"
+      if (texto.trim().toLowerCase().startsWith('caudal://juntos')) {
+        _navegadores[_pestana].currentState
+            ?.push(MaterialPageRoute(builder: (_) => JuntosPagina(codigoInicial: texto.trim())));
+        return;
+      }
       _ir(3);
       DescargasPagina.pegar(texto);
     };
@@ -67,6 +75,7 @@ class _ArmazonState extends State<Armazon> {
 
   void _ir(int i) {
     if (i == _pestana) {
+      if (i == 1) BuscarPagina.enfocar();     // tocar Buscar otra vez enfoca el campo
       // tocar la pestana en la que estas vuelve a su inicio, como en Spotify
       _navegadores[i].currentState?.popUntil((r) => r.isFirst);
       return;
@@ -137,6 +146,11 @@ class MiniReproductor extends StatefulWidget {
 class _MiniReproductorState extends State<MiniReproductor> {
   Color _color = C.superficie3;
   String _url = '';
+  // hacia donde se pidio el cambio de cancion, para que el texto entre por ahi
+  int _pedido = 1;
+  int _direccion = 1;
+  String _claveVista = '';
+  bool _abajo = false;
 
   void _colorDe(String url) {
     if (url == _url) return;
@@ -144,20 +158,39 @@ class _MiniReproductorState extends State<MiniReproductor> {
     colorDominante(url).then((c) {
       if (mounted) setState(() => _color = c);
     });
+    // la portada grande queda lista: al abrir, el vuelo ya la tiene
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) precargarPortadaGrande(context, url, ladoPortadaGrande(MediaQuery.sizeOf(context).width));
+    });
+  }
+
+  void _apretar(bool v) {
+    if (_abajo != v) setState(() => _abajo = v);
   }
 
   @override
   Widget build(BuildContext context) {
     final s = Caudal.of(context);
     final r = s.reproductor;
+    final ladoGrande = ladoPortadaGrande(MediaQuery.sizeOf(context).width);
     return ListenableBuilder(
       listenable: Listenable.merge([r, s.coleccion]),
       builder: (context, _) {
         final p = r.actual;
         if (p == null) return const SizedBox.shrink();
-        _colorDe('${p['miniatura'] ?? ''}');
-        final gusta = s.coleccion.meGusta('${p['clave']}');
+        final url = '${p['miniatura'] ?? ''}';
+        _colorDe(url);
+        final clave = '${p['clave']}';
+        if (clave != _claveVista) {
+          _direccion = _claveVista.isEmpty ? 1 : _pedido;
+          _pedido = 1;
+          _claveVista = clave;
+        }
+        final gusta = s.coleccion.meGusta(clave);
         return GestureDetector(
+          onTapDown: (_) => _apretar(true),
+          onTapUp: (_) => _apretar(false),
+          onTapCancel: () => _apretar(false),
           onTap: () => s.abrirReproductor(context),
           onVerticalDragEnd: (d) {
             if ((d.primaryVelocity ?? 0) < -200) s.abrirReproductor(context);
@@ -166,10 +199,21 @@ class _MiniReproductorState extends State<MiniReproductor> {
             // deslizar de lado salta de cancion, como en Spotify
             final v = d.primaryVelocity ?? 0;
             if (v.abs() > 300) Haptico.seleccion();
-            if (v < -300) r.siguiente();
-            if (v > 300) r.anterior();
+            if (v < -300) {
+              _pedido = 1;
+              r.siguiente();
+            }
+            if (v > 300) {
+              _pedido = -1;
+              r.anterior();
+            }
           },
-          child: AnimatedContainer(
+          // se hunde apenas bajo el dedo antes de abrirse
+          child: AnimatedScale(
+            scale: _abajo ? 0.975 : 1,
+            duration: Duration(milliseconds: _abajo ? 90 : 220),
+            curve: Curves.easeOut,
+            child: AnimatedContainer(
             duration: const Duration(milliseconds: 400),
             height: 60,
             decoration: BoxDecoration(
@@ -180,36 +224,52 @@ class _MiniReproductorState extends State<MiniReproductor> {
               Row(children: [
                 Padding(
                   padding: const EdgeInsets.all(7),
-                  child: Hero(tag: 'portada-actual',
-                      child: Portada(url: '${p['miniatura'] ?? ''}', lado: 46, radio: 5)),
+                  child: Hero(
+                    tag: etiquetaPortada,
+                    flightShuttleBuilder: vueloPortada(url, ladoGrande),
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 260),
+                      child: Portada(key: ValueKey(clave), url: url, lado: 46, radio: 5),
+                    ),
+                  ),
                 ),
                 Expanded(
-                  child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                    Text('${p['titulo'] ?? ''}', maxLines: 1, overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
-                    Text('${p['artista'] ?? ''}', maxLines: 1, overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 12.5, color: Color(0xCCFFFFFF))),
-                  ]),
+                  child: ClipRect(
+                    child: AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 300),
+                      transitionBuilder: deslizarEn(_direccion, ValueKey(clave), distancia: 0.4),
+                      layoutBuilder: (a, previos) =>
+                          Stack(alignment: Alignment.centerLeft, children: [...previos, ?a]),
+                      child: Column(
+                          key: ValueKey(clave),
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                        Text('${p['titulo'] ?? ''}', maxLines: 1, overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 14)),
+                        Text('${p['artista'] ?? ''}', maxLines: 1, overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontSize: 12.5, color: Color(0xCCFFFFFF))),
+                      ]),
+                    ),
+                  ),
                 ),
-                IconButton(
-                  icon: Icon(gusta ? Icons.favorite_rounded : Icons.favorite_border_rounded,
-                      color: gusta ? C.acento : C.texto),
-                  onPressed: () => s.alternarMeGusta(p),
-                ),
+                CorazonAnimado(gusta: gusta, alPulsar: () => s.alternarMeGusta(p)),
                 SizedBox(
                   width: 48,
-                  child: r.estado == EstadoRepro.cargando
-                      ? const Center(child: SizedBox(width: 22, height: 22,
-                          child: CircularProgressIndicator(strokeWidth: 2.4, color: C.texto)))
-                      : IconButton(
-                          icon: Icon(r.estado == EstadoRepro.sonando ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                              size: 30),
-                          onPressed: () {
-                            Haptico.toque();
-                            r.alternar();
-                          },
-                        ),
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 180),
+                    child: r.estado == EstadoRepro.cargando
+                        ? const Center(key: ValueKey('cargando'), child: SizedBox(width: 22, height: 22,
+                            child: CircularProgressIndicator(strokeWidth: 2.4, color: C.texto)))
+                        : IconButton(
+                            key: const ValueKey('boton'),
+                            icon: IconoPlayPausa(sonando: r.estado == EstadoRepro.sonando, tamano: 30),
+                            onPressed: () {
+                              Haptico.toque();
+                              r.alternar();
+                            },
+                          ),
+                  ),
                 ),
                 const SizedBox(width: 4),
               ]),
@@ -218,7 +278,7 @@ class _MiniReproductorState extends State<MiniReproductor> {
                 // la barrita avanza varias veces por segundo: que repinte sola
                 child: RepaintBoundary(child: ValueListenableBuilder<Duration>(
                   valueListenable: r.posicion,
-                  builder: (_, pos, __) {
+                  builder: (_, pos, _) {
                     final d = r.duracion.value.inMilliseconds;
                     return ClipRRect(
                       borderRadius: BorderRadius.circular(2),
@@ -233,6 +293,7 @@ class _MiniReproductorState extends State<MiniReproductor> {
                 )),
               ),
             ]),
+          ),
           ),
         );
       },

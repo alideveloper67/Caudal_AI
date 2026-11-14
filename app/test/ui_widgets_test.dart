@@ -259,4 +259,121 @@ void main() {
       expect(Servicios.idLista('mi_lista'), isNull);
     });
   });
+
+  group('pulido', () {
+    testWidgets('lo que se pulsa se hunde un poco y vuelve a su tamaño', (t) async {
+      var tocado = 0;
+      await _montar(t, Center(child: Pulsable(escala: 0.9,
+          child: GestureDetector(onTap: () => tocado++,
+              child: const ColoredBox(color: Colors.red, child: SizedBox(width: 100, height: 100))))));
+      double escala() => t.widget<ScaleTransition>(
+          find.descendant(of: find.byType(Pulsable), matching: find.byType(ScaleTransition)).first).scale.value;
+      final gesto = await t.startGesture(t.getCenter(find.byType(Pulsable)));
+      await t.pump();
+      await t.pump(const Duration(milliseconds: 200));
+      expect(escala(), closeTo(0.9, 0.001));
+      await gesto.up();
+      await t.pumpAndSettle();
+      expect(escala(), 1);
+      expect(tocado, 1, reason: 'el toque sigue llegando al de dentro');
+    });
+
+    testWidgets('al desplazar con el dedo la escala se suelta', (t) async {
+      await _montar(t, Center(child: Pulsable(escala: 0.9,
+          child: GestureDetector(onTap: () {},
+              child: const ColoredBox(color: Colors.red, child: SizedBox(width: 100, height: 100))))));
+      final gesto = await t.startGesture(t.getCenter(find.byType(Pulsable)));
+      await t.pump();
+      await t.pump(const Duration(milliseconds: 200));
+      await gesto.moveBy(const Offset(0, 40));
+      await t.pumpAndSettle();
+      expect(t.widget<ScaleTransition>(
+          find.descendant(of: find.byType(Pulsable), matching: find.byType(ScaleTransition)).first).scale.value, 1);
+      await gesto.up();
+    });
+
+    testWidgets('la entrada escalonada termina quieta y opaca, sin temporizadores colgando', (t) async {
+      await _montar(t, const Escalonado(child: Column(children: [
+        Entrada(indice: 0, child: Text('uno')),
+        Entrada(indice: 5, child: Text('seis')),
+      ])));
+      await t.pumpAndSettle();
+      for (final f in t.widgetList<FadeTransition>(find.byType(FadeTransition))) {
+        expect(f.opacity.value, 1);
+      }
+      expect(find.text('seis'), findsOneWidget);
+    });
+
+    testWidgets('lo que se monta mucho después de llegar el contenido ya no se anima', (t) async {
+      final mostrar = ValueNotifier(false);
+      await _montar(t, Escalonado(child: ValueListenableBuilder<bool>(
+        valueListenable: mostrar,
+        builder: (_, v, _) => v ? const Entrada(child: Text('tarde')) : const SizedBox(),
+      )));
+      // la ventana se mide con el reloj de verdad
+      await t.runAsync(() => Future<void>.delayed(const Duration(milliseconds: Entrada.ventana + 100)));
+      mostrar.value = true;
+      await t.pump();
+      expect(find.descendant(of: find.byType(Entrada), matching: find.byType(FadeTransition)), findsNothing);
+    });
+
+    testWidgets('los esqueletos de cada forma caben sin desbordar', (t) async {
+      for (final forma in FormaEsqueleto.values) {
+        await _montar(t, Esqueleto(forma: forma), tam: const Size(720, 1280));
+        expect(t.takeException(), isNull, reason: '$forma');
+      }
+    });
+
+    testWidgets('un estado vacío con acción la ejecuta al tocar', (t) async {
+      var veces = 0;
+      await _montar(t, Vacio(icono: Icons.wifi_off_rounded, titulo: 'Sin conexión', texto: 'Vuelve a intentarlo',
+          error: true, alAccion: () => veces++));
+      await t.pumpAndSettle();
+      await t.tap(find.text('Reintentar'));
+      expect(veces, 1);
+      expect(t.takeException(), isNull);
+    });
+
+    test('los errores técnicos se explican sin jerga', () {
+      expect(explicarError('No se encontró a este artista en YouTube Music.'),
+          'No se encontró a este artista en YouTube Music.');
+      expect(explicarError('SocketException: Failed host lookup'), contains('conexión'));
+      expect(explicarError("Null check operator used on a null value #0"), isNot(contains('Null')));
+    });
+
+    testWidgets('la cabecera plegable muestra el título pequeño solo al plegarse', (t) async {
+      final scroll = ScrollController();
+      addTearDown(scroll.dispose);
+      await t.pumpWidget(MaterialApp(
+        theme: temaCaudal(),
+        home: Scaffold(
+          body: CustomScrollView(controller: scroll, slivers: [
+            const CabeceraPlegable(titulo: 'Un artista', color: Color(0xFF884422), alto: 320,
+                fondo: ColoredBox(color: Colors.red)),
+            SliverList.list(children: [for (var i = 0; i < 40; i++) SizedBox(height: 60, child: Text('fila $i'))]),
+          ]),
+        ),
+      ));
+      double opacidad() => t.widget<Opacity>(find.ancestor(of: find.text('Un artista'),
+          matching: find.byType(Opacity)).first).opacity;
+      expect(opacidad(), 0);
+      scroll.jumpTo(600);
+      await t.pump();
+      expect(opacidad(), 1);
+      expect(t.takeException(), isNull);
+    });
+
+    testWidgets('las pastillas de filtro avisan al tocarlas', (t) async {
+      String? elegido;
+      await _montar(t, Row(children: [
+        Pildora(texto: 'Música', activa: false, alPulsar: () => elegido = 'musica'),
+        const Pildora(texto: 'Videos', activa: true, alPulsar: _nada),
+      ]));
+      await t.tap(find.text('Música'));
+      await t.pumpAndSettle();
+      expect(elegido, 'musica');
+    });
+  });
 }
+
+void _nada() {}

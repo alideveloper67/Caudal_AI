@@ -22,6 +22,35 @@ from .nube import ErrorNube, SinConexion
 
 CADA = 3 * 60 * 1000          # traer cambios de otros dispositivos cada 3 minutos
 
+# Ajustes que valen igual en todos los dispositivos de la cuenta (misma lista
+# que Ajustes.compartidos de la app movil: si se toca una, tocar la otra).
+COMPARTIDOS = (
+    "region", "calidad_audio", "calidad_video", "codec_video", "normalizar", "super_volumen",
+    "ecualizador", "eq_bandas", "eq_preset", "autoplay", "sponsorblock", "sponsorblock_videos",
+    "formato_audio", "bitrate_mp3", "crossfade",
+    "descarga_inteligente", "descarga_inteligente_gb", "transicion_dj", "apagado_suave",
+)
+
+
+def ajustes_compartidos(ajustes):
+    """Los ajustes comunes, listos para la nube (eq_bandas siempre como lista)."""
+    salida = {}
+    for k in COMPARTIDOS:
+        if k not in ajustes:
+            continue
+        v = ajustes[k]
+        if k == "eq_bandas" and isinstance(v, str):
+            try:
+                v = json.loads(v)
+            except ValueError:
+                continue
+        salida[k] = v
+    return salida
+
+
+def huella_ajustes(datos):
+    return json.dumps(datos, sort_keys=True, ensure_ascii=False)
+
 
 def nuevo_uuid():
     return str(uuid.uuid4())
@@ -34,10 +63,12 @@ def _q(valor):
 
 class Sincronizador(QObject):
     cambio_remoto = Signal()        # llegaron cambios: la interfaz se refresca
+    ajustes_remotos = Signal(dict)  # otro dispositivo cambio los ajustes comunes
     estado = Signal(str)            # "sincronizado" | "pendiente" | "sin_conexion" | "error"
 
-    def __init__(self, coleccion, cuenta, al_renovar=None, padre=None):
+    def __init__(self, coleccion, cuenta, al_renovar=None, padre=None, ajustes=None):
         super().__init__(padre)
+        self.ajustes = ajustes
         self.coleccion = coleccion
         self.cuenta = cuenta
         self.sesion = cuenta.get("sesion")
@@ -74,8 +105,14 @@ class Sincronizador(QObject):
         self._corriendo = True
         en_segundo_plano(self._ciclo, ok=self._terminado, error=self._fallo, dueno=self)
 
-    def _terminado(self, cambio):
+    def _terminado(self, resultado):
+        cambio, remotos = resultado
         self._corriendo = False
+        if remotos and self.ajustes is not None:
+            for k, v in remotos.items():
+                self.ajustes[k] = v
+            self.ajustes.guardar()
+            self.ajustes_remotos.emit(remotos)
         self._fijar("sincronizado")
         if self.al_renovar:
             self.al_renovar()
@@ -112,7 +149,8 @@ class Sincronizador(QObject):
                             (json.dumps(uid),))
                 con.commit()
             self._enviar_pendientes(con)
-            return self._traer(con)
+            cambio = self._traer(con)
+            return cambio, self._sincronizar_ajustes(con)
         finally:
             con.close()
 
@@ -208,6 +246,42 @@ class Sincronizador(QObject):
                     cabeceras={"Prefer": "return=minimal"})
         elif op == "ajustes":
             self._upsert("ajustes", [{"datos": d, "actualizado": _iso(time.time())}], "user_id")
+
+    def _sincronizar_ajustes(self, con):
+        """Ajustes comunes: si solo cambiaron en otro dispositivo, se aplican
+        aqui (devuelve cuales); si cambiaron aqui, se suben (gana el ultimo)."""
+        if self.ajustes is None:
+            return {}
+        def leer(clave):
+            f = con.execute("SELECT valor FROM estado WHERE clave = ?", (clave,)).fetchone()
+            return json.loads(f["valor"]) if f else None
+        def poner(clave, valor):
+            con.execute("INSERT OR REPLACE INTO estado (clave, valor) VALUES (?, ?)",
+                        (clave, json.dumps(valor)))
+        locales = ajustes_compartidos(self.ajustes)
+        huella_local = huella_ajustes(locales)
+        sincronizada = leer("ajustes_huella")          # la ultima que coincidia con la nube
+        fecha_vista = leer("ajustes_fecha")            # la ultima version de la nube que vimos
+        filas = self.sesion.pedir("GET", "ajustes?select=datos,actualizado")
+        remoto = filas[0] if filas else None
+        aplicar = {}
+        primera_vez = sincronizada is None
+        if remoto and remoto.get("actualizado") != fecha_vista and (huella_local == sincronizada or primera_vez):
+            # cambio en otro dispositivo y aqui nada (o este equipo es nuevo
+            # en la cuenta): lo de la nube manda
+            datos = {k: v for k, v in (remoto.get("datos") or {}).items() if k in COMPARTIDOS}
+            aplicar = {k: v for k, v in datos.items() if locales.get(k) != v}
+            poner("ajustes_huella", huella_ajustes({**locales, **datos}))
+            poner("ajustes_fecha", remoto.get("actualizado"))
+        elif remoto is None or huella_local != sincronizada:
+            # cambio aqui (o la nube aun no tiene nada): se sube
+            fecha = _iso(time.time())
+            self._upsert("ajustes", [{"datos": locales, "actualizado": fecha}], "user_id")
+            nueva = self.sesion.pedir("GET", "ajustes?select=actualizado")
+            poner("ajustes_huella", huella_local)
+            poner("ajustes_fecha", nueva[0]["actualizado"] if nueva else fecha)
+        con.commit()
+        return aplicar
 
     def _traer(self, con):
         """Lo de la nube manda (salvo lo que aun espera para subir). Devuelve si

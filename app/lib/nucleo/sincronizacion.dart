@@ -3,6 +3,7 @@ import 'dart:convert';
 
 import 'package:sqflite/sqflite.dart';
 
+import 'ajustes.dart';
 import 'coleccion.dart';
 import 'nube.dart';
 
@@ -14,9 +15,13 @@ import 'nube.dart';
 /// 3. Trae lo cambiado en otros dispositivos: la nube manda, salvo lo que aun
 ///    espera para subir.
 class Sincronizador {
-  Sincronizador(this.coleccion, this.sesion, {this.alRenovar});
+  Sincronizador(this.coleccion, this.sesion, {this.alRenovar, this.ajustes, this.alCambiarAjustes});
 
   final Coleccion coleccion;
+
+  /// Los ajustes comunes (ecualizador, calidad...) viajan entre dispositivos.
+  final Ajustes? ajustes;
+  final void Function(Set<String> cambiados)? alCambiarAjustes;
   final Sesion sesion;
   final Future<void> Function()? alRenovar;
 
@@ -86,7 +91,68 @@ class Sincronizador {
       await coleccion.guardarEstado('nube_usuario', sesion.userId);
     }
     await _enviarPendientes();
-    return _traer();
+    final cambio = await _traer();
+    await _sincronizarAjustes();
+    return cambio;
+  }
+
+  /// Los ajustes comunes como van a la nube (eq_bandas siempre como lista).
+  static Map<String, Object?> ajustesParaNube(Map<String, Object?> crudos) {
+    final salida = <String, Object?>{};
+    crudos.forEach((k, v) {
+      if (v == null) return;
+      if (k == 'eq_bandas' && v is String) {
+        try {
+          salida[k] = jsonDecode(v);
+        } catch (_) {}
+        return;
+      }
+      salida[k] = v;
+    });
+    return salida;
+  }
+
+  /// Misma huella que huella_ajustes() del escritorio: claves ordenadas.
+  static String huellaAjustes(Map<String, Object?> datos) {
+    final claves = datos.keys.toList()..sort();
+    return jsonEncode({for (final k in claves) k: datos[k]});
+  }
+
+  /// Si solo cambiaron en otro dispositivo, se aplican aqui; si cambiaron
+  /// aqui, se suben (gana el ultimo). Igual que en sincronizacion.py.
+  Future<void> _sincronizarAjustes() async {
+    final a = ajustes;
+    if (a == null) return;
+    final locales = ajustesParaNube(a.paraNube());
+    final huella = huellaAjustes(locales);
+    final sincronizada = await coleccion.estado('ajustes_huella');
+    final fechaVista = await coleccion.estado('ajustes_fecha');
+    final filas = await sesion.pedir('GET', 'ajustes?select=datos,actualizado') as List;
+    final remoto = filas.isEmpty ? null : Map<String, dynamic>.from(filas.first as Map);
+    // un telefono nuevo en la cuenta toma los de la nube, no los sube
+    final primeraVez = sincronizada == null;
+    if (remoto != null && remoto['actualizado'] != fechaVista && (huella == sincronizada || primeraVez)) {
+      final datos = <String, Object?>{
+        for (final e in Map<String, dynamic>.from((remoto['datos'] as Map?) ?? {}).entries)
+          if (Ajustes.compartidos.contains(e.key)) e.key: e.value,
+      };
+      final cambiados = <String>{};
+      for (final e in datos.entries) {
+        if (e.value == null || jsonEncode(locales[e.key]) == jsonEncode(e.value)) continue;
+        await a.poner(e.key, e.value is num && Ajustes.defectos[e.key] is double
+            ? (e.value as num).toDouble() : e.value!, avisar: false);
+        cambiados.add(e.key);
+      }
+      await coleccion.guardarEstado('ajustes_huella', huellaAjustes({...locales, ...datos}));
+      await coleccion.guardarEstado('ajustes_fecha', remoto['actualizado']);
+      if (cambiados.isNotEmpty) alCambiarAjustes?.call(cambiados);
+    } else if (remoto == null || huella != sincronizada) {
+      await _upsert('ajustes', [{'datos': locales, 'actualizado': _iso(null)}], 'user_id');
+      final nueva = await sesion.pedir('GET', 'ajustes?select=actualizado') as List;
+      await coleccion.guardarEstado('ajustes_huella', huella);
+      await coleccion.guardarEstado('ajustes_fecha',
+          nueva.isEmpty ? null : (nueva.first as Map)['actualizado']);
+    }
   }
 
   Future<void> _upsert(String tabla, List<Map<String, dynamic>> filas, String conflicto) async {

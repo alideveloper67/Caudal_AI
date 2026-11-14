@@ -5,10 +5,12 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/gestures.dart' show kTouchSlop;
 import 'package:flutter/material.dart';
 
 import '../nucleo/coleccion.dart';
 import '../reproduccion/reproductor.dart';
+import 'plataforma.dart';
 import 'servicios.dart';
 import 'tema.dart';
 
@@ -42,15 +44,15 @@ class Portada extends StatelessWidget {
       img = relleno;
     } else if (!url.startsWith('http')) {
       img = Image.file(File(url), fit: BoxFit.cover, cacheWidth: ancho, gaplessPlayback: true,
-          errorBuilder: (_, __, ___) => relleno);
+          errorBuilder: (_, _, _) => relleno);
     } else {
       img = CachedNetworkImage(
         imageUrl: url,
         fit: BoxFit.cover,
         memCacheWidth: ancho,
         fadeInDuration: const Duration(milliseconds: 140),
-        placeholder: (_, __) => Container(color: C.superficie3),
-        errorWidget: (_, __, ___) => relleno,
+        placeholder: (_, _) => Container(color: C.superficie3),
+        errorWidget: (_, _, _) => relleno,
       );
     }
     final caja = SizedBox(width: lado, height: h, child: img);
@@ -152,7 +154,8 @@ class FilaPista extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = Caudal.of(context);
-    return ListenableBuilder(
+    // la escala al pulsar va por fuera: lo que cambia en la coleccion no la reinicia
+    return Pulsable(escala: 0.985, child: ListenableBuilder(
       listenable: Listenable.merge([s.reproductor, s.coleccion]),
       builder: (context, _) {
         final actual = _esActual(s.reproductor);
@@ -163,7 +166,7 @@ class FilaPista extends StatelessWidget {
           onTap: alPulsar,
           onLongPress: alMantener ?? () => s.hojaPista(context, pista, extra: extraMenu),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 7),
+            padding: const EdgeInsets.symmetric(horizontal: Esp.lado, vertical: 7),
             child: Row(children: [
               if (numero != null)
                 SizedBox(
@@ -180,8 +183,7 @@ class FilaPista extends StatelessWidget {
               Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text('${pista['titulo'] ?? ''}', maxLines: 1, overflow: TextOverflow.ellipsis,
-                      style: TextStyle(fontSize: 15.5, fontWeight: FontWeight.w600,
-                          color: actual ? C.acento : C.texto)),
+                      style: estiloTituloFila.copyWith(color: actual ? C.acento : C.texto)),
                   const SizedBox(height: 3),
                   Row(children: [
                     if (descargada) ...[
@@ -221,7 +223,7 @@ class FilaPista extends StatelessWidget {
           ),
         );
       },
-    );
+    ));
   }
 }
 
@@ -243,7 +245,7 @@ class Tarjeta extends StatelessWidget {
     final h = esVideo ? w * 9 / 16 : w;
     final esMeGusta = tipo == 'me_gusta';
     return RepaintBoundary(
-      child: SizedBox(
+      child: Pulsable(child: SizedBox(
         width: w,
         child: InkWell(
           borderRadius: BorderRadius.circular(8),
@@ -260,20 +262,23 @@ class Tarjeta extends StatelessWidget {
                       _ => Icons.music_note_rounded,
                     }),
             const SizedBox(height: 8),
-            Text('${el['titulo'] ?? ''}', maxLines: 1, overflow: TextOverflow.ellipsis,
-                textAlign: tipo == 'artista' ? TextAlign.center : TextAlign.start,
-                style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600)),
+            SizedBox(
+              width: double.infinity,
+              child: Text('${el['titulo'] ?? ''}', maxLines: 1, overflow: TextOverflow.ellipsis,
+                  textAlign: tipo == 'artista' ? TextAlign.center : TextAlign.start,
+                  style: estiloTituloTarjeta),
+            ),
             const SizedBox(height: 2),
             SizedBox(
               width: double.infinity,
               child: Text('${el['subtitulo'] ?? el['artista'] ?? (tipo == 'artista' ? 'Artista' : '')}',
                   maxLines: 2, overflow: TextOverflow.ellipsis,
                   textAlign: tipo == 'artista' ? TextAlign.center : TextAlign.start,
-                  style: const TextStyle(fontSize: 12.5, color: C.texto2, height: 1.25)),
+                  style: estiloSubTarjeta),
             ),
           ]),
         ),
-      ),
+      )),
     );
   }
 }
@@ -329,7 +334,7 @@ class _TarjetaGeneroState extends State<TarjetaGenero> {
   Widget build(BuildContext context) {
     final color = _hex('${widget.el['color'] ?? '#7C5CFF'}');
     final alto = widget.ancho * 0.58;
-    return GestureDetector(
+    return Pulsable(child: GestureDetector(
       onTap: () => Caudal.leer(context).abrirElemento(context, widget.el),
       child: Container(
         width: widget.ancho,
@@ -347,13 +352,15 @@ class _TarjetaGeneroState extends State<TarjetaGenero> {
             Positioned(
               right: -alto * 0.18,
               bottom: -alto * 0.12,
-              child: Transform.rotate(
-                angle: 0.42,
-                child: Container(
-                  decoration: const BoxDecoration(boxShadow: [
-                    BoxShadow(color: Color(0x66000000), blurRadius: 8, offset: Offset(2, 4)),
-                  ]),
-                  child: Portada(url: _portada, lado: alto * 0.72, radio: 4),
+              child: Aparecer(
+                child: Transform.rotate(
+                  angle: 0.42,
+                  child: Container(
+                    decoration: const BoxDecoration(boxShadow: [
+                      BoxShadow(color: Color(0x66000000), blurRadius: 8, offset: Offset(2, 4)),
+                    ]),
+                    child: Portada(url: _portada, lado: alto * 0.72, radio: 4),
+                  ),
                 ),
               ),
             ),
@@ -364,7 +371,7 @@ class _TarjetaGeneroState extends State<TarjetaGenero> {
           ),
         ]),
       ),
-    );
+    ));
   }
 }
 
@@ -382,12 +389,13 @@ class TituloSeccion extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.fromLTRB(16, 0, 8, 10),
+        padding: const EdgeInsets.fromLTRB(Esp.lado, 0, Esp.s, 10),
         child: Row(children: [
           Expanded(child: Text(texto, style: estiloTituloSeccion, maxLines: 1, overflow: TextOverflow.ellipsis)),
           if (alPulsarMas != null)
             TextButton(onPressed: alPulsarMas,
-                child: const Text('Ver todo', style: TextStyle(color: C.texto2, fontWeight: FontWeight.w700))),
+                style: TextButton.styleFrom(foregroundColor: C.texto2, visualDensity: VisualDensity.compact),
+                child: const Text('Ver todo')),
         ]),
       );
 }
@@ -414,10 +422,12 @@ class Carrusel extends StatelessWidget {
       SizedBox(
         height: alto,
         child: ListView.separated(
+          // de lado tambien se recuerda donde quedo (al volver o al cambiar de filtro)
+          key: PageStorageKey('carrusel|$titulo'),
           scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.symmetric(horizontal: 16),
+          padding: const EdgeInsets.symmetric(horizontal: Esp.lado),
           itemCount: elementos.length,
-          separatorBuilder: (_, __) => const SizedBox(width: 14),
+          separatorBuilder: (_, _) => const SizedBox(width: 14),
           itemBuilder: (_, i) => Tarjeta(el: Map<String, dynamic>.from(elementos[i] as Map)),
         ),
       ),
@@ -443,8 +453,9 @@ class RejillaRapida extends StatelessWidget {
       SizedBox(
         height: 4 * fila,
         child: ListView.builder(
+          key: PageStorageKey('rapida|$titulo'),
           scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.only(left: 0, right: 16),
+          padding: const EdgeInsets.only(left: 0, right: Esp.lado),
           physics: const PageScrollPhysics(),
           itemCount: columnas,
           itemBuilder: (_, c) => SizedBox(
@@ -468,7 +479,9 @@ class RejillaRapida extends StatelessWidget {
 }
 
 /// Las secciones del catalogo convertidas en carruseles y rejillas.
-List<Widget> pintarSecciones(BuildContext context, List secciones) {
+///
+/// [desde] es el turno de entrada de la primera (si encima ya hay otras).
+List<Widget> pintarSecciones(BuildContext context, List secciones, {int desde = 0}) {
   final s = Caudal.leer(context);
   final salida = <Widget>[];
   for (final raw in secciones) {
@@ -481,14 +494,17 @@ List<Widget> pintarSecciones(BuildContext context, List secciones) {
       alMas = () => s.abrirElemento(context, {'tipo': 'pagina', 'id': mas['id'], 'params': mas['params'],
         'titulo': sec['titulo']});
     }
+    final Widget w;
     if (sec['estilo'] == 'filas' && elementos.every((e) => e['tipo'] == 'pista')) {
-      salida.add(RejillaRapida(titulo: '${sec['titulo']}', pistas: elementos));
+      w = RejillaRapida(titulo: '${sec['titulo']}', pistas: elementos);
     } else if (sec['estilo'] == 'rejilla') {
-      salida.add(RejillaTarjetas(titulo: '${sec['titulo']}', elementos: elementos));
+      w = RejillaTarjetas(titulo: '${sec['titulo']}', elementos: elementos);
     } else {
-      salida.add(Carrusel(titulo: '${sec['titulo']}', elementos: elementos, alPulsarMas: alMas));
+      w = Carrusel(titulo: '${sec['titulo']}', elementos: elementos, alPulsarMas: alMas);
     }
-    salida.add(const SizedBox(height: 26));
+    // cada seccion entra un poco despues de la anterior
+    salida.add(Entrada(indice: desde + salida.length ~/ 2, child: w));
+    salida.add(const SizedBox(height: Esp.entreSecciones));
   }
   return salida;
 }
@@ -505,7 +521,7 @@ class RejillaTarjetas extends StatelessWidget {
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
       if (titulo.isNotEmpty) TituloSeccion(titulo),
       Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16),
+        padding: const EdgeInsets.symmetric(horizontal: Esp.lado),
         child: Wrap(spacing: 12, runSpacing: generos ? 12 : 18, children: [
           for (final el in elementos) Tarjeta(el: el, ancho: ancho),
         ]),
@@ -514,12 +530,217 @@ class RejillaTarjetas extends StatelessWidget {
   }
 }
 
+// ---------------------------------------------------------------- al pulsar
+
+/// Lo que se toca se hunde un poco y vuelve con suavidad, como una tecla.
+///
+/// Escucha los punteros sin entrar en la pelea de gestos: el InkWell o el
+/// GestureDetector de dentro siguen recibiendo el toque, y si el dedo se
+/// mueve (se esta desplazando la lista) la escala se suelta al instante.
+class Pulsable extends StatefulWidget {
+  const Pulsable({super.key, required this.child, this.escala = 0.965});
+  final Widget child;
+
+  /// El tamano mientras el dedo esta encima (1 = sin cambio).
+  final double escala;
+
+  @override
+  State<Pulsable> createState() => _PulsableState();
+}
+
+class _PulsableState extends State<Pulsable> with SingleTickerProviderStateMixin {
+  late final AnimationController _c = AnimationController(
+      vsync: this, duration: const Duration(milliseconds: 110), reverseDuration: const Duration(milliseconds: 260));
+  late final Animation<double> _escala = Tween<double>(begin: 1, end: widget.escala)
+      .animate(CurvedAnimation(parent: _c, curve: Curves.easeOut, reverseCurve: Curves.easeIn));
+  Offset? _abajo;
+  bool _quieto = false;
+
+  @override
+  void dispose() {
+    _c.dispose();
+    super.dispose();
+  }
+
+  void _bajar(PointerDownEvent e) {
+    if (_quieto) return;
+    _abajo = e.position;
+    _c.forward();
+  }
+
+  void _mover(PointerMoveEvent e) {
+    final a = _abajo;
+    if (a != null && (e.position - a).distance > kTouchSlop) _soltar(enSeco: true);
+  }
+
+  void _soltar({bool enSeco = false}) {
+    if (_abajo == null) return;
+    _abajo = null;
+    // un toque muy corto: se termina de hundir antes de volver (si no, ni se nota)
+    if (!enSeco && _c.status == AnimationStatus.forward) {
+      _c.forward().whenCompleteOrCancel(() {
+        if (mounted && _abajo == null) _c.reverse();
+      });
+    } else {
+      _c.reverse();
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    _quieto = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+    return Listener(
+      onPointerDown: _bajar,
+      onPointerMove: _mover,
+      onPointerUp: (_) => _soltar(),
+      onPointerCancel: (_) => _soltar(enSeco: true),
+      child: ScaleTransition(scale: _escala, child: widget.child),
+    );
+  }
+}
+
+// ---------------------------------------------------------------- entrada escalonada
+
+class _Marca {
+  DateTime desde = DateTime.now();
+}
+
+/// Marca el momento en que llega el contenido de una pagina: las [Entrada]
+/// que se montan poco despues aparecen escalonadas; las que se construyen mas
+/// tarde (al desplazarse por una lista larga) salen ya quietas, sin parpadeos.
+/// Cambiar [clave] (llegan datos nuevos, otro filtro) vuelve a empezar.
+class Escalonado extends StatefulWidget {
+  const Escalonado({super.key, this.clave, required this.child});
+  final Object? clave;
+  final Widget child;
+
+  @override
+  State<Escalonado> createState() => _EscalonadoState();
+}
+
+class _EscalonadoState extends State<Escalonado> {
+  final _marca = _Marca();
+
+  @override
+  void didUpdateWidget(Escalonado viejo) {
+    super.didUpdateWidget(viejo);
+    if (viejo.clave != widget.clave) _marca.desde = DateTime.now();
+  }
+
+  @override
+  Widget build(BuildContext context) => _Escalon(marca: _marca, child: widget.child);
+}
+
+class _Escalon extends InheritedWidget {
+  const _Escalon({required this.marca, required super.child});
+  final _Marca marca;
+
+  @override
+  bool updateShouldNotify(_Escalon viejo) => false;
+}
+
+/// Aparece subiendo un poco y con un fundido, en su turno ([indice]).
+/// Solo se anima una vez, al montarse; despues no cuesta nada.
+class Entrada extends StatefulWidget {
+  const Entrada({super.key, this.indice = 0, this.desplazamiento = 14, required this.child});
+  final int indice;
+  final double desplazamiento;
+  final Widget child;
+
+  /// Pasado este tiempo desde que llego el contenido, ya no se anima.
+  static const ventana = 900;
+
+  @override
+  State<Entrada> createState() => _EntradaState();
+}
+
+class _EntradaState extends State<Entrada> with SingleTickerProviderStateMixin {
+  AnimationController? _c;
+  Animation<double>? _a;
+  bool _decidido = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    if (_decidido) return;
+    _decidido = true;
+    if (MediaQuery.maybeDisableAnimationsOf(context) ?? false) return;
+    final marca = context.getInheritedWidgetOfExactType<_Escalon>()?.marca;
+    final pasado = marca == null ? 0 : DateTime.now().difference(marca.desde).inMilliseconds;
+    if (pasado > Entrada.ventana) return;
+    final espera = max(0, min(widget.indice, 7) * 55 - pasado);
+    final total = espera + Mov.entrada.inMilliseconds;
+    final c = AnimationController(vsync: this, duration: Duration(milliseconds: total))..forward();
+    _c = c;
+    _a = CurvedAnimation(parent: c, curve: Interval(espera / total, 1, curve: Mov.curvaEntrada));
+  }
+
+  @override
+  void dispose() {
+    _c?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final a = _a;
+    if (a == null) return widget.child;
+    return FadeTransition(
+      opacity: a,
+      child: AnimatedBuilder(
+        animation: a,
+        builder: (_, hijo) => Transform.translate(offset: Offset(0, (1 - a.value) * widget.desplazamiento), child: hijo),
+        child: widget.child,
+      ),
+    );
+  }
+}
+
+/// Un fundido corto al aparecer (una portada que llega tarde, un aviso).
+class Aparecer extends StatelessWidget {
+  const Aparecer({super.key, required this.child, this.duracion = Mov.normal});
+  final Widget child;
+  final Duration duracion;
+
+  @override
+  Widget build(BuildContext context) => TweenAnimationBuilder<double>(
+        tween: Tween(begin: 0, end: 1),
+        duration: duracion,
+        curve: Mov.curva,
+        builder: (_, v, hijo) => Opacity(opacity: v, child: hijo),
+        child: child,
+      );
+}
+
 // ---------------------------------------------------------------- esqueleto
+
+/// Que se esta cargando: cada forma imita lo que va a aparecer, al mismo
+/// tamano y en el mismo sitio, para que al llegar no salte nada.
+enum FormaEsqueleto {
+  /// Titulos con carruseles de tarjetas (Inicio, generos, "Ver todo").
+  carruseles,
+
+  /// Filas de canciones.
+  filas,
+
+  /// La rejilla de "Explorar todo" en Buscar.
+  generos,
+
+  /// Un album o una lista: portada centrada, titulo, botones y canciones.
+  coleccion,
+
+  /// Un artista: la foto a todo lo ancho, los botones y sus populares.
+  artista,
+
+  /// Los accesos de arriba en Inicio: dos columnas de 56 de alto.
+  atajos,
+}
 
 /// Formas grises con un brillo que pasa: lo que se ve mientras algo carga.
 class Esqueleto extends StatefulWidget {
-  const Esqueleto({super.key, this.filas = false});
-  final bool filas;
+  const Esqueleto({super.key, bool filas = false, FormaEsqueleto? forma})
+      : forma = forma ?? (filas ? FormaEsqueleto.filas : FormaEsqueleto.carruseles);
+  final FormaEsqueleto forma;
 
   @override
   State<Esqueleto> createState() => _EsqueletoState();
@@ -529,64 +750,168 @@ class _EsqueletoState extends State<Esqueleto> with SingleTickerProviderStateMix
   late final AnimationController _c =
       AnimationController(vsync: this, duration: const Duration(milliseconds: 1300))..repeat();
 
+  // anchos que varian de una fila a otra (siempre los mismos: nada baila)
+  static const _anchos = [0.62, 0.48, 0.7, 0.55, 0.4, 0.66, 0.52, 0.6];
+
   @override
   void dispose() {
     _c.dispose();
     super.dispose();
   }
 
-  Widget _caja(double w, double h, {double r = 6}) => Container(
-        width: w, height: h,
-        decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(r)));
+  static Widget _caja(double w, double h, {double r = 4}) => Container(
+      width: w, height: h, decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(r)));
+
+  static Widget _circulo(double lado) => Container(
+      width: lado, height: lado, decoration: const BoxDecoration(color: Colors.white, shape: BoxShape.circle));
+
+  /// Igual que [FilaPista]: portada de 48, titulo y artista, 62 de alto.
+  static Widget _filas(double ancho, int cuantas, {bool numero = false}) => Column(children: [
+        for (var i = 0; i < cuantas; i++)
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: Esp.lado, vertical: 7),
+            child: SizedBox(
+              height: 48,
+              child: Row(children: [
+                if (numero) ...[_caja(12, 14), const SizedBox(width: 18)] else _caja(48, 48),
+                const SizedBox(width: 12),
+                Expanded(child: Column(mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  _caja((ancho - 140) * _anchos[i % _anchos.length], 14),
+                  const SizedBox(height: 8),
+                  _caja((ancho - 140) * _anchos[(i + 3) % _anchos.length] * 0.6, 11),
+                ])),
+              ]),
+            ),
+          ),
+      ]);
+
+  /// Igual que [TituloSeccion].
+  static Widget _titulo(double w) =>
+      Padding(padding: const EdgeInsets.fromLTRB(Esp.lado, 2, 0, 12), child: _caja(w, 21, r: 5));
+
+  /// Igual que [Carrusel] con tarjetas de 150.
+  static Widget _carrusel() => SizedBox(
+        height: 230,
+        child: ListView(scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: Esp.lado),
+            physics: const NeverScrollableScrollPhysics(), children: [
+          for (var i = 0; i < 4; i++)
+            Padding(
+              padding: const EdgeInsets.only(right: 14),
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                _caja(150, 150, r: 6), const SizedBox(height: 10), _caja(150 * _anchos[i], 13),
+                const SizedBox(height: 7), _caja(150 * _anchos[i + 2] * 0.8, 10),
+              ]),
+            ),
+        ]),
+      );
+
+  /// Los botones de una coleccion o un artista: a la izquierda los pequenos,
+  /// a la derecha el play grande.
+  static Widget _botones({bool artista = false}) => Padding(
+        padding: EdgeInsets.fromLTRB(Esp.lado, artista ? 14 : 8, Esp.lado, 8),
+        child: Row(children: [
+          if (artista) ...[_caja(84, 36, r: 18), const SizedBox(width: 12), _circulo(28)]
+          else ...[_circulo(28), const SizedBox(width: 20), _circulo(28), const SizedBox(width: 20), _circulo(24)],
+          const Spacer(),
+          _circulo(28),
+          const SizedBox(width: 14),
+          _circulo(56),
+        ]),
+      );
+
+  Widget _contenido(BuildContext context) {
+    final ancho = MediaQuery.sizeOf(context).width;
+    final arriba = MediaQuery.paddingOf(context).top;
+    switch (widget.forma) {
+      case FormaEsqueleto.filas:
+        return Padding(padding: const EdgeInsets.only(top: 6), child: _filas(ancho, 9));
+      case FormaEsqueleto.carruseles:
+        return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          for (var s = 0; s < 3; s++) ...[
+            _titulo(150 + 30.0 * (s % 2)),
+            _carrusel(),
+            const SizedBox(height: Esp.entreSecciones),
+          ],
+        ]);
+      case FormaEsqueleto.generos:
+        final w = (ancho - 32 - 12) / 2;
+        return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          _titulo(140),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: Esp.lado),
+            child: Wrap(spacing: 12, runSpacing: 12, children: [
+              for (var i = 0; i < 10; i++) _caja(w, w * 0.58, r: 8),
+            ]),
+          ),
+        ]);
+      case FormaEsqueleto.coleccion:
+        final lado = ancho * 0.58;
+        return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          SizedBox(height: arriba + kToolbarHeight + 8),
+          Center(child: _caja(lado, lado)),
+          const SizedBox(height: 20),
+          Padding(padding: const EdgeInsets.symmetric(horizontal: Esp.lado), child: _caja(ancho * 0.6, 24, r: 5)),
+          const SizedBox(height: 12),
+          Padding(padding: const EdgeInsets.symmetric(horizontal: Esp.lado), child: _caja(ancho * 0.42, 12)),
+          const SizedBox(height: 10),
+          _botones(),
+          _filas(ancho, 6),
+        ]);
+      case FormaEsqueleto.atajos:
+        final w = (ancho - 32 - 8) / 2;
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(Esp.lado, 6, Esp.lado, 20),
+          child: Wrap(spacing: 8, runSpacing: 8, children: [
+            for (var i = 0; i < 6; i++)
+              SizedBox(
+                width: w,
+                height: 56,
+                child: Row(children: [
+                  _caja(56, 56, r: 6),
+                  const SizedBox(width: 10),
+                  _caja((w - 80) * _anchos[i], 12),
+                ]),
+              ),
+          ]),
+        );
+      case FormaEsqueleto.artista:
+        return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          _caja(ancho, arriba + ancho * 0.82, r: 0),
+          _botones(artista: true),
+          const SizedBox(height: 8),
+          _titulo(120),
+          _filas(ancho, 5, numero: true),
+        ]);
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final contenido = widget.filas
-        ? Column(children: [
-            for (var i = 0; i < 7; i++)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                child: Row(children: [
-                  _caja(48, 48, r: 4),
-                  const SizedBox(width: 12),
-                  Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                    _caja(180, 13), const SizedBox(height: 8), _caja(110, 10),
-                  ])),
-                ]),
-              ),
-          ])
-        : Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            for (var s = 0; s < 3; s++) ...[
-              Padding(padding: const EdgeInsets.fromLTRB(16, 8, 0, 12), child: _caja(170, 20)),
-              SizedBox(
-                height: 200,
-                child: ListView(scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: 16),
-                    physics: const NeverScrollableScrollPhysics(), children: [
-                  for (var i = 0; i < 4; i++)
-                    Padding(
-                      padding: const EdgeInsets.only(right: 14),
-                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        _caja(150, 150), const SizedBox(height: 10), _caja(110, 12), const SizedBox(height: 6), _caja(80, 10),
-                      ]),
-                    ),
-                ]),
-              ),
-              const SizedBox(height: 16),
-            ],
-          ]);
-    return AnimatedBuilder(
-      animation: _c,
-      builder: (_, hijo) => ShaderMask(
-        blendMode: BlendMode.srcIn,
-        shaderCallback: (r) => LinearGradient(
-          colors: const [Color(0x14FFFFFF), Color(0x2EFFFFFF), Color(0x14FFFFFF)],
-          stops: const [0.35, 0.5, 0.65],
-          begin: Alignment(-1.6 + _c.value * 3.2, 0),
-          end: Alignment(-0.6 + _c.value * 3.2, 0),
-        ).createShader(r),
-        child: hijo,
+    final contenido = _contenido(context);
+    final brillo = RepaintBoundary(
+      child: AnimatedBuilder(
+        animation: _c,
+        builder: (_, hijo) => ShaderMask(
+          blendMode: BlendMode.srcIn,
+          shaderCallback: (r) => LinearGradient(
+            colors: const [Color(0x14FFFFFF), Color(0x2EFFFFFF), Color(0x14FFFFFF)],
+            stops: const [0.35, 0.5, 0.65],
+            begin: Alignment(-1.6 + _c.value * 3.2, -0.3),
+            end: Alignment(-0.6 + _c.value * 3.2, 0.3),
+          ).createShader(r),
+          child: hijo,
+        ),
+        child: contenido,
       ),
-      child: contenido,
+    );
+    // con alto limitado (cuerpo de una pagina) lo que sobra se recorta sin avisos;
+    // dentro de una lista ocupa lo suyo
+    return Semantics(
+      label: 'Cargando',
+      child: LayoutBuilder(builder: (_, c) => c.hasBoundedHeight
+          ? SingleChildScrollView(physics: const NeverScrollableScrollPhysics(), primary: false, child: brillo)
+          : brillo),
     );
   }
 }
@@ -600,44 +925,300 @@ class BotonPlay extends StatelessWidget {
   final double lado;
 
   @override
-  Widget build(BuildContext context) => Material(
-        color: C.acento,
-        shape: const CircleBorder(),
-        elevation: 4,
-        child: InkWell(
-          customBorder: const CircleBorder(),
-          onTap: alPulsar,
-          child: SizedBox(
-            width: lado, height: lado,
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 160),
-              child: Icon(sonando ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                  key: ValueKey(sonando), color: C.acentoTexto, size: lado * 0.55),
+  Widget build(BuildContext context) => Pulsable(
+        escala: 0.9,
+        child: Material(
+          color: C.acento,
+          shape: const CircleBorder(),
+          elevation: 4,
+          shadowColor: const Color(0x8022D3EE),
+          child: InkWell(
+            customBorder: const CircleBorder(),
+            onTap: alPulsar,
+            child: SizedBox(
+              width: lado, height: lado,
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 160),
+                transitionBuilder: (hijo, a) => ScaleTransition(scale: a, child: FadeTransition(opacity: a, child: hijo)),
+                child: Icon(sonando ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                    key: ValueKey(sonando), color: C.acentoTexto, size: lado * 0.55),
+              ),
             ),
           ),
         ),
       );
 }
 
+/// Un filtro en forma de pastilla (Inicio, Buscar, Tu biblioteca): el color
+/// pasa con suavidad al elegirlo y se hunde un poco al tocarlo.
+class Pildora extends StatelessWidget {
+  const Pildora({super.key, this.texto, this.icono, required this.activa, required this.alPulsar, this.tooltip});
+  final String? texto;
+  final IconData? icono;
+  final bool activa;
+  final VoidCallback alPulsar;
+  final String? tooltip;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = activa ? C.acentoTexto : C.texto;
+    Widget contenido = AnimatedContainer(
+      duration: Mov.normal,
+      curve: Mov.curva,
+      constraints: const BoxConstraints(minHeight: 34),
+      alignment: Alignment.center,
+      padding: EdgeInsets.symmetric(horizontal: texto == null ? 10 : 16),
+      decoration: BoxDecoration(color: activa ? C.acento : C.superficie2, borderRadius: BorderRadius.circular(999)),
+      child: texto == null
+          ? Icon(icono, size: 17, color: color)
+          : AnimatedDefaultTextStyle(
+              duration: Mov.normal,
+              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: color, height: 1.2),
+              child: Text(texto!),
+            ),
+    );
+    if (tooltip != null) contenido = Tooltip(message: tooltip!, child: contenido);
+    return Padding(
+      padding: const EdgeInsets.only(right: Esp.s),
+      child: Semantics(
+        button: true,
+        selected: activa,
+        child: Pulsable(
+          escala: 0.94,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () {
+              Haptico.seleccion();
+              alPulsar();
+            },
+            // area de toque comoda aunque la pastilla se vea fina
+            child: Padding(padding: const EdgeInsets.symmetric(vertical: 4), child: contenido),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ---------------------------------------------------------------- estados vacios y errores
+
+/// Cuando no hay nada que mostrar (o algo fallo): un icono con halo, que paso
+/// y que se puede hacer. [alAccion] pone el boton (por defecto "Reintentar").
 class Vacio extends StatelessWidget {
-  const Vacio({super.key, required this.icono, required this.titulo, required this.texto, this.accion});
+  const Vacio({super.key, required this.icono, required this.titulo, required this.texto, this.accion,
+      this.alAccion, this.textoAccion, this.iconoAccion, this.error = false});
   final IconData icono;
   final String titulo;
   final String texto;
   final Widget? accion;
+  final VoidCallback? alAccion;
+  final String? textoAccion;
+  final IconData? iconoAccion;
+
+  /// Algo fallo (el halo va en rojo suave).
+  final bool error;
 
   @override
-  Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 48),
-        child: Column(children: [
-          Icon(icono, size: 52, color: C.texto3),
-          const SizedBox(height: 14),
-          Text(titulo, textAlign: TextAlign.center, style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
-          const SizedBox(height: 8),
-          Text(texto, textAlign: TextAlign.center, style: estiloSecundario),
-          if (accion != null) ...[const SizedBox(height: 18), accion!],
-        ]),
+  Widget build(BuildContext context) {
+    final tono = error ? C.error : C.acento;
+    final boton = accion ??
+        (alAccion == null
+            ? null
+            : FilledButton.icon(
+                onPressed: alAccion,
+                icon: Icon(iconoAccion ?? Icons.refresh_rounded, size: 20),
+                label: Text(textoAccion ?? 'Reintentar'),
+                style: FilledButton.styleFrom(
+                  backgroundColor: C.texto,
+                  foregroundColor: C.fondo,
+                  shape: const StadiumBorder(),
+                  padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 12),
+                  textStyle: const TextStyle(fontSize: 15, fontWeight: FontWeight.w800),
+                ),
+              ));
+    final cuerpo = Entrada(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: Esp.xxl, vertical: 44),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 340),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              Container(
+                width: 92,
+                height: 92,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: RadialGradient(colors: [tono.withValues(alpha: 0.22), tono.withValues(alpha: 0.03)]),
+                  border: Border.all(color: tono.withValues(alpha: 0.22)),
+                ),
+                child: Icon(icono, size: 40, color: error ? C.error : C.acentoAlto),
+              ),
+              const SizedBox(height: 20),
+              Text(titulo, textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800, letterSpacing: -0.2, height: 1.2)),
+              if (texto.isNotEmpty) ...[
+                const SizedBox(height: 8),
+                Text(texto, textAlign: TextAlign.center, style: estiloSecundario.copyWith(height: 1.45)),
+              ],
+              if (boton != null) ...[const SizedBox(height: 22), boton],
+            ]),
+          ),
+        ),
+      ),
+    );
+    // como cuerpo de una pagina: centrado, y si no cabe (teclado abierto) se desplaza
+    return LayoutBuilder(builder: (_, c) => !c.hasBoundedHeight
+        ? cuerpo
+        : SingleChildScrollView(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: c.maxHeight),
+              child: Align(alignment: const Alignment(0, -0.25), child: cuerpo),
+            ),
+          ));
+  }
+}
+
+/// El texto de un fallo, entendible: los mensajes del catalogo ya lo son; lo
+/// tecnico (excepciones, trazas) se cambia por lo que significa para quien usa la app.
+String explicarError(Object? e) {
+  final t = '${e ?? ''}'.trim();
+  final tecnico = t.isEmpty ||
+      RegExp(r'Exception|Error:|Null check|is not a subtype|#\d|StackTrace').hasMatch(t);
+  if (!tecnico) return t;
+  if (RegExp(r'Socket|Dio|Handshake|Timeout|host|network|connection', caseSensitive: false).hasMatch(t)) {
+    return 'Parece que no hay conexión. Revisa el wifi o los datos y vuelve a intentarlo.';
+  }
+  return 'Algo falló al cargar. Vuelve a intentarlo en un momento.';
+}
+
+// ---------------------------------------------------------------- cabecera plegable
+
+/// La cabecera de un artista o un album: al subir se pliega con parallax (el
+/// fondo va a media velocidad), al tirar hacia abajo se estira, y la barra que
+/// queda arriba se tine con el [color] de la portada. El color nuevo entra con
+/// un fundido. Solo se reconstruye la cabecera al desplazarse, nunca la pagina.
+class CabeceraPlegable extends StatelessWidget {
+  const CabeceraPlegable({super.key, required this.titulo, required this.color, required this.alto,
+      required this.fondo, this.acciones = const [], this.degradado = false});
+
+  final String titulo;
+  final Color color;
+
+  /// Alto desplegado, sin contar la barra de estado.
+  final double alto;
+
+  /// Lo que se ve desplegado (va con parallax).
+  final Widget fondo;
+  final List<Widget> acciones;
+
+  /// Pinta debajo del fondo un degradado del color hacia [colorMedio], para
+  /// enlazar con lo que sigue debajo de la cabecera.
+  final bool degradado;
+
+  /// El color en el que acaba la cabecera (y empieza lo de debajo).
+  static Color colorMedio(Color c) => Color.lerp(c, C.fondo, 0.5)!;
+
+  @override
+  Widget build(BuildContext context) => TweenAnimationBuilder<Color?>(
+        tween: ColorTween(end: color),
+        duration: Mov.color,
+        curve: Mov.curva,
+        builder: (_, c, _) {
+          final base = c ?? color;
+          final barra = Color.lerp(base, Colors.black, 0.45)!;
+          return SliverAppBar(
+            pinned: true,
+            stretch: true,
+            expandedHeight: alto,
+            backgroundColor: barra,
+            surfaceTintColor: Colors.transparent,
+            foregroundColor: C.texto,
+            title: _TituloPlegado(titulo),
+            actions: acciones,
+            flexibleSpace: _FondoPlegable(color: base, barra: barra, degradado: degradado, child: fondo),
+          );
+        },
       );
+}
+
+/// Cuanto queda desplegada la cabecera: 1 abierta, 0 plegada (y el estirado).
+(double, double) _pliegue(BuildContext context) {
+  final s = context.dependOnInheritedWidgetOfExactType<FlexibleSpaceBarSettings>();
+  if (s == null) return (1, 0);
+  final rango = s.maxExtent - s.minExtent;
+  final t = rango <= 0 ? 1.0 : ((s.currentExtent - s.minExtent) / rango).clamp(0.0, 1.0);
+  return (t, max(0.0, s.currentExtent - s.maxExtent));
+}
+
+class _TituloPlegado extends StatelessWidget {
+  const _TituloPlegado(this.titulo);
+  final String titulo;
+
+  @override
+  Widget build(BuildContext context) {
+    final (t, _) = _pliegue(context);
+    // el titulo pequeno solo aparece al final, cuando el grande ya se fue
+    final o = (((1 - t) - 0.72) / 0.28).clamp(0.0, 1.0);
+    return Opacity(opacity: o, child: Text(titulo, maxLines: 1, overflow: TextOverflow.ellipsis));
+  }
+}
+
+class _FondoPlegable extends StatelessWidget {
+  const _FondoPlegable({required this.color, required this.barra, required this.degradado, required this.child});
+  final Color color;
+  final Color barra;
+  final bool degradado;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = context.dependOnInheritedWidgetOfExactType<FlexibleSpaceBarSettings>();
+    final (t, _) = _pliegue(context);
+    final maximo = s?.maxExtent ?? 0;
+    final actual = s?.currentExtent ?? maximo;
+    final subido = max(0.0, maximo - actual);
+    final tinte = Curves.easeIn.transform(1 - t);
+    return ClipRect(
+      child: Stack(fit: StackFit.expand, children: [
+        if (degradado)
+          DecoratedBox(decoration: BoxDecoration(gradient: LinearGradient(
+              colors: [color, CabeceraPlegable.colorMedio(color)],
+              begin: Alignment.topCenter, end: Alignment.bottomCenter))),
+        // parallax: el fondo sube a la mitad de velocidad; al estirar crece
+        Positioned(top: -subido * 0.5, left: 0, right: 0, height: max(maximo, actual), child: child),
+        if (!degradado)
+          const IgnorePointer(
+            child: DecoratedBox(decoration: BoxDecoration(gradient: LinearGradient(
+                colors: [Color(0x66000000), Color(0x00000000)], stops: [0, 0.32],
+                begin: Alignment.topCenter, end: Alignment.bottomCenter))),
+          ),
+        if (tinte > 0.001) IgnorePointer(child: ColoredBox(color: barra.withValues(alpha: tinte))),
+      ]),
+    );
+  }
+}
+
+/// La portada de un album dentro de [CabeceraPlegable]: al plegar se encoge
+/// y se desvanece; al estirar crece un poco.
+class PortadaPlegable extends StatelessWidget {
+  const PortadaPlegable({super.key, required this.child});
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final (t, estirado) = _pliegue(context);
+    final escala = 0.74 + 0.26 * t + min(0.12, estirado / 900);
+    final o = ((t - 0.12) / 0.88).clamp(0.0, 1.0);
+    return Opacity(
+      opacity: o,
+      child: Transform.scale(
+        scale: escala,
+        alignment: Alignment.bottomCenter,
+        // la imagen no se vuelve a pintar en cada fotograma del pliegue
+        child: RepaintBoundary(child: child),
+      ),
+    );
+  }
 }
 
 // ---------------------------------------------------------------- dialogos

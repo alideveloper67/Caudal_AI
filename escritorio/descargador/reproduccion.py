@@ -57,6 +57,151 @@ NOMBRES_SALTO = {
 }
 
 
+# ---------------------------------------------------------------- transiciones DJ
+# Al pasar de una cancion a otra se recorta el silencio del final de la que
+# acaba y el del principio de la que entra. Primero manda SponsorBlock
+# ("music_offtopic": intros habladas y finales sin musica); si no hay datos, se
+# escucha el principio y el final con el silencedetect de ffmpeg.
+
+UMBRAL_SILENCIO = "-45dB"
+SILENCIO_MINIMO = 0.35       # segundos seguidos bajo el umbral para contar
+TRAMO_INICIO = 15.0          # cuanto se escucha del principio
+TRAMO_FINAL = 30.0           # y del final
+RECORTE_MAX_INICIO = 15.0    # nunca se salta mas que esto al entrar
+RECORTE_MINIMO = 0.4         # por debajo de esto no merece la pena recortar
+FUNDIDO_DJ_CORTO = 1.2       # fundido minimo al saltar un silencio sin crossfade
+APAGADO_SUAVE_SEG = 30.0     # el temporizador baja el volumen estos ultimos segundos
+
+
+def analizar_silencedetect(texto, desplazamiento=0.0, tramo=None):
+    """Lee la salida de `silencedetect` y devuelve [(inicio, fin o None), ...]
+    en segundos de la cancion. `desplazamiento` es donde empezo a escucharse;
+    si ffmpeg ya dio tiempos absolutos (mayores que el tramo) no se suma."""
+    import re
+    silencios = []
+    abierto = None
+    for linea in (texto or "").splitlines():
+        m = re.search(r"silence_start:\s*(-?[\d.]+)", linea)
+        if m:
+            abierto = max(0.0, float(m.group(1)))
+            continue
+        m = re.search(r"silence_end:\s*(-?[\d.]+)", linea)
+        if m:
+            fin = float(m.group(1))
+            silencios.append((abierto if abierto is not None else 0.0, fin))
+            abierto = None
+    if abierto is not None:
+        silencios.append((abierto, None))     # el silencio llega hasta el final
+    if not desplazamiento:
+        return silencios
+    absolutos = tramo is not None and any(
+        (f or i) > tramo + 2 for i, f in silencios)
+    if absolutos:
+        return silencios
+    return [(i + desplazamiento, None if f is None else f + desplazamiento)
+            for i, f in silencios]
+
+
+def bordes_de_musica(duracion, segmentos=(), silencios_inicio=(), silencios_final=()):
+    """Donde empieza y donde acaba de verdad la musica: (inicio, fin).
+
+    Sin datos (o si el recorte dejaria la cancion en casi nada) devuelve
+    (0, duracion), que es no recortar."""
+    dur = float(duracion or 0)
+    if dur <= 0:
+        return 0.0, 0.0
+    inicio, fin = 0.0, dur
+    for ini, fi, cat in segmentos or ():
+        if cat and cat != "music_offtopic":
+            continue
+        if ini <= 1.5 and fi < dur * 0.5:
+            inicio = max(inicio, float(fi))
+        if fi >= dur - 2.0 and ini > dur * 0.5:
+            fin = min(fin, float(ini))
+    for ini, fi in silencios_inicio or ():
+        if ini <= 0.3 and fi is not None:
+            inicio = max(inicio, float(fi))
+            break
+    for ini, fi in silencios_final or ():
+        if ini > dur * 0.5 and (fi is None or fi >= dur - 0.5):
+            fin = min(fin, float(ini))
+            break
+    inicio = min(inicio, RECORTE_MAX_INICIO)
+    if inicio < RECORTE_MINIMO:
+        inicio = 0.0
+    if dur - fin < RECORTE_MINIMO:
+        fin = dur
+    if fin - inicio < max(20.0, dur * 0.4):
+        return 0.0, dur
+    return round(inicio, 2), round(fin, 2)
+
+
+def _ffmpeg_exe():
+    from .config import ruta_ffmpeg
+    carpeta = ruta_ffmpeg()
+    if not carpeta:
+        return ""
+    for nombre in ("ffmpeg.exe", "ffmpeg"):
+        ruta = os.path.join(carpeta, nombre)
+        if os.path.exists(ruta):
+            return ruta
+    return ""
+
+
+def sondear_silencios(fuente, desde, tramo, exe=None):
+    """Escucha un tramo de la cancion con ffmpeg (sin ventana y con la prioridad
+    mas baja del sistema) y devuelve sus silencios."""
+    import subprocess
+    exe = exe or _ffmpeg_exe()
+    if not exe or not fuente:
+        return []
+    origen = fuente.get("archivo") or fuente.get("audio_url") or fuente.get("url")
+    if not origen:
+        return []
+    cmd = [exe, "-hide_banner", "-nostats", "-nostdin", "-loglevel", "info"]
+    if not fuente.get("archivo"):
+        cab = fuente.get("cabeceras") or {}
+        if cab.get("User-Agent"):
+            cmd += ["-user_agent", cab["User-Agent"]]
+        otras = "".join(f"{k}: {v}\r\n" for k, v in cab.items()
+                        if v and k.lower() not in ("user-agent", "accept-encoding"))
+        if otras:
+            cmd += ["-headers", otras]
+        cmd += ["-rw_timeout", "15000000"]
+    if desde > 0:
+        cmd += ["-ss", f"{desde:.2f}"]
+    cmd += ["-t", f"{tramo:.2f}", "-i", origen, "-vn", "-sn", "-dn",
+            "-af", f"silencedetect=n={UMBRAL_SILENCIO}:d={SILENCIO_MINIMO}",
+            "-f", "null", "-"]
+    banderas = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    banderas |= getattr(subprocess, "IDLE_PRIORITY_CLASS", 0)
+    try:
+        r = subprocess.run(cmd, capture_output=True, text=True, errors="replace",
+                           timeout=40, creationflags=banderas)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    return analizar_silencedetect(r.stderr, desde, tramo)
+
+
+def calcular_bordes(fuente, duracion, video_id="", segmentos=None):
+    """Trabajo de fondo: (inicio, fin) de la musica de una pista."""
+    dur = float(duracion or 0)
+    if dur <= 20:
+        return 0.0, dur
+    if segmentos is None:
+        segmentos = catalogo.segmentos_a_saltar(video_id, CATEGORIAS_MUSICA) if video_id else []
+    inicio, fin = bordes_de_musica(dur, segmentos)
+    exe = _ffmpeg_exe()
+    s_ini, s_fin = [], []
+    if exe:
+        if inicio == 0:
+            s_ini = sondear_silencios(fuente, 0.0, TRAMO_INICIO, exe)
+        if fin >= dur:
+            desde = max(0.0, dur - TRAMO_FINAL + 2)
+            s_fin = sondear_silencios(fuente, desde, TRAMO_FINAL, exe)
+    return bordes_de_musica(dur, segmentos, s_ini, s_fin)
+
+
 def _edl(video_url, audio_url):
     """Une la pista de imagen y la de sonido en una sola fuente, como hace mpv
     con YouTube: es lo que permite 4K/8K (YouTube los sirve por separado)."""
@@ -385,6 +530,10 @@ class Reproductor(QObject):
         self._temporizador.timeout.connect(self._tic_temporizador)
         self._apagar_en = None            # time.time() objetivo
         self._apagar_al_final = False
+        self._factor_suave = 1.0          # 1 = volumen normal; baja al final del temporizador
+
+        self._bordes = {}                 # clave de pista -> (inicio, fin) de la musica
+        self._salto_dj = -1               # gen en la que ya se salto el silencio final
 
         self._pasos_fundido = QTimer(self)
         self._pasos_fundido.setInterval(50)
@@ -396,6 +545,15 @@ class Reproductor(QObject):
             except Exception as e:  # noqa: BLE001
                 self.disponible = False
                 self.motivo_no_disponible = str(e)
+
+        # descarga inteligente: tus me gusta y lo mas escuchado, sin molestar
+        self.descarga_inteligente = None
+        try:
+            from .descarga_inteligente import DescargaInteligente
+            self.descarga_inteligente = DescargaInteligente(ajustes, coleccion, self, padre=self)
+            self.descarga_inteligente.iniciar()
+        except Exception:  # noqa: BLE001 - nunca debe impedir que suene la musica
+            self.descarga_inteligente = None
 
     # ------------------------------------------------------------ motores
 
@@ -470,12 +628,25 @@ class Reproductor(QObject):
             m.fijar_velocidad(self.velocidad)
         self._aplicar_volumen()
 
+    def _vol(self):
+        """Volumen que de verdad llega a mpv (el temporizador lo va bajando)."""
+        return self.volumen * self._factor_suave
+
     def _aplicar_volumen(self):
         if self._fundido:
             return
         actual = self.motor_actual()
         for m in self._todos():
-            m.fijar_volumen(self.volumen if m is actual else 0)
+            m.fijar_volumen(self._vol() if m is actual else 0)
+
+    def _poner_factor_suave(self, factor):
+        factor = max(0.0, min(1.0, float(factor)))
+        if abs(factor - self._factor_suave) < 0.004 and factor not in (0.0, 1.0):
+            return
+        if factor == self._factor_suave:
+            return
+        self._factor_suave = factor
+        self._aplicar_volumen()
 
     def fijar_volumen(self, v):
         self.volumen = max(0, min(100, int(v)))
@@ -713,7 +884,8 @@ class Reproductor(QObject):
                 self.detener()
                 self.buscar(0)
             return
-        self._cargar(objetivo)
+        # al pasar sola, la siguiente entra donde empieza su musica
+        self._cargar(objetivo, inicio=self._inicio_dj(objetivo) if automatico else 0.0)
         self.cola_cambio.emit()
 
     def anterior(self):
@@ -976,7 +1148,7 @@ class Reproductor(QObject):
             motor.fijar_volumen(0)
             motor.cargar(fuente, inicio=objetivo, pausado=True)
         else:
-            motor.fijar_volumen(self.volumen)
+            motor.fijar_volumen(self._vol())
             motor.cargar(fuente, inicio=inicio, pausado=pausado)
         info = dict((fuente.get("info") or {}))
         info["local"] = bool(fuente.get("local"))
@@ -1012,6 +1184,10 @@ class Reproductor(QObject):
                                        if not dur or (s[1] - s[0]) < dur * 0.6]
             en_segundo_plano(catalogo.segmentos_a_saltar, vid, categorias,
                              ok=segmentos, dueno=self)
+        # transicion DJ: donde acaba de verdad la musica de esta (audio solamente)
+        if self.modo == "audio" and self.ajustes["transicion_dj"]:
+            QTimer.singleShot(2500, lambda: gen == self._gen and self._analizar_bordes(
+                pista, self._fuente))
         # precargar la siguiente para que empiece al instante
         QTimer.singleShot(4000, lambda: gen == self._gen and self._precargar())
         # y dejar listo el video de esta, por si pulsas "Ver el video"
@@ -1062,7 +1238,7 @@ class Reproductor(QObject):
         if completar:
             entrante = self.motor_actual()
             if entrante is not None:
-                entrante.fijar_volumen(self.volumen)
+                entrante.fijar_volumen(self._vol())
                 entrante.pausar(False)
             saliente.detener()
             if t.get("desde") and t.get("listo_en"):
@@ -1078,18 +1254,28 @@ class Reproductor(QObject):
         sig = self._mirar_siguiente()
         if not sig or sig is self.actual:
             return
+        dj = self.modo == "audio" and self.ajustes["transicion_dj"]
         if sig.get("archivo") and os.path.exists(sig["archivo"]):
+            if dj:
+                self._analizar_bordes(sig, {"archivo": sig["archivo"]})
             return
-        if self.ajustes["preferir_descargado"] and self.coleccion.copia_local(
-                sig.get("video_id"), self.modo == "video"):
+        copia = self.coleccion.copia_local(sig.get("video_id"), self.modo == "video") \
+            if self.ajustes["preferir_descargado"] else None
+        if copia:
+            if dj:
+                self._analizar_bordes(sig, {"archivo": copia[0]})
             return
         objetivo = sig.get("video_id") or sig.get("url")
         if not objetivo:
             return
         modo = self.modo
         calidad = self.ajustes["calidad_video"] if modo == "video" else self.ajustes["calidad_audio"]
+
+        def resuelta(datos):
+            if dj:
+                self._analizar_bordes(sig, datos)
         en_segundo_plano(catalogo.resolver, objetivo, modo, calidad, self.ajustes["codec_video"],
-                         self.ajustes, ok=lambda _d: None, error=lambda _e: None, dueno=self)
+                         self.ajustes, ok=resuelta, error=lambda _e: None, dueno=self)
         # si quedan pocas, pedir mas canciones parecidas por adelantado
         if (self.ajustes["autoplay"] and self.repetir == "no"
                 and len(self.secuencia) - self.pos <= 3 and not self.proximas
@@ -1132,7 +1318,11 @@ class Reproductor(QObject):
         self._posicion = float(valor)
         self.posicion_cambio.emit(self._posicion)
         # saltar lo que no es musica
+        dj = self.ajustes["transicion_dj"] and self.modo == "audio"
         for ini, fin, cat in self._segmentos:
+            if dj and cat == "music_offtopic" and fin >= (self._duracion or 0) - 2.0 \
+                    and ini > (self._duracion or 0) * 0.5:
+                continue        # el final sin musica lo resuelve la transicion DJ
             if ini <= self._posicion < fin - 0.5:
                 m.buscar(fin)
                 self.aviso.emit("Saltado: " + NOMBRES_SALTO.get(cat, "segmento"))
@@ -1144,8 +1334,14 @@ class Reproductor(QObject):
             if self._posicion >= umbral:
                 self._escucha_registrada = True
                 self.coleccion.registrar_escucha(self.actual, self.contexto)
-        # fundido con la siguiente
-        if (self.modo == "audio" and not self._fundido
+        # temporizador "al terminar esta cancion": baja poco a poco al final
+        if self._apagar_al_final and self.ajustes["apagado_suave"] and self._duracion > 0:
+            quedan = (self._fin_musica() or self._duracion) - self._posicion
+            self._poner_factor_suave(min(1.0, quedan / APAGADO_SUAVE_SEG))
+        # fundido con la siguiente (con la transicion DJ, antes del silencio final)
+        if dj:
+            self._vigilar_final_dj(m)
+        elif (self.modo == "audio" and not self._fundido and not self._apagar_al_final
                 and int(self.ajustes["crossfade"] or 0) > 0
                 and self._duracion > 20 and self.repetir != "una"
                 and self._duracion - self._posicion <= int(self.ajustes["crossfade"])
@@ -1215,6 +1411,7 @@ class Reproductor(QObject):
                 self._apagar_al_final = False
                 self.temporizador_cambio.emit(None)
                 self.detener()
+                self._poner_factor_suave(1.0)
                 self.aviso.emit("Temporizador: música detenida")
                 return
             self.siguiente(automatico=True)
@@ -1256,9 +1453,93 @@ class Reproductor(QObject):
             if estado in ("pausa", "parado"):
                 self._guardar_sesion_pronto()
 
+    # ------------------------------------------------------------ transicion DJ
+
+    @staticmethod
+    def _clave_bordes(pista):
+        if not pista:
+            return ""
+        return pista.get("video_id") or pista.get("archivo") or pista.get("url") or ""
+
+    def _analizar_bordes(self, pista, fuente):
+        """Calcula en segundo plano donde empieza y acaba la musica de la pista."""
+        clave = self._clave_bordes(pista)
+        if not clave or not fuente or clave in self._bordes:
+            return
+        duracion = float(pista.get("duracion") or (fuente.get("info") or {}).get("duracion") or 0)
+        if pista is self.actual and self._duracion:
+            duracion = self._duracion
+        if duracion <= 20:
+            return
+        self._bordes[clave] = None              # en camino: no se pide dos veces
+        if len(self._bordes) > 400:
+            for k in list(self._bordes)[:200]:
+                self._bordes.pop(k, None)
+
+        def listo(res):
+            self._bordes[clave] = tuple(res) if res else (0.0, duracion)
+
+        def fallo(_e):
+            self._bordes.pop(clave, None)
+        en_segundo_plano(calcular_bordes, dict(fuente), duracion, pista.get("video_id") or "",
+                         ok=listo, error=fallo, dueno=self)
+
+    def _inicio_dj(self, pista):
+        """Segundo en el que entra la musica (0 si no hay nada que recortar)."""
+        if not self.ajustes["transicion_dj"] or self.modo != "audio":
+            return 0.0
+        b = self._bordes.get(self._clave_bordes(pista))
+        return float(b[0]) if b else 0.0
+
+    def _fin_musica(self):
+        """Segundo en el que acaba de verdad la musica de lo que suena."""
+        dur = self._duracion or 0.0
+        if not self.ajustes["transicion_dj"] or dur <= 20:
+            return dur
+        fin = dur
+        b = self._bordes.get(self._clave_bordes(self.actual))
+        if b and b[1] and b[1] < dur:
+            fin = float(b[1])
+        for ini, fi, cat in self._segmentos:
+            if cat == "music_offtopic" and fi >= dur - 2.0 and ini > dur * 0.5:
+                fin = min(fin, float(ini))
+        return fin
+
+    def _vigilar_final_dj(self, m):
+        """Fundido (o salto) a la siguiente antes de que llegue el silencio."""
+        if self.modo != "audio" or self.estado != "sonando" or self._fundido:
+            return
+        if self.repetir == "una" or self._duracion <= 20 or self._salto_dj == self._gen:
+            return
+        fin = self._fin_musica()
+        crossfade = int(self.ajustes["crossfade"] or 0)
+        recorta = fin < self._duracion - RECORTE_MINIMO
+        if self._apagar_al_final:
+            # el temporizador "al terminar esta cancion" para donde acaba la musica
+            if recorta and self._posicion >= fin:
+                self._salto_dj = self._gen
+                self._apagar_al_final = False
+                self.temporizador_cambio.emit(None)
+                self.detener()
+                self._poner_factor_suave(1.0)
+                self.aviso.emit("Temporizador: música detenida")
+            return
+        if crossfade > 0:
+            if fin - self._posicion <= crossfade:
+                # si la siguiente aun no esta lista se reintenta en el proximo aviso
+                if not self._empezar_fundido() and recorta and self._posicion >= fin:
+                    self._salto_dj = self._gen
+                    self.siguiente(automatico=True)
+            return
+        if recorta and self._posicion >= fin:
+            # sin fundido elegido: se salta el silencio con un fundido muy corto
+            self._salto_dj = self._gen
+            if not self._empezar_fundido(FUNDIDO_DJ_CORTO):
+                self.siguiente(automatico=True)
+
     # ------------------------------------------------------------ fundido
 
-    def _empezar_fundido(self):
+    def _empezar_fundido(self, duracion=None):
         sig = self._mirar_siguiente()
         if sig is None or len(self.audio) < 2:
             return
@@ -1290,16 +1571,18 @@ class Reproductor(QObject):
         self.activo = 1 - self.activo
         self._fundido = {"saliente": saliente, "entrante": entrante,
                          "inicio": time.time(),
-                         "dur": float(self.ajustes["crossfade"])}
+                         "dur": float(duracion or self.ajustes["crossfade"] or FUNDIDO_DJ_CORTO)}
+        # transicion DJ: la que entra empieza donde empieza su musica
+        entrada = self._inicio_dj(objetivo_pista)
         entrante.fijar_volumen(0)
         entrante.fijar_velocidad(self.velocidad)
-        entrante.cargar(fuente)
+        entrante.cargar(fuente, inicio=entrada)
         self._fuente = fuente
         self.actual = objetivo_pista
         self._escucha_registrada = False
         self._segmentos = []
         self._duracion = float(objetivo_pista.get("duracion") or 0)
-        self._posicion = 0.0
+        self._posicion = entrada
         self.pista_cambio.emit(objetivo_pista)
         self.duracion_cambio.emit(self._duracion)
         info = dict(fuente.get("info") or {})
@@ -1308,6 +1591,7 @@ class Reproductor(QObject):
         self.cola_cambio.emit()
         self._pasos_fundido.start()
         self._preparar_extras(self._gen)
+        return True
 
     def _paso_fundido(self):
         f = self._fundido
@@ -1317,8 +1601,8 @@ class Reproductor(QObject):
         avance = min(1.0, (time.time() - f["inicio"]) / max(0.5, f["dur"]))
         # curva de igual potencia: no hay bajon a mitad del fundido
         import math
-        f["entrante"].fijar_volumen(self.volumen * math.sin(avance * math.pi / 2))
-        f["saliente"].fijar_volumen(self.volumen * math.cos(avance * math.pi / 2))
+        f["entrante"].fijar_volumen(self._vol() * math.sin(avance * math.pi / 2))
+        f["saliente"].fijar_volumen(self._vol() * math.cos(avance * math.pi / 2))
         if avance >= 1.0:
             f["saliente"].detener()
             self._fundido = None
@@ -1336,6 +1620,8 @@ class Reproductor(QObject):
 
     def programar_apagado(self, minutos=None, al_terminar=False):
         self._apagar_al_final = bool(al_terminar)
+        self._temporizador.setInterval(1000)
+        self._poner_factor_suave(1.0)
         if minutos:
             self._apagar_en = time.time() + minutos * 60
             self._temporizador.start()
@@ -1367,10 +1653,23 @@ class Reproductor(QObject):
         if quedan <= 0:
             self._apagar_en = None
             self._temporizador.stop()
+            self._temporizador.setInterval(1000)
             self.temporizador_cambio.emit(None)
             self.pausar()
+            # en pausa ya no se oye: el volumen vuelve a su sitio para la proxima vez
+            self._poner_factor_suave(1.0)
             self.aviso.emit("Temporizador: música en pausa. ¡Buenas noches!")
-        else:
+            return
+        if self.ajustes["apagado_suave"] and quedan <= APAGADO_SUAVE_SEG:
+            # los ultimos 30 s el volumen baja poco a poco (a pasos de 0,2 s)
+            if self._temporizador.interval() != 200:
+                self._temporizador.setInterval(200)
+            self._poner_factor_suave(quedan / APAGADO_SUAVE_SEG)
+        elif self._factor_suave != 1.0:
+            self._poner_factor_suave(1.0)
+        segundos = int(quedan + 0.999)
+        if segundos != getattr(self, "_ultimo_aviso_tempo", None):
+            self._ultimo_aviso_tempo = segundos
             self.temporizador_cambio.emit(int(quedan))
 
     def _apagar_si_toca_al_cambiar(self, cambio):

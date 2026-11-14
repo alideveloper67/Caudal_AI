@@ -98,6 +98,10 @@ class CaudalNativo: NSObject, FlutterPlugin, FlutterSceneLifeCycleDelegate {
   /// - caudal:// sin nada que abrir -> nil (solo abre la app)
   private func textoDe(_ url: URL) -> String? {
     if url.scheme?.lowercased() == "caudal" {
+      // caudal://juntos?sala=XXXXXX va entero: Dart lo lleva a "Escuchar juntos"
+      if url.host?.lowercased() == "juntos" {
+        return url.absoluteString
+      }
       let items = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
       for nombre in ["url", "texto", "text", "u"] {
         if let valor = items.first(where: { $0.name == nombre })?.value,

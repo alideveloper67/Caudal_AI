@@ -233,6 +233,9 @@ class Ventana(QWidget):
         self.campo.addAction(self.icono_lupa, QLineEdit.LeadingPosition)
         h.addWidget(self.campo, 1)
         h.addStretch(1)
+        self.bt_resumen = BotonIcono("ecualizador", 19, "Tu resumen", 36)
+        self.bt_resumen.clicked.connect(lambda: self.navegar({"pagina": "resumen"}))
+        h.addWidget(self.bt_resumen)
         self.bt_descargas = BotonIcono("descargar", 19, "Descargas", 36)
         self.bt_descargas.clicked.connect(lambda: self.navegar({"pagina": "descargas"}))
         h.addWidget(self.bt_descargas)
@@ -353,6 +356,12 @@ class Ventana(QWidget):
         elif pag in ("album", "lista", "mi_lista", "me_gusta", "disco"):
             from .paginas.coleccion import PaginaColeccion
             w = PaginaColeccion(self.ctx, destino)
+        elif pag == "mix":
+            from .paginas.inicio import PaginaMix
+            w = PaginaMix(self.ctx, destino)
+        elif pag == "resumen":
+            from .paginas.resumen import PaginaResumen
+            w = PaginaResumen(self.ctx)
         elif pag == "biblioteca":
             from .paginas.biblioteca import PaginaBiblioteca
             w = PaginaBiblioteca(self.ctx)
@@ -439,6 +448,7 @@ class Ventana(QWidget):
             self.campo.clear()
         self.bt_atras.setEnabled(self.indice > 0)
         self.bt_adelante.setEnabled(self.indice < len(self.historia) - 1)
+        self.bt_resumen.set_activo(pag == "resumen", punto=False)
         self.bt_descargas.set_activo(pag == "descargas", punto=False)
         self.bt_ajustes.set_activo(pag == "ajustes", punto=False)
         titulo = getattr(w, "titulo", "") or ""

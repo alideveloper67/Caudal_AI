@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android Auto: Caudal es una app de musica (MediaBrowserService de audio_service) -->
+<automotiveApp>
+    <uses name="media"/>
+</automotiveApp>

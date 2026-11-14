@@ -4,18 +4,32 @@ import 'package:audio_service/audio_service.dart';
 import 'package:audio_session/audio_session.dart';
 import 'package:flutter/foundation.dart';
 
+import '../nucleo/coleccion.dart';
+import '../nucleo/plataforma.dart';
+import 'biblioteca_auto.dart';
 import 'reproductor.dart';
+import 'widget_inicio.dart';
 
 /// Puente con el sistema: notificacion con controles (Android), pantalla de
 /// bloqueo y Centro de control (iPhone, MPNowPlayingInfoCenter y
 /// MPRemoteCommandCenter), auriculares y que la musica siga con la pantalla
 /// apagada. En iPhone hace falta `audio` en UIBackgroundModes del Info.plist.
+///
+/// En Android ademas: la biblioteca en el coche (Android Auto: getChildren,
+/// playFromMediaId, busqueda por voz) y el widget de la pantalla de inicio.
 class ServicioAudio extends BaseAudioHandler with SeekHandler {
-  ServicioAudio(this.r) {
+  ServicioAudio(this.r, {Coleccion? coleccion}) : auto = BibliotecaAuto(coleccion ?? r.coleccion) {
     _enganchar();
+    WidgetInicio.iniciar(
+      alternar: () => r.estado == EstadoRepro.sonando ? pause() : play(),
+      siguiente: skipToNext,
+    );
   }
 
   Reproductor r;
+
+  /// Lo que se navega desde el coche; cambia con la cuenta.
+  final BibliotecaAuto auto;
 
   void _enganchar() {
     r.addListener(_publicar);
@@ -24,10 +38,12 @@ class ServicioAudio extends BaseAudioHandler with SeekHandler {
   }
 
   /// Otra cuenta, otro reproductor: Android solo deja iniciar el servicio una vez.
-  void cambiar(Reproductor nuevo) {
+  /// La biblioteca del coche pasa a [coleccion] (por defecto, la del reproductor).
+  void cambiar(Reproductor nuevo, {Coleccion? coleccion}) {
     r.removeListener(_publicar);
     r.posicion.removeListener(_publicarPosicion);
     r = nuevo;
+    auto.coleccion = coleccion ?? nuevo.coleccion;
     _ultimaClave = '';
     _enganchar();
   }
@@ -35,13 +51,13 @@ class ServicioAudio extends BaseAudioHandler with SeekHandler {
   static ServicioAudio? _unico;
 
   /// Inicia el servicio la primera vez; despues solo le cambia el reproductor.
-  static Future<ServicioAudio> para(Reproductor r) async {
+  static Future<ServicioAudio> para(Reproductor r, {Coleccion? coleccion}) async {
     final u = _unico;
     if (u != null) {
-      u.cambiar(r);
+      u.cambiar(r, coleccion: coleccion);
       return u;
     }
-    final nuevo = _unico = await iniciar(r);
+    final nuevo = _unico = await iniciar(r, coleccion: coleccion);
     unawaited(nuevo._sesion());
     return nuevo;
   }
@@ -100,8 +116,8 @@ class ServicioAudio extends BaseAudioHandler with SeekHandler {
   String _ultimaClave = '';
   int _ultimoSegundo = -1;
 
-  static Future<ServicioAudio> iniciar(Reproductor r) => AudioService.init(
-        builder: () => ServicioAudio(r),
+  static Future<ServicioAudio> iniciar(Reproductor r, {Coleccion? coleccion}) => AudioService.init(
+        builder: () => ServicioAudio(r, coleccion: coleccion),
         config: const AudioServiceConfig(
           androidNotificationChannelId: 'app.caudal.reproduccion',
           androidNotificationChannelName: 'Reproducción',
@@ -135,6 +151,20 @@ class ServicioAudio extends BaseAudioHandler with SeekHandler {
       ));
     }
     _estado();
+    _widget();
+  }
+
+  void _widget() {
+    if (!Plataforma.esAndroid) return;
+    final p = r.actual;
+    final item = mediaItem.value;
+    WidgetInicio.publicar(
+      hay: p != null,
+      titulo: p == null ? '' : '${p['titulo'] ?? ''}',
+      artista: p == null ? '' : '${p['artista'] ?? ''}',
+      arte: p == null ? '' : (item?.artUri?.toString() ?? ''),
+      sonando: r.estado == EstadoRepro.sonando || r.estado == EstadoRepro.cargando,
+    );
   }
 
   void _publicarPosicion() {
@@ -185,4 +215,88 @@ class ServicioAudio extends BaseAudioHandler with SeekHandler {
   Future<void> fastForward() => r.avanzar(10);
   @override
   Future<void> rewind() => r.avanzar(-10);
+
+  // ------------------------------------------------------------ Android Auto
+
+  @override
+  Future<List<MediaItem>> getChildren(String parentMediaId, [Map<String, dynamic>? options]) async {
+    try {
+      return await auto.hijos(parentMediaId);
+    } catch (e) {
+      debugPrint('auto getChildren: $e');
+      return const [];
+    }
+  }
+
+  @override
+  Future<MediaItem?> getMediaItem(String mediaId) async {
+    try {
+      return await auto.elemento(mediaId);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  @override
+  Future<List<MediaItem>> search(String query, [Map<String, dynamic>? extras]) async {
+    final halladas = await auto.buscar(query);
+    return [for (final p in halladas) BibliotecaAuto.cancion('bus', p)];
+  }
+
+  /// Tocar una cancion en el coche: suena con el resto de su carpeta en cola.
+  @override
+  Future<void> playFromMediaId(String mediaId, [Map<String, dynamic>? extras]) async {
+    final partes = BibliotecaAuto.partir(mediaId);
+    if (partes == null) {
+      // una carpeta entera (p. ej. "pon mis me gusta")
+      return _sonarCarpeta(mediaId);
+    }
+    final (carpeta, clave) = partes;
+    final pistas = await auto.pistasDe(carpeta);
+    final i = pistas.indexWhere((p) => '${p['clave']}' == clave);
+    if (i < 0) {
+      final suelta = (await auto.coleccion.pistas([clave])).firstOrNull;
+      if (suelta != null) await r.reproducirPista(suelta);
+      return;
+    }
+    if (carpeta == 'bus') {
+      await r.reproducirPista(pistas[i]);
+      return;
+    }
+    await r.reproducirLista(pistas, inicio: i, contexto: await _contexto(carpeta));
+  }
+
+  Future<void> _sonarCarpeta(String carpeta) async {
+    final pistas = await auto.pistasDe(carpeta);
+    if (pistas.isEmpty) return;
+    await r.reproducirLista(pistas, contexto: await _contexto(carpeta));
+  }
+
+  Future<Json> _contexto(String carpeta) async {
+    final titulo = await auto.tituloDe(carpeta);
+    if (carpeta.startsWith('l:')) return {'tipo': 'mi_lista', 'id': int.tryParse(carpeta.substring(2)), 'titulo': titulo};
+    if (carpeta == 'c:megusta') return {'tipo': 'me_gusta', 'id': 'me_gusta', 'titulo': titulo};
+    if (carpeta == 'c:descargas') return {'tipo': 'descargados', 'id': 'descargados', 'titulo': titulo};
+    return {'tipo': 'seleccion', 'id': titulo, 'titulo': titulo};
+  }
+
+  /// "Ok Google, pon ... en Caudal". Sin texto: tus me gusta (o lo reciente).
+  @override
+  Future<void> playFromSearch(String query, [Map<String, dynamic>? extras]) async {
+    if (query.trim().isEmpty) {
+      final gustan = await auto.pistasDe('c:megusta');
+      if (gustan.isNotEmpty) {
+        await r.reproducirLista(gustan, aleatorio: true, contexto: await _contexto('c:megusta'));
+      } else {
+        await _sonarCarpeta('c:recientes');
+      }
+      return;
+    }
+    final halladas = await auto.buscar(query, limite: 10);
+    if (halladas.isEmpty) return;
+    await r.reproducirPista(halladas.first);
+  }
+
+  @override
+  Future<void> playMediaItem(MediaItem mediaItem) => playFromMediaId(mediaItem.id);
 }

@@ -148,6 +148,9 @@ class BarraReproduccion(QFrame):
         self.bt_cola = BotonIcono("cola", 18, "Cola", 32)
         self.bt_cola.clicked.connect(lambda: self.pidio_panel.emit("cola"))
         der.addWidget(self.bt_cola)
+        self.bt_juntos = BotonIcono("usuario", 18, "Escuchar juntos", 32)
+        self.bt_juntos.clicked.connect(self._abrir_juntos)
+        der.addWidget(self.bt_juntos)
         self.bt_temporizador = BotonIcono("temporizador", 17, "Temporizador para dormir", 32)
         self.bt_temporizador.clicked.connect(self._menu_temporizador)
         der.addWidget(self.bt_temporizador)
@@ -402,6 +405,19 @@ class BarraReproduccion(QFrame):
         nivel = int(self.ctx.ajustes["super_volumen"] or 0)
         self.bt_super.set_activo(bool(nivel))
         self.bt_super.setToolTip("Súper volumen: " + NOMBRES_SUPER_VOLUMEN.get(nivel, "").lower())
+
+    def _abrir_juntos(self):
+        from .paginas import juntos
+        g = juntos.gestor(self.ctx)
+        if not getattr(self, "_juntos_atado", False):
+            self._juntos_atado = True
+            g.cambio.connect(lambda: self._pintar_juntos(g))
+        juntos.abrir_ventana(self.ctx, self.window())
+
+    def _pintar_juntos(self, g):
+        s = g.sala
+        self.bt_juntos.set_activo(s is not None)
+        self.bt_juntos.setToolTip(f"Escuchar juntos · sala {s.codigo}" if s else "Escuchar juntos")
 
     def marcar_panel(self, nombre):
         self.bt_letras.set_activo(nombre == "letras")

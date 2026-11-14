@@ -121,11 +121,16 @@ def main():
         reproductor = Reproductor(ajustes, coleccion)
         ctx = Contexto(ajustes, historial, coleccion, gestor, reproductor)
         ctx.cuenta = cuenta
+        # la descarga inteligente espera a tus descargas manuales y avisa de lo que baja
+        inteligente = getattr(reproductor, "descarga_inteligente", None)
+        if inteligente is not None:
+            inteligente.gestor = gestor
+            inteligente.descargada.connect(lambda _p: ctx.descargas_cambio.emit())
         ctx.cerrar_sesion = lambda: (Cuentas().olvidar(cuenta), reiniciar())
         if cuenta.get("sesion") is not None:
             # biblioteca compartida con los demas dispositivos de la cuenta
             from descargador.sincronizacion import Sincronizador
-            sinc = Sincronizador(coleccion, cuenta,
+            sinc = Sincronizador(coleccion, cuenta, ajustes=ajustes,
                                  al_renovar=lambda: Cuentas().actualizar_recordada(cuenta))
             coleccion.sincronizador = sinc
             ctx.sincronizador = sinc
@@ -135,6 +140,26 @@ def main():
                 ctx.listas_cambio.emit()
                 ctx.guardados_cambio.emit()
             sinc.cambio_remoto.connect(llego_de_otro)
+
+            def ajustes_de_otro(cambiados):
+                # el sonido (ecualizador, super volumen...) se nota al momento
+                reproductor.aplicar_sonido()
+                if "region" in cambiados:
+                    catalogo.fijar_region(ajustes["region"])
+            sinc.ajustes_remotos.connect(ajustes_de_otro)
+
+            # al guardar un ajuste, se sube en un momento (los seguidos se agrupan)
+            from descargador.sincronizacion import ajustes_compartidos, huella_ajustes
+            guardar_original = ajustes.guardar
+            ultima = [huella_ajustes(ajustes_compartidos(ajustes))]
+
+            def guardar_y_subir():
+                guardar_original()
+                ahora = huella_ajustes(ajustes_compartidos(ajustes))
+                if ahora != ultima[0]:      # el volumen u otros ajustes propios no viajan
+                    ultima[0] = ahora
+                    sinc.pronto()
+            ajustes.guardar = guardar_y_subir
             sinc.iniciar()
         ventana = Ventana(ctx)
         estado["ventana"] = ventana

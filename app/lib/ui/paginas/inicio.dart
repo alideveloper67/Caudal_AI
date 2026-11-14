@@ -7,6 +7,8 @@ import '../plataforma.dart';
 import '../servicios.dart';
 import '../tema.dart';
 import 'ajustes_pagina.dart';
+import 'juntos_pagina.dart';
+import 'resumen.dart';
 
 const espacioInferior = 84.0;
 
@@ -24,6 +26,8 @@ class _InicioPaginaState extends State<InicioPagina> with AutomaticKeepAliveClie
   String _filtro = 'todo';
   Map<String, dynamic>? _catalogo = _cacheCatalogo;
   bool _sinRed = false;
+  // hasta que llega lo de este telefono se ve su esqueleto (y nada salta luego)
+  bool _localListo = false;
   List<Json> _recientes = [];
   List<Json> _atajos = [];
   List<Json> _mixes = [];
@@ -70,6 +74,7 @@ class _InicioPaginaState extends State<InicioPagina> with AutomaticKeepAliveClie
     final enTelefono = await col.descargadas();
     if (!mounted) return;
     setState(() {
+      _localListo = true;
       _recientes = recientes;
       _atajos = atajos.take(8).toList();
       _mixes = mixes;
@@ -120,6 +125,9 @@ class _InicioPaginaState extends State<InicioPagina> with AutomaticKeepAliveClie
       }
     }
 
+    final verAtajos = _filtro != 'telefono' && _filtro != 'videos';
+    // turnos de entrada: lo de arriba primero, el catalogo despues
+    var turno = 0;
     return Scaffold(
       body: RefreshIndicator.adaptive(
         color: C.acento,
@@ -127,112 +135,139 @@ class _InicioPaginaState extends State<InicioPagina> with AutomaticKeepAliveClie
           Haptico.firme();
           return _cargar(forzar: true);
         },
-        child: CustomScrollView(
-          cacheExtent: 800,
-          slivers: [
-            SliverToBoxAdapter(
-              child: Container(
-                decoration: const BoxDecoration(
-                  gradient: LinearGradient(colors: [Color(0xFF16324A), C.fondo],
-                      begin: Alignment.topCenter, end: Alignment.bottomCenter),
-                ),
-                padding: EdgeInsets.fromLTRB(16, MediaQuery.paddingOf(context).top + 12, 16, 8),
-                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Row(children: [
-                    GestureDetector(
-                      onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AjustesPagina())),
-                      child: CircleAvatar(
-                        radius: 17, backgroundColor: C.acento,
-                        child: Text(s.cuenta.inicial,
-                            style: const TextStyle(color: C.acentoTexto, fontWeight: FontWeight.w900)),
-                      ),
+        child: Escalonado(
+          clave: '$_localListo|${_catalogo != null}|$_sinRed|$_filtro',
+          child: CustomScrollView(
+            key: const PageStorageKey('inicio'),
+            cacheExtent: 800,
+            slivers: [
+              SliverToBoxAdapter(child: _Cabecera(saludo: nombre.isEmpty ? _saludo() : '${_saludo()}, $nombre',
+                  inicial: s.cuenta.inicial, filtro: _filtro, alFiltrar: (f) => setState(() => _filtro = f))),
+              if (!_localListo && verAtajos)
+                const SliverToBoxAdapter(child: Esqueleto(forma: FormaEsqueleto.atajos))
+              else if (verAtajos && _atajos.length > 1)
+                SliverPadding(
+                  padding: const EdgeInsets.fromLTRB(Esp.lado, 6, Esp.lado, 20),
+                  sliver: SliverGrid(
+                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 2, mainAxisSpacing: 8, crossAxisSpacing: 8, mainAxisExtent: 56),
+                    delegate: SliverChildBuilderDelegate(
+                      // en diagonal: de dos en dos, muy seguido
+                      (_, i) => Entrada(indice: i ~/ 2, desplazamiento: 10, child: _Atajo(el: _atajos[i])),
+                      childCount: _atajos.length,
                     ),
-                    const SizedBox(width: 12),
-                    Expanded(child: Text(nombre.isEmpty ? _saludo() : '${_saludo()}, $nombre',
-                        style: const TextStyle(fontSize: 23, fontWeight: FontWeight.w900), maxLines: 1,
-                        overflow: TextOverflow.ellipsis)),
-                    IconButton(
-                      icon: const Icon(Icons.settings_outlined),
-                      onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AjustesPagina())),
-                    ),
-                  ]),
-                  const SizedBox(height: 14),
-                  SingleChildScrollView(
-                    scrollDirection: Axis.horizontal,
-                    child: Row(children: [
-                      for (final (clave, texto) in const [('todo', 'Todo'), ('musica', 'Música'),
-                        ('videos', 'Videos'), ('telefono', 'En tu teléfono')])
-                        Padding(
-                          padding: const EdgeInsets.only(right: 8),
-                          child: ChoiceChip(
-                            label: Text(texto),
-                            selected: _filtro == clave,
-                            onSelected: (_) => setState(() => _filtro = clave),
-                            showCheckmark: false,
-                            selectedColor: C.acento,
-                            labelStyle: TextStyle(fontWeight: FontWeight.w600,
-                                color: _filtro == clave ? C.acentoTexto : C.texto),
-                            backgroundColor: C.superficie2,
-                            side: BorderSide.none,
-                            shape: const StadiumBorder(),
-                          ),
-                        ),
-                    ]),
                   ),
+                ),
+              SliverList(
+                // otro filtro: todo vuelve a entrar en su turno
+                key: ValueKey(_filtro),
+                delegate: SliverChildListDelegate([
+                  if (_filtro == 'telefono') ...[
+                    if (_localListo && _enTelefono.isEmpty)
+                      Vacio(icono: Icons.download_for_offline_outlined, titulo: 'Aún no hay nada en tu teléfono',
+                          texto: 'Descarga canciones, álbumes o videos y suenan sin internet.',
+                          textoAccion: 'Descargar un enlace', iconoAccion: Icons.link_rounded,
+                          alAccion: () => s.irAPestana?.call(3))
+                    else ...[
+                      // sin titulos de carruseles vacios (solo musica o solo videos)
+                      for (final (titulo, audio) in const [('Tu música descargada', true), ('Tus videos descargados', false)])
+                        if (_enTelefono.any((p) => (p['es_audio'] == true) == audio)) ...[
+                          Entrada(indice: turno++, child: Carrusel(titulo: titulo,
+                              elementos: _enTelefono.where((p) => (p['es_audio'] == true) == audio).toList())),
+                          const SizedBox(height: Esp.entreSecciones),
+                        ],
+                    ],
+                  ] else ...[
+                    if (_filtro != 'videos' && _recientes.isNotEmpty) ...[
+                      Entrada(indice: ++turno, child: Carrusel(titulo: 'Volver a escuchar', elementos: _recientes)),
+                      const SizedBox(height: Esp.entreSecciones),
+                    ],
+                    if (_filtro == 'todo')
+                      // hechos con tu historial; se oculta sola si aun no hay nada
+                      SeccionMixes(alAbrir: (m) => Caudal.leer(context).abrirElemento(context, m)),
+                    if (_filtro == 'todo' && _mixes.isNotEmpty) ...[
+                      Entrada(indice: ++turno,
+                          child: Carrusel(titulo: 'Mixes de tus artistas', elementos: _mixes)),
+                      const SizedBox(height: Esp.entreSecciones),
+                    ],
+                    if (_catalogo == null && !_sinRed) const Esqueleto(),
+                    if (_sinRed)
+                      Vacio(icono: Icons.wifi_off_rounded, titulo: 'Sin conexión', error: true,
+                          texto: 'Mientras vuelve, tienes lo descargado en «En tu teléfono».',
+                          alAccion: () => _cargar(forzar: true)),
+                    ...pintarSecciones(context, secciones, desde: turno + 1),
+                  ],
+                  const SizedBox(height: espacioInferior),
                 ]),
               ),
-            ),
-            if (_filtro != 'telefono' && _filtro != 'videos' && _atajos.length > 1)
-              SliverPadding(
-                padding: const EdgeInsets.fromLTRB(16, 6, 16, 20),
-                sliver: SliverGrid(
-                  gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: 2, mainAxisSpacing: 8, crossAxisSpacing: 8, mainAxisExtent: 56),
-                  delegate: SliverChildBuilderDelegate(
-                    (_, i) => _Atajo(el: _atajos[i]),
-                    childCount: _atajos.length,
-                  ),
-                ),
-              ),
-            SliverList(
-              delegate: SliverChildListDelegate([
-                if (_filtro == 'telefono') ...[
-                  if (_enTelefono.isEmpty)
-                    const Vacio(icono: Icons.download_for_offline_outlined, titulo: 'Aún no hay nada en tu teléfono',
-                        texto: 'Descarga canciones, álbumes o videos y suenan sin internet.')
-                  else ...[
-                    // sin titulos de carruseles vacios (solo musica o solo videos)
-                    for (final (titulo, audio) in const [('Tu música descargada', true), ('Tus videos descargados', false)])
-                      if (_enTelefono.any((p) => (p['es_audio'] == true) == audio)) ...[
-                        Carrusel(titulo: titulo,
-                            elementos: _enTelefono.where((p) => (p['es_audio'] == true) == audio).toList()),
-                        const SizedBox(height: 26),
-                      ],
-                  ],
-                ] else ...[
-                  if (_filtro != 'videos' && _recientes.isNotEmpty) ...[
-                    Carrusel(titulo: 'Volver a escuchar', elementos: _recientes),
-                    const SizedBox(height: 26),
-                  ],
-                  if (_filtro == 'todo' && _mixes.isNotEmpty) ...[
-                    Carrusel(titulo: 'Tus mixes', elementos: _mixes),
-                    const SizedBox(height: 26),
-                  ],
-                  if (_catalogo == null && !_sinRed) const Esqueleto(),
-                  if (_sinRed)
-                    Vacio(icono: Icons.wifi_off_rounded, titulo: 'Sin conexión',
-                        texto: 'Mientras vuelve, tienes lo descargado en «En tu teléfono».',
-                        accion: OutlinedButton(onPressed: () => _cargar(forzar: true), child: const Text('Reintentar'))),
-                  ...pintarSecciones(context, secciones),
-                ],
-                const SizedBox(height: espacioInferior),
-              ]),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
   }
+}
+
+/// El saludo, el acceso a los ajustes y los filtros, sobre un degradado.
+class _Cabecera extends StatelessWidget {
+  const _Cabecera({required this.saludo, required this.inicial, required this.filtro, required this.alFiltrar});
+  final String saludo;
+  final String inicial;
+  final String filtro;
+  final ValueChanged<String> alFiltrar;
+
+  void _ajustes(BuildContext context) =>
+      Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AjustesPagina()));
+
+  @override
+  Widget build(BuildContext context) => Container(
+        decoration: const BoxDecoration(
+          gradient: LinearGradient(colors: [Color(0xFF16324A), C.fondo],
+              begin: Alignment.topCenter, end: Alignment.bottomCenter),
+        ),
+        padding: EdgeInsets.fromLTRB(Esp.lado, MediaQuery.paddingOf(context).top + Esp.m, Esp.lado, Esp.s),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Pulsable(
+              escala: 0.9,
+              child: GestureDetector(
+                onTap: () => _ajustes(context),
+                child: CircleAvatar(
+                  radius: 17, backgroundColor: C.acento,
+                  child: Text(inicial, style: const TextStyle(color: C.acentoTexto, fontWeight: FontWeight.w900)),
+                ),
+              ),
+            ),
+            const SizedBox(width: Esp.m),
+            Expanded(child: Text(saludo, style: estiloTituloBarra, maxLines: 1, overflow: TextOverflow.ellipsis)),
+            IconButton(
+              tooltip: 'Escuchar juntos',
+              icon: const Icon(Icons.groups_2_outlined),
+              onPressed: () => Navigator.of(context)
+                  .push(MaterialPageRoute(builder: (_) => const JuntosPagina())),
+            ),
+            IconButton(
+              tooltip: 'Tu resumen',
+              icon: const Icon(Icons.insights_rounded),
+              onPressed: () => ResumenPagina.abrir(context),
+            ),
+            IconButton(
+              tooltip: 'Ajustes',
+              icon: const Icon(Icons.settings_outlined),
+              onPressed: () => _ajustes(context),
+            ),
+          ]),
+          const SizedBox(height: 10),
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(children: [
+              for (final (clave, texto) in const [('todo', 'Todo'), ('musica', 'Música'),
+                ('videos', 'Videos'), ('telefono', 'En tu teléfono')])
+                Pildora(texto: texto, activa: filtro == clave, alPulsar: () => alFiltrar(clave)),
+            ]),
+          ),
+        ]),
+      );
 }
 
 class _Atajo extends StatelessWidget {
@@ -242,7 +277,7 @@ class _Atajo extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final s = Caudal.leer(context);
-    return Material(
+    return Pulsable(escala: 0.97, child: Material(
       color: C.superficie2,
       borderRadius: BorderRadius.circular(6),
       clipBehavior: Clip.antiAlias,
@@ -263,6 +298,6 @@ class _Atajo extends StatelessWidget {
           const SizedBox(width: 6),
         ]),
       ),
-    );
+    ));
   }
 }

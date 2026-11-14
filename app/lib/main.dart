@@ -9,6 +9,7 @@ import 'nucleo/ajustes.dart';
 import 'nucleo/capturador_oculto.dart';
 import 'nucleo/catalogo.dart';
 import 'nucleo/coleccion.dart';
+import 'nucleo/descarga_inteligente.dart';
 import 'nucleo/cuentas.dart';
 import 'nucleo/descargas.dart';
 import 'nucleo/motor_local.dart';
@@ -59,6 +60,7 @@ class _CaudalAppState extends State<CaudalApp> {
   bool _comprobando = true;
   final _navegador = GlobalKey<NavigatorState>();
   CapturadorOculto? _capturador;
+  DescargaInteligente? _inteligente;
 
   @override
   void initState() {
@@ -101,9 +103,29 @@ class _CaudalAppState extends State<CaudalApp> {
     _capturador ??= CapturadorOculto();
     unawaited(_capturador!.preparar().catchError((_) {}));
     final descargas = GestorDescargas(coleccion: coleccion, ajustes: ajustes, capturador: _capturador!);
+    // con wifi baja sola tus favoritas (si el ajuste esta activo)
+    _inteligente?.detener();
+    _inteligente = DescargaInteligente(coleccion, descargas, ajustes)..iniciar();
     Sincronizador? sinc;
     if (c.sesion != null) {
-      sinc = Sincronizador(coleccion, c.sesion!, alRenovar: () => Cuentas.actualizarRecordada(c))..iniciar();
+      sinc = Sincronizador(coleccion, c.sesion!, alRenovar: () => Cuentas.actualizarRecordada(c),
+          ajustes: ajustes,
+          alCambiarAjustes: (cambiados) {
+            // lo cambiado en otro dispositivo se nota al momento
+            reproductor.aplicarSonido();
+            if (cambiados.contains('region')) Catalogo.fijarRegion(ajustes.texto('region'));
+            if (cambiados.contains('bitrate_mp3')) MotorLocal.bitrateMp3 = ajustes.texto('bitrate_mp3');
+          })
+        ..iniciar();
+      // al cambiar un ajuste comun, se sube en un momento
+      var ultima = Sincronizador.huellaAjustes(Sincronizador.ajustesParaNube(ajustes.paraNube()));
+      final sincr = sinc;
+      ajustes.addListener(() {
+        final ahora = Sincronizador.huellaAjustes(Sincronizador.ajustesParaNube(ajustes.paraNube()));
+        if (ahora == ultima) return;      // el volumen u otros ajustes propios no viajan
+        ultima = ahora;
+        sincr.pronto();
+      });
     }
     late final Servicios s;
     s = Servicios(
@@ -123,6 +145,8 @@ class _CaudalAppState extends State<CaudalApp> {
     _navegador.currentState?.popUntil((r) => r.isFirst);
     await s.reproductor.detener();
     s.sincronizador?.detener();
+    _inteligente?.detener();
+    _inteligente = null;
     await Cuentas.olvidar(s.cuenta);
     setState(() => _s = null);
     // se libera despues de que la pantalla ya no lo use

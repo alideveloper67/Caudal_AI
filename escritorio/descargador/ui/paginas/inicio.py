@@ -2,14 +2,22 @@
 """Inicio: lo tuyo arriba, y lo que propone YouTube Music debajo."""
 
 import time
+from datetime import datetime, timedelta
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QGridLayout, QHBoxLayout, QLabel, QWidget
+from PySide6.QtCore import QObject, QRectF, Qt, QTimer, Signal
+from PySide6.QtGui import (QColor, QFont, QFontMetrics, QLinearGradient, QPainter, QPainterPath,
+                           QPixmap)
+from PySide6.QtWidgets import QApplication, QGridLayout, QHBoxLayout, QLabel, QMenu, QWidget
 
 from ... import catalogo
 from ...hilos import en_segundo_plano
-from ..componentes import Carrusel, Chip, Pagina
+from .. import iconos, imagenes
+from ..componentes import (BarraAcciones, Cabecera, Carrusel, Chip, ListaPistas, Pagina, Tarjeta,
+                           formato_duracion_larga, fuente)
+from ..estilos import C
 from .comun import Atajo, cache, guardar_cache, pintar_secciones
+
+_INTENTO_MIXES = {}
 
 
 def saludo():
@@ -85,10 +93,12 @@ class PaginaInicio(Pagina):
             if recientes:
                 self.zv.addWidget(Carrusel(ctx, "Volver a escuchar", recientes,
                                            subtitulo="lo último que sonó"))
+            self._mixes_diarios()
+            self._banner_resumen()
             mixes = self._mixes()
             if mixes:
-                self.zv.addWidget(Carrusel(ctx, "Tus mixes", mixes,
-                                           subtitulo="hechos con lo que más escuchas"))
+                self.zv.addWidget(Carrusel(ctx, "Mixes de tus artistas", mixes,
+                                           subtitulo="sus radios, con artistas parecidos"))
         if self.filtro == "disco":
             musica = col.descargadas(True)
             videos = col.descargadas(False)
@@ -215,6 +225,76 @@ class PaginaInicio(Pagina):
         else:
             self.ctx.abrir_elemento(el)
 
+    # ------------------------------------------------------------ mixes diarios
+
+    def _mixes_diarios(self):
+        """Tus mixes diarios: salen al momento con lo tuyo y, cuando llega la
+        radio de YouTube Music, se completan (una vez al dia)."""
+        from PySide6.QtWidgets import QVBoxLayout
+        from ... import mixes as mx
+        col = self.ctx.coleccion
+        self.caja_mixes = QWidget()
+        self.v_mixes = QVBoxLayout(self.caja_mixes)
+        self.v_mixes.setContentsMargins(0, 0, 0, 0)
+        self.zv.addWidget(self.caja_mixes)
+        guardados, completos = mx.guardados_de_hoy(col)
+        historial = None
+        if guardados:
+            self._pintar_mixes(guardados)
+        else:
+            historial = mx.historial_para_mixes(col)
+            self._pintar_mixes(mx.construir(historial, radio=None))
+        if completos or not self.v_mixes.count():
+            return
+        dia = mx.clave_dia(datetime.now())
+        if _INTENTO_MIXES.get("dia") == dia and time.time() - _INTENTO_MIXES.get("t", 0) < 600:
+            return            # sin red hace un momento: no se insiste en cada vuelta a Inicio
+        _INTENTO_MIXES.update(dia=dia, t=time.time())
+        if historial is None:
+            historial = mx.historial_para_mixes(col)
+        en_segundo_plano(mx.construir, historial, mx.radio_catalogo,
+                         ok=self._mixes_listos, error=lambda _e: None, dueno=self)
+
+    def _mixes_listos(self, nuevos):
+        from ... import mixes as mx
+        if not nuevos:
+            return
+        mx.guardar(self.ctx.coleccion, nuevos)
+        guardados, _c = mx.guardados_de_hoy(self.ctx.coleccion)
+        try:
+            self._pintar_mixes(guardados or nuevos)
+        except RuntimeError:
+            pass
+
+    def _pintar_mixes(self, lista):
+        from ..componentes import _borrar_layout
+        _borrar_layout(self.v_mixes)
+        if not lista:
+            return
+        car = Carrusel(self.ctx, "Tus mixes diarios", [],
+                       subtitulo="hechos para ti · se renuevan cada día")
+        fila = car.area.widget().layout()
+        alto = 0
+        for i, el in enumerate(lista):
+            tj = TarjetaMix(self.ctx, el)
+            tj.abrir.connect(lambda e: self.ctx.navegar({"pagina": "mix", "id": e["id"]}))
+            tj.reproducir.connect(lambda e: reproducir_mix(self.ctx, e))
+            tj.menu.connect(lambda e, pos: menu_mix(self.ctx, e, pos))
+            fila.insertWidget(i, tj)
+            alto = max(alto, tj.height())
+        car.area.setFixedHeight(alto + 2)
+        self.v_mixes.addWidget(car)
+
+    def _banner_resumen(self):
+        from ... import mixes as mx
+        r = mx.calcular_resumen(mx.leer_historial(
+            self.ctx.coleccion, desde=datetime.now() - timedelta(days=8)), "semana")
+        if r["vacio"]:
+            return
+        b = BannerResumen(r)
+        b.clicked.connect(lambda: self.ctx.navegar({"pagina": "resumen"}))
+        self.zv.addWidget(b)
+
     def _mixes(self):
         col = self.ctx.coleccion
         salida = []
@@ -228,5 +308,288 @@ class PaginaInicio(Pagina):
         return salida
 
 
-def _sin_usar():  # pragma: no cover
-    return Qt
+# ---------------------------------------------------------------- mixes
+
+def contexto_mix(el):
+    return {"tipo": "mix", "id": el.get("id"), "titulo": el.get("titulo"),
+            "miniatura": el.get("miniatura") or ""}
+
+
+def reproducir_mix(ctx, el, aleatorio=None):
+    pistas = el.get("pistas") or []
+    if pistas:
+        ctx.reproducir_lista(pistas, 0, contexto_mix(el), aleatorio)
+
+
+def menu_mix(ctx, el, pos):
+    pistas = el.get("pistas") or []
+    menu = QMenu(ctx.ventana)
+    menu.addAction(iconos.icono("reproducir", 16, C["texto2"]), "Reproducir",
+                   lambda: reproducir_mix(ctx, el))
+    menu.addAction(iconos.icono("aleatorio", 16, C["texto2"]), "Reproducir en aleatorio",
+                   lambda: reproducir_mix(ctx, el, True))
+    menu.addAction(iconos.icono("lista", 16, C["texto2"]), "Añadir a la cola",
+                   lambda: ctx.reproductor.agregar_a_cola(pistas))
+    menu.addSeparator()
+    ctx._submenu_listas(menu, pistas)
+    ctx.menu_descargar(menu, pistas)
+    menu.exec(pos)
+
+
+def dibujar_cubriendo(p, img, celda):
+    """drawImage con recorte tipo «cover»."""
+    w, h = img.width(), img.height()
+    if w <= 0 or h <= 0 or celda.height() <= 0:
+        return
+    proporcion = celda.width() / celda.height()
+    if w / h > proporcion:
+        nw = h * proporcion
+        origen = QRectF((w - nw) / 2, 0, nw, h)
+    else:
+        nh = w / proporcion
+        origen = QRectF(0, (h - nh) / 2, w, nh)
+    p.drawImage(celda, img, origen)
+
+
+def pintar_mosaico(p, r, imgs, color, radio=6):
+    """Portada de mix: 2x2 con cuatro portadas (o una sola), con el color del mix
+    como franja abajo, como los mixes diarios de Spotify."""
+    ruta = QPainterPath()
+    ruta.addRoundedRect(r, radio, radio)
+    p.save()
+    p.setClipPath(ruta)
+    base = QColor(color)
+    grad = QLinearGradient(r.topLeft(), r.bottomRight())
+    grad.setColorAt(0, base.darker(130))
+    grad.setColorAt(1, base.darker(320))
+    p.fillRect(r, grad)
+    imgs = [i for i in imgs if i is not None and not i.isNull()]
+    p.setRenderHint(QPainter.SmoothPixmapTransform, True)
+    if len(imgs) >= 4:
+        mitad = r.width() / 2
+        for k, img in enumerate(imgs[:4]):
+            celda = QRectF(r.x() + (k % 2) * mitad, r.y() + (k // 2) * mitad, mitad, mitad)
+            dibujar_cubriendo(p, img, celda)
+    elif imgs:
+        dibujar_cubriendo(p, imgs[0], r)
+    else:
+        lado = int(r.width() * 0.3)
+        p.drawPixmap(int(r.center().x() - lado / 2), int(r.center().y() - lado / 2),
+                     iconos.pixmap("musica", lado, "#FFFFFF"))
+    velo = QLinearGradient(r.left(), r.bottom() - r.height() * 0.5, r.left(), r.bottom())
+    velo.setColorAt(0, QColor(0, 0, 0, 0))
+    velo.setColorAt(1, QColor(0, 0, 0, 170))
+    p.fillRect(r, velo)
+    alto = max(3.0, r.height() * 0.035)
+    p.fillRect(QRectF(r.left(), r.bottom() - alto, r.width(), alto), base)
+    p.restore()
+
+
+class Mosaico(QObject):
+    """Baja las portadas de un mix y avisa con el pixmap compuesto."""
+
+    listo = Signal(QPixmap)
+
+    def __init__(self, el, lado, rotulo=True, padre=None):
+        super().__init__(padre)
+        self.el = el
+        self.lado = lado
+        self.rotulo = rotulo
+        self.urls = list(el.get("miniaturas") or ([el["miniatura"]] if el.get("miniatura") else []))
+        self.imgs = {}
+        for u in self.urls:
+            imagenes.imagen(u, lambda img, u=u: self._llego(u, img))
+
+    def _llego(self, url, img):
+        try:
+            self.imgs[url] = img
+            self.listo.emit(self.pixmap())
+        except RuntimeError:
+            pass
+
+    def pixmap(self):
+        app = QApplication.instance()
+        escala = app.devicePixelRatio() if app is not None else 1.0
+        lado = self.lado
+        pm = QPixmap(int(lado * escala), int(lado * escala))
+        pm.setDevicePixelRatio(escala)
+        pm.fill(Qt.transparent)
+        p = QPainter(pm)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        r = QRectF(0, 0, lado, lado)
+        pintar_mosaico(p, r, [self.imgs.get(u) for u in self.urls],
+                       self.el.get("color") or C["acento"], 6 if lado < 300 else 8)
+        if self.rotulo:
+            # «Mix diario 3» escrito sobre la portada
+            f = fuente(max(11, lado * 0.105), QFont.Black, True)
+            p.setFont(f)
+            p.setPen(QColor("#FFFFFF"))
+            margen = lado * 0.08
+            p.drawText(QRectF(margen, lado * 0.5, lado - 2 * margen, lado * 0.42),
+                       Qt.AlignLeft | Qt.AlignBottom | Qt.TextWordWrap,
+                       self.el.get("titulo") or "Mix")
+        p.end()
+        return pm
+
+
+class TarjetaMix(Tarjeta):
+    """Tarjeta de un mix diario, con la portada en mosaico."""
+
+    def __init__(self, ctx, el, ancho=176, padre=None):
+        super().__init__(ctx, dict(el, miniatura=""), ancho, padre)
+        self.el = el
+        self._mosaico = Mosaico(el, self.lado_img, padre=self)
+        self._pm = self._mosaico.pixmap()
+        self._mosaico.listo.connect(self._con_mosaico)
+
+    def _con_mosaico(self, pm):
+        self._pm = pm
+        self.update()
+
+
+class PaginaMix(Pagina):
+    """Un mix diario: cabecera con el mosaico y sus canciones."""
+
+    def __init__(self, ctx, destino, padre=None):
+        super().__init__(ctx, padre, margen=(24, 0, 24, 32))
+        from ... import mixes as mx
+        self.destino = destino
+        guardados, _c = mx.guardados_de_hoy(ctx.coleccion)
+        if not guardados:
+            guardados = mx.construir(mx.historial_para_mixes(ctx.coleccion), radio=None)
+        self.el = next((m for m in guardados or [] if m.get("id") == destino.get("id")), None)
+        if self.el is None:
+            self.titulo = "Mix diario"
+            self.error("Este mix ya no está: los mixes se renuevan cada día.",
+                       lambda: ctx.navegar({"pagina": "inicio"}))
+            return
+        self._pintar()
+
+    def _pintar(self):
+        ctx, el = self.ctx, self.el
+        self.titulo = el.get("titulo") or "Mix diario"
+        pistas = el.get("pistas") or []
+        self.set_color(QColor(el.get("color") or C["acento"]).darker(230).name())
+        cab = Cabecera(ctx, "Mix diario", self.titulo, "", lado=212)
+        self._mosaico = Mosaico(el, 212, rotulo=False, padre=self)
+        portada = cab.portada
+        portada.pm = self._mosaico.pixmap()
+
+        def nuevo(pm):
+            try:
+                portada.pm = pm
+                portada.update()
+            except RuntimeError:
+                pass
+        self._mosaico.listo.connect(nuevo)
+        cab.set_descripcion("Lo que más escuchas mezclado con canciones parecidas. "
+                            "Se renueva cada día.")
+        nombres = el.get("artistas") or []
+        if nombres:
+            cab.add_dato(", ".join(nombres[:4]) + (" y más" if len(nombres) > 4 else ""),
+                         negrita=True)
+        n = len(pistas)
+        dur = formato_duracion_larga(sum(p.get("duracion") or 0 for p in pistas))
+        cab.add_dato(f"{n} {'canción' if n == 1 else 'canciones'}" + (f", {dur}" if dur else ""))
+        cab.terminar()
+        self.cuerpo.addWidget(cab)
+
+        acciones = BarraAcciones()
+        acciones.bt_play.clicked.connect(lambda: reproducir_mix(ctx, el))
+        acciones.bt_play.setEnabled(bool(pistas))
+        acciones.boton("aleatorio", "Reproducir en aleatorio",
+                       lambda: reproducir_mix(ctx, el, True), 26, 40)
+        acciones.boton("cola", "Añadir a la cola",
+                       lambda: ctx.reproductor.agregar_a_cola(pistas), 24, 40)
+        self.bt_mas = acciones.boton("puntos", "Más opciones", self._menu, 24, 40)
+        acciones.terminar()
+        self.cuerpo.addWidget(acciones)
+
+        self.lista = ListaPistas(ctx)
+        self.lista.set_pistas(pistas, contexto_mix(el))
+        self.cuerpo.addWidget(self.lista)
+        self.cuerpo.addStretch(1)
+
+    def _menu(self):
+        menu_mix(self.ctx, self.el, self.bt_mas.mapToGlobal(self.bt_mas.rect().bottomLeft()))
+
+
+# ---------------------------------------------------------------- resumen
+
+class BannerResumen(QWidget):
+    """Entrada a «Tu resumen» desde Inicio: una franja con tus minutos de la semana."""
+
+    clicked = Signal()
+
+    def __init__(self, r, padre=None):
+        super().__init__(padre)
+        self.r = r
+        self.setFixedHeight(96)
+        self.setCursor(Qt.PointingHandCursor)
+        self._encima = 0.0
+        self._objetivo = 0.0
+        self._t = QTimer(self)
+        self._t.setInterval(16)
+        self._t.timeout.connect(self._paso)
+
+    def _paso(self):
+        self._encima += (self._objetivo - self._encima) * 0.25
+        if abs(self._encima - self._objetivo) < 0.01:
+            self._encima = self._objetivo
+            self._t.stop()
+        self.update()
+
+    def enterEvent(self, _e):
+        self._objetivo = 1.0
+        self._t.start()
+
+    def leaveEvent(self, _e):
+        self._objetivo = 0.0
+        self._t.start()
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton:
+            self.clicked.emit()
+
+    def paintEvent(self, _e):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        r = QRectF(self.rect()).adjusted(0, 0, -1, -1)
+        ruta = QPainterPath()
+        ruta.addRoundedRect(r, 12, 12)
+        grad = QLinearGradient(r.topLeft(), r.topRight())
+        grad.setColorAt(0, QColor("#123A8C"))
+        grad.setColorAt(0.55, QColor("#5B1E5E"))
+        grad.setColorAt(1, QColor("#FF5C8A"))
+        p.fillPath(ruta, grad)
+        if self._encima > 0.01:
+            p.fillPath(ruta, QColor(255, 255, 255, int(18 * self._encima)))
+        p.save()
+        p.setClipPath(ruta)
+        p.setPen(Qt.NoPen)
+        dx = 10 * self._encima
+        for cx, cy, rad, a in ((r.right() - 80 - dx, 10, 70, 40), (r.right() - 20, 80, 46, 55),
+                               (r.right() - 170 - dx * 2, 92, 34, 30)):
+            p.setBrush(QColor(255, 255, 255, a))
+            p.drawEllipse(QRectF(cx - rad, cy - rad, rad * 2, rad * 2))
+        p.restore()
+        datos = self.r
+        p.setPen(QColor(255, 255, 255, 200))
+        p.setFont(fuente(11.5, QFont.Bold))
+        p.drawText(QRectF(24, 16, r.width() - 48, 18), Qt.AlignLeft | Qt.AlignVCenter,
+                   "TU RESUMEN · SIEMPRE DISPONIBLE")
+        p.setPen(QColor("#FFFFFF"))
+        p.setFont(fuente(24, QFont.Black, True))
+        minutos = f"{datos['minutos']:,}".replace(",", ".")
+        p.drawText(QRectF(24, 34, r.width() - 48, 32), Qt.AlignLeft | Qt.AlignVCenter,
+                   f"{minutos} {'minuto' if datos['minutos'] == 1 else 'minutos'} esta semana")
+        top = datos["top_artistas"][0]["nombre"] if datos["top_artistas"] else ""
+        p.setPen(QColor(255, 255, 255, 215))
+        p.setFont(fuente(13))
+        texto = (f"Tu artista: {top}  ·  " if top else "") + "Mira tu semana, tu mes o tu año"
+        p.drawText(QRectF(24, 66, r.width() - 120, 20), Qt.AlignLeft | Qt.AlignVCenter,
+                   QFontMetrics(fuente(13)).elidedText(texto, Qt.ElideRight, int(r.width() - 120)))
+        lado = 22
+        x = r.right() - 24 - lado + 4 * self._encima
+        p.drawPixmap(int(x), int(r.center().y() - lado / 2),
+                     iconos.pixmap("adelante", lado, "#FFFFFF"))

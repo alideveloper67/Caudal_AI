@@ -33,6 +33,193 @@ class PantallaNativa(QWidget):
         p.fillRect(self.rect(), QColor("#000000"))
 
 
+def fondo_desenfocado(img, ancho, alto, oscurecer=0.48):
+    """La portada estirada, muy desenfocada y oscurecida, del tamano pedido.
+
+    El desenfoque sale de encoger la imagen a unos pocos pixeles y volver a
+    agrandarla en dos pasos suaves: cuesta casi nada y se hace una vez por
+    cancion (y al cambiar el tamano), no en cada cuadro."""
+    from PySide6.QtGui import QImage, QLinearGradient, QPixmap, QRadialGradient
+    ancho, alto = max(1, int(ancho)), max(1, int(alto))
+    lienzo = QPixmap(ancho, alto)
+    lienzo.fill(QColor("#0B0D12"))
+    p = QPainter(lienzo)
+    if img is not None and not img.isNull():
+        base = img.convertToFormat(QImage.Format_RGB32)
+        # se recorta como "cover" a la proporcion del destino
+        prop = ancho / alto
+        w, h = base.width(), base.height()
+        if w / max(1, h) > prop:
+            nw = int(h * prop)
+            base = base.copy((w - nw) // 2, 0, max(1, nw), h)
+        else:
+            nh = int(w / prop)
+            base = base.copy(0, (h - nh) // 2, w, max(1, nh))
+        diminuta = base.scaled(max(2, int(24 * prop)), 24, Qt.IgnoreAspectRatio,
+                               Qt.SmoothTransformation)
+        media = diminuta.scaled(diminuta.width() * 4, diminuta.height() * 4, Qt.IgnoreAspectRatio,
+                                Qt.SmoothTransformation)
+        grande = media.scaled(ancho, alto, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+        p.drawImage(0, 0, grande)
+    p.fillRect(lienzo.rect(), QColor(0, 0, 0, int(255 * oscurecer)))
+    # vineta: bordes mas oscuros para que la portada nitida resalte
+    vineta = QRadialGradient(ancho / 2, alto / 2, max(ancho, alto) * 0.65)
+    vineta.setColorAt(0.0, QColor(0, 0, 0, 0))
+    vineta.setColorAt(1.0, QColor(0, 0, 0, 150))
+    p.fillRect(lienzo.rect(), vineta)
+    abajo = QLinearGradient(0, alto * 0.55, 0, alto)
+    abajo.setColorAt(0.0, QColor(0, 0, 0, 0))
+    abajo.setColorAt(1.0, QColor(0, 0, 0, 110))
+    p.fillRect(lienzo.rect(), abajo)
+    p.end()
+    return lienzo
+
+
+class ModoAmbiente(QWidget):
+    """Lo que se ve en la vista grande cuando suena solo el audio: la portada
+    desenfocada de fondo, moviendose muy despacio, y la portada nitida delante.
+
+    Coste: el fondo se calcula una vez por cancion; cada cuadro solo copia un
+    mapa de bits ya hecho, a 15 cuadros por segundo como mucho y solo cuando el
+    desplazamiento cambia de verdad un pixel. Oculta o minimizada, no hace nada."""
+
+    MARGEN = 0.06            # cuanto sobra el fondo por cada lado para poder moverse
+    PERIODO_X = 47.0         # segundos de cada vaiven (dos periodos distintos:
+    PERIODO_Y = 61.0         # el recorrido nunca se repite igual)
+    FPS = 15
+
+    def __init__(self, padre=None):
+        super().__init__(padre)
+        self.setAttribute(Qt.WA_OpaquePaintEvent, True)
+        self.setMinimumSize(160, 90)
+        self.img = None
+        self.url = ""
+        self.titulo = ""
+        self.artista = ""
+        self._fondo = None
+        self._portada = None
+        self._tam_fondo = None
+        self._desp = (0, 0)
+        self._t0 = __import__("time").monotonic()
+        self.cuadros = 0                  # pintados (sirve a las pruebas)
+        self._reloj = QTimer(self)
+        self._reloj.setInterval(int(1000 / self.FPS))
+        self._reloj.timeout.connect(self._tic)
+
+    # ------------------------------------------------------------ datos
+
+    def poner(self, pista):
+        pista = pista or {}
+        self.titulo = pista.get("titulo") or ""
+        self.artista = pista.get("artista") or ""
+        url = pista.get("miniatura") or ""
+        if url != self.url:
+            self.url = url
+            self.img = None
+            self._fondo = self._portada = None
+            if url:
+                imagenes.imagen(url, lambda img, u=url: self._llego(u, img))
+        self.update()
+
+    def _llego(self, url, img):
+        try:
+            if url != self.url:
+                return
+            self.img = img
+            self._fondo = self._portada = None
+            self.update()
+        except RuntimeError:
+            pass
+
+    def _preparar(self):
+        w, h = self.width(), self.height()
+        mx, my = int(w * self.MARGEN), int(h * self.MARGEN)
+        tam = (w + 2 * mx, h + 2 * my)
+        if self._fondo is None or self._tam_fondo != tam:
+            self._fondo = fondo_desenfocado(self.img, *tam)
+            self._tam_fondo = tam
+            self._portada = None
+        if self._portada is None and self.img is not None and not self.img.isNull():
+            lado = int(max(120, min(w * 0.42, h * 0.62)))
+            self._portada = imagenes.formar(self.img, lado, lado, radio=12)
+
+    # ------------------------------------------------------------ movimiento
+
+    def desplazamiento(self, t):
+        """Desplazamiento (x, y) en pixeles enteros en el segundo t."""
+        import math
+        mx = self.width() * self.MARGEN * 0.85
+        my = self.height() * self.MARGEN * 0.85
+        return (int(round(mx * math.sin(2 * math.pi * t / self.PERIODO_X))),
+                int(round(my * math.sin(2 * math.pi * t / self.PERIODO_Y + 1.3))))
+
+    def _tic(self):
+        ventana = self.window()
+        if not self.isVisible() or (ventana is not None and ventana.isMinimized()):
+            return
+        d = self.desplazamiento(__import__("time").monotonic() - self._t0)
+        if d != self._desp:
+            self._desp = d
+            self.update()
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        self._reloj.start()
+
+    def hideEvent(self, e):
+        super().hideEvent(e)
+        self._reloj.stop()
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self._portada = None
+
+    # ------------------------------------------------------------ pintado
+
+    def paintEvent(self, _e):
+        self._preparar()
+        self.cuadros += 1
+        p = QPainter(self)
+        w, h = self.width(), self.height()
+        mx, my = int(w * self.MARGEN), int(h * self.MARGEN)
+        p.drawPixmap(-mx + self._desp[0], -my + self._desp[1], self._fondo)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        if self._portada is not None:
+            dpr = self._portada.devicePixelRatio() or 1.0
+            lado = int(self._portada.width() / dpr)
+            texto_alto = 64 if self.titulo else 0
+            x = (w - lado) // 2
+            y = max(10, (h - lado - texto_alto) // 2)
+            # sombra suave (tres capas translucidas, sin efectos caros)
+            for i, alfa in ((18, 26), (10, 40), (4, 60)):
+                p.setPen(Qt.NoPen)
+                p.setBrush(QColor(0, 0, 0, alfa))
+                p.drawRoundedRect(QRectF(x - i / 2, y - i / 3 + i, lado + i, lado + i), 16, 16)
+            p.drawPixmap(x, y, self._portada)
+            ytexto = y + lado + 18
+        else:
+            p.drawPixmap(w // 2 - 32, h // 2 - 52, iconos.pixmap("musica", 64, C["texto3"]))
+            ytexto = h // 2 + 26
+        if self.titulo:
+            f = QFont(self.font())
+            f.setPointSizeF(max(11.0, min(20.0, w / 60)))
+            f.setBold(True)
+            p.setFont(f)
+            p.setPen(QColor(255, 255, 255, 235))
+            fm = QFontMetrics(f)
+            p.drawText(QRectF(20, ytexto, w - 40, fm.height() + 4), Qt.AlignHCenter,
+                       fm.elidedText(self.titulo, Qt.ElideRight, w - 60))
+            if self.artista:
+                f2 = QFont(self.font())
+                f2.setPointSizeF(max(9.5, min(14.0, w / 85)))
+                p.setFont(f2)
+                p.setPen(QColor(255, 255, 255, 170))
+                fm2 = QFontMetrics(f2)
+                p.drawText(QRectF(20, ytexto + fm.height() + 4, w - 40, fm2.height() + 4),
+                           Qt.AlignHCenter, fm2.elidedText(self.artista, Qt.ElideRight, w - 60))
+        p.end()
+
+
 class VistaVideo(QWidget):
     volver = Signal()
     pidio_mini = Signal()
@@ -78,8 +265,14 @@ class VistaVideo(QWidget):
         hc.addWidget(self.et_calidad)
         v.addWidget(self.cab)
 
+        # la imagen del video, o el modo ambiente cuando suena solo el audio
+        from PySide6.QtWidgets import QStackedWidget
+        self.escena = QStackedWidget()
         self.pantalla = PantallaNativa()
-        v.addWidget(self.pantalla, 1)
+        self.escena.addWidget(self.pantalla)
+        self.ambiente = ModoAmbiente()
+        self.escena.addWidget(self.ambiente)
+        v.addWidget(self.escena, 1)
 
         # controles
         self.controles = QWidget()
@@ -158,7 +351,9 @@ class VistaVideo(QWidget):
         self.r.duracion_cambio.connect(self._duracion)
         self.r.calidad_cambio.connect(self._calidad)
         self.r.video_listo.connect(self._video_listo)
+        self.r.modo_cambio.connect(lambda _m: self._escena())
         self._pista(self.r.actual)
+        self._escena()
 
         # vigilancia de cuadros perdidos y de la pantalla completa
         self.reloj = QTimer(self)
@@ -198,7 +393,28 @@ class VistaVideo(QWidget):
 
     # ------------------------------------------------------------ pintado
 
+    def en_ambiente(self):
+        """¿Toca el modo ambiente? Cuando suena solo el audio, o cuando el video
+        se esta viendo en el mini reproductor."""
+        return self.r.modo != "video" or self.r.destino_video != "principal"
+
+    def _escena(self):
+        ambiente = self.en_ambiente()
+        self.escena.setCurrentWidget(self.ambiente if ambiente else self.pantalla)
+        solo_audio = self.r.modo != "video"
+        self.bt_audio.setText("  Ver el video" if solo_audio else "  Solo audio")
+        self.bt_audio.setIcon(iconos.icono("video" if solo_audio else "musica", 15, C["texto"]))
+        self.bt_audio.setToolTip("Ver la imagen del video en esta pantalla" if solo_audio
+                                 else "Seguir escuchando sin la imagen (en segundo plano)")
+        self.bt_audio.setEnabled(not solo_audio or bool((self.r.actual or {}).get("video_id")
+                                                         or (self.r.actual or {}).get("url")))
+        for b in (self.bt_completa, self.bt_calidad, self.bt_subs):
+            b.setVisible(not solo_audio)
+
     def _pista(self, p):
+        self.ambiente.poner(p)
+        if hasattr(self, "bt_completa"):
+            self._escena()
         if not p:
             self.et_titulo.setText("")
             self.et_autor.setText("")
@@ -328,6 +544,11 @@ class VistaVideo(QWidget):
         menu.exec(self.bt_capitulos.mapToGlobal(QPoint(0, -min(menu.sizeHint().height(), 500) - 6)))
 
     def _solo_audio(self):
+        if self.r.modo != "video":
+            # en modo ambiente el boton trae la imagen sin salir de la vista
+            if self.r.actual is not None:
+                self.r.cambiar_modo("video")
+            return
         self.r.cambiar_modo("audio")
         self.volver.emit()
         self.ctx.aviso.emit("Sigue sonando sin la imagen")
@@ -335,6 +556,9 @@ class VistaVideo(QWidget):
     # ------------------------------------------------------------ vigilancia
 
     def _vigilar(self):
+        # el video puede irse al mini reproductor (o volver) sin aviso propio
+        if (self.escena.currentWidget() is self.ambiente) != self.en_ambiente():
+            self._escena()
         if (self.r.modo != "video" or self.r.estado != "sonando" or self.motor is None
                 or self.r.destino_video != "principal"):
             self._caidos_previos = None

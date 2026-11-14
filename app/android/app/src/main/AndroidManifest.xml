@@ -60,6 +60,13 @@
                 <category android:name="android.intent.category.DEFAULT"/>
                 <data android:mimeType="text/plain"/>
             </intent-filter>
+            <!-- enlaces caudal://... (p. ej. caudal://juntos?sala=ABC123, "Escuchar juntos") -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="caudal"/>
+            </intent-filter>
         </activity>
 
         <service
@@ -80,6 +87,27 @@
                 <action android:name="android.intent.action.MEDIA_BUTTON"/>
             </intent-filter>
         </receiver>
+
+        <!-- widget de la pantalla de inicio: caratula, titulo, play/pausa y siguiente -->
+        <receiver
+            android:name=".CaudalWidget"
+            android:label="@string/widget_nombre"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE"/>
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/caudal_widget_info"/>
+        </receiver>
+
+        <!-- Android Auto: la biblioteca en la pantalla del coche -->
+        <meta-data
+            android:name="com.google.android.gms.car.application"
+            android:resource="@xml/automotive_app_desc"/>
+        <meta-data
+            android:name="com.google.android.gms.car.notification.SmallIcon"
+            android:resource="@drawable/ic_notificacion"/>
 
         <meta-data
             android:name="flutterEmbedding"
