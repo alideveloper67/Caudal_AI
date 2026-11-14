@@ -29,8 +29,10 @@ class MotorLocal {
   /// restriccion de edad, solo estos cuatro sirven de algo; los otros siete
   /// que ofrece la libreria no contestaron ni una vez.
   static final List<YoutubeApiClient> _clientes = [
-    YoutubeApiClient.android,
+    // primero el que no exige el token especial de YouTube: es el que menos
+    // enlaces "prohibidos" (403) da luego al reproducir
     YoutubeApiClient.androidSdkless,
+    YoutubeApiClient.android,
     YoutubeApiClient.androidVr,
     YoutubeApiClient.ios,
   ];
@@ -40,14 +42,19 @@ class MotorLocal {
   /// Se dan dos vueltas: como los fallos son intermitentes, insistir sale
   /// mucho mas barato que dejar al usuario sin su video.
   /// Las pistas de un video (lo usa tambien el reproductor para sonar en vivo).
-  Future<StreamManifest> manifiesto(String videoId) => _manifiesto(VideoId(videoId));
+  Future<StreamManifest> manifiesto(String videoId, {int empezarEn = 0}) =>
+      _manifiesto(VideoId(videoId), empezarEn: empezarEn);
 
   YoutubeExplode get cliente => _yt;
 
-  Future<StreamManifest> _manifiesto(VideoId id) async {
+  Future<StreamManifest> _manifiesto(VideoId id, {int empezarEn = 0}) async {
     Object? ultimoFallo;
+    // empezarEn > 0: el enlace del primer cliente no se pudo abrir, se prueba otro
+    final orden = [
+      for (var i = 0; i < _clientes.length; i++) _clientes[(i + empezarEn) % _clientes.length],
+    ];
     for (var vuelta = 0; vuelta < 2; vuelta++) {
-      for (final cliente in _clientes) {
+      for (final cliente in orden) {
         try {
           final m = await _yt.videos.streamsClient
               .getManifest(id, ytClients: [cliente])

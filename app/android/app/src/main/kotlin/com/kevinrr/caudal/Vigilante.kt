@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Build
 import android.os.Handler
 import android.os.Looper
+import android.os.Process
 import android.os.SystemClock
 import java.io.File
 import java.text.SimpleDateFormat
@@ -59,7 +60,8 @@ object Vigilante {
                 append("$fecha · hilo principal quieto ${quietoMs / 1000} s · estado ${hilo.state}\n")
                 append(pila)
             }
-            File(contexto.filesDir, ARCHIVO).writeText(texto)
+            // la primera linea dice que proceso lo escribio: solo cuenta en el arranque siguiente
+            File(contexto.filesDir, ARCHIVO).writeText("pid=${Process.myPid()}\n$texto")
         } catch (_: Throwable) {
         }
     }
@@ -75,7 +77,12 @@ object Vigilante {
         val f = File(contexto.filesDir, ARCHIVO)
         if (!f.exists()) return null
         return try {
-            f.readText().also { f.delete() }
+            val texto = f.readText()
+            val primera = texto.substringBefore('\n')
+            // escrito por este mismo arranque (p. ej. un inicio lento): aun no se cuenta
+            if (primera == "pid=${Process.myPid()}") return null
+            f.delete()
+            texto.substringAfter('\n')
         } catch (_: Exception) {
             null
         }

@@ -82,7 +82,14 @@ class _InicioPaginaState extends State<InicioPagina> with AutomaticKeepAliveClie
     });
     if (forzar || _catalogo == null || DateTime.now().difference(_cuando) > const Duration(minutes: 15)) {
       try {
-        final datos = await Catalogo.inicio();
+        Json datos;
+        try {
+          datos = await Catalogo.inicio();
+        } catch (_) {
+          await Future<void>.delayed(const Duration(seconds: 3));
+          if (!mounted) return;
+          datos = await Catalogo.inicio();
+        }
         _cacheCatalogo = datos;
         _cuando = DateTime.now();
         if (mounted) setState(() {

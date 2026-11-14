@@ -24,6 +24,10 @@ class Diagnostico {
 
   static const _canal = MethodChannel('caudal/diagnostico');
   static File? _marca;
+  static File? _archivoErrores;
+
+  /// Errores de este arranque (los ultimos), para contarlos si algo se traba.
+  static final List<String> _errores = [];
 
   /// true: arrancar sin las piezas nativas opcionales.
   static bool modoSeguro = false;
@@ -48,6 +52,12 @@ class Diagnostico {
     try {
       if (!await dir.exists()) await dir.create(recursive: true);
       _marca = File(p.join(dir.path, 'arranque.txt'));
+      _archivoErrores = File(p.join(dir.path, 'errores.txt'));
+      var erroresPrevios = '';
+      if (await _archivoErrores!.exists()) {
+        erroresPrevios = (await _archivoErrores!.readAsString()).trim();
+        await _archivoErrores!.delete();
+      }
       var previo = '';
       if (await _marca!.exists()) previo = (await _marca!.readAsString()).trim();
       final partes = previo.split('|');
@@ -64,14 +74,18 @@ class Diagnostico {
       }
 
       modoSeguro = mismaVersion && (seguroAntes || seTrabo);
-      if (seTrabo || (traba != null && traba.isNotEmpty)) {
+      // solo se cuenta si de verdad no llego a verse la pantalla (un arranque
+      // lento pero que termino bien no es una traba)
+      if (seTrabo) {
         detalle = [
-          if (seTrabo) 'Último paso del arranque: $paso${seguroAntes ? ' (ya en modo seguro)' : ''}',
+          'Caudal $versionApp · último paso del arranque: $paso${seguroAntes ? ' (ya en modo seguro)' : ''}',
+          if (erroresPrevios.isNotEmpty) erroresPrevios,
           if (traba != null && traba.isNotEmpty) traba,
-        ].join('\n');
+        ].join('\n\n');
       }
     } catch (_) {}
     marcar('inicio');
+    _guardarErrores();
   }
 
   /// Anota el paso en curso. Sincrono a proposito: si el paso congela la app,
@@ -79,6 +93,25 @@ class Diagnostico {
   static void marcar(String paso) {
     try {
       _marca?.writeAsStringSync('$versionApp|$paso|${modoSeguro ? 1 : 0}', flush: true);
+    } catch (_) {}
+  }
+
+  /// Un error de Flutter o de Dart: se escribe en el registro del sistema
+  /// (tambien en la version final) y se guarda para el detalle.
+  static void anotarError(Object error, StackTrace? pila) {
+    final lineas = (pila?.toString() ?? '').split('\n').where((l) => l.trim().isNotEmpty).take(12).join('\n');
+    final texto = 'Error: $error\n$lineas';
+    // ignore: avoid_print
+    print('CAUDAL_ERROR $texto');
+    _errores.add(texto);
+    if (_errores.length > 3) _errores.removeAt(0);
+    _guardarErrores();
+  }
+
+  static void _guardarErrores() {
+    if (_errores.isEmpty) return;
+    try {
+      _archivoErrores?.writeAsStringSync(_errores.join('\n\n'), flush: true);
     } catch (_) {}
   }
 

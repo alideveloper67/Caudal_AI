@@ -53,8 +53,14 @@ class _Motor {
     player = Player(configuration: const PlayerConfiguration(
       title: 'Caudal',
       bufferSize: 48 * 1024 * 1024,
-      logLevel: MPVLogLevel.error,
+      logLevel: MPVLogLevel.warn,
     ));
+    // lo que dice el motor por dentro (403, certificados, red...) al registro del sistema
+    player.stream.log.listen((l) {
+      if (l.level == 'error' || l.level == 'fatal' || l.level == 'warn') {
+        debugPrint('mpvlog ${l.prefix}: ${l.text.trim()}');
+      }
+    });
     _afinar();
   }
 
@@ -661,8 +667,11 @@ class Reproductor extends ChangeNotifier {
 
   // ------------------------------------------------------------ carga
 
+  /// Cuantas veces se pidio un enlace nuevo para la pista actual (ver [_alError]).
+  int _reintentos = 0;
+
   Future<void> _cargar(Json pista, {Duration inicio = Duration.zero, bool pausado = false,
-      bool mismo = false, bool forzarStream = false}) async {
+      bool mismo = false, bool forzarStream = false, int intento = 0}) async {
     // en modo video, las dos pantallas listas antes de abrir (traspaso sin negro)
     if (modo == 'video') {
       _a.video;
@@ -672,6 +681,7 @@ class Reproductor extends ChangeNotifier {
     final gen = ++_gen;
     final cambio = !identical(pista, actual) || !mismo;
     actual = pista;
+    if (intento == 0) _reintentos = 0;
     if (cambio) {
       _escuchaContada = false;
       _segmentos = [];
@@ -706,7 +716,7 @@ class Reproductor extends ChangeNotifier {
       try {
         f = await streams.resolver(vid, video: querVideo,
             calidad: querVideo ? (_calidadForzada ?? ajustes.texto('calidad_video')) : ajustes.texto(Red.conDatos ? 'calidad_audio_datos' : 'calidad_audio'),
-            codec: _codecVideo);
+            codec: _codecVideo, intento: intento);
       } catch (e) {
         if (gen != _gen) return;
         if (_traspaso != null) {
@@ -983,7 +993,27 @@ class Reproductor extends ChangeNotifier {
       return;
     }
     if (!_esActual(m) || m.fuente == null) return;
-    debugPrint('mpv: $e');
+    debugPrint('mpv: ${e.length > 160 ? '${e.substring(0, 160)}…' : e}');
+    final pista = actual;
+    if (pista == null || m.fuente!.local) return;
+    // YouTube a veces da un enlace que luego no abre: se pide otro, con otro
+    // cliente, sin perder el punto. Si tampoco abre, se avisa y se sigue.
+    final vid = '${pista['video_id'] ?? ''}';
+    if (vid.isNotEmpty && _reintentos < 2) {
+      _reintentos++;
+      streams.olvidar(vid);
+      unawaited(_cargar(pista, inicio: posicion.value, mismo: true, forzarStream: true,
+          pausado: estado == EstadoRepro.pausa, intento: _reintentos));
+      return;
+    }
+    _fijarEstado(EstadoRepro.parado);
+    _aviso('No se pudo reproducir esta canción. Pasamos a la siguiente.');
+    final gen = _gen;
+    if (proximas.isNotEmpty || pos + 1 < secuencia.length) {
+      Timer(const Duration(milliseconds: 1500), () {
+        if (gen == _gen) siguiente();
+      });
+    }
   }
 
   void _fijarEstado(EstadoRepro e) {

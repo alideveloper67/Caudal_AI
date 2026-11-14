@@ -17,14 +17,18 @@ class Streams {
   /// Alto de la pantalla en pixeles fisicos (lo fija la app al arrancar).
   static int altoPantalla = 1080;
 
+  /// Olvida los enlaces guardados de un video (p. ej. porque no se pudieron abrir).
+  void olvidar(String videoId) => _cache.removeWhere((k, _) => k.startsWith('$videoId|'));
+
   Future<Fuente> resolver(String videoId,
-      {required bool video, String calidad = 'maxima', String codec = 'auto'}) async {
+      {required bool video, String calidad = 'maxima', String codec = 'auto', int intento = 0}) async {
     final clave = '$videoId|$video|$calidad|$codec';
     final guardado = _cache[clave];
-    if (guardado != null && DateTime.now().difference(guardado.$1) < const Duration(minutes: 210)) {
+    if (intento == 0 && guardado != null &&
+        DateTime.now().difference(guardado.$1) < const Duration(minutes: 210)) {
       return guardado.$2;
     }
-    final m = await motor.manifiesto(videoId);
+    final m = await motor.manifiesto(videoId, empezarEn: intento);
     final audios = m.audioOnly.toList()
       ..sort((a, b) => b.bitrate.bitsPerSecond.compareTo(a.bitrate.bitsPerSecond));
     AudioOnlyStreamInfo? audio;

@@ -33,6 +33,15 @@ import 'ui/tema.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  // cualquier error queda escrito (registro del sistema + detalle de la traba)
+  FlutterError.onError = (d) {
+    FlutterError.presentError(d);
+    Diagnostico.anotarError(d.exceptionAsString(), d.stack);
+  };
+  PlatformDispatcher.instance.onError = (e, pila) {
+    Diagnostico.anotarError(e, pila);
+    return true;
+  };
   MediaKit.ensureInitialized();
   SystemChrome.setSystemUIOverlayStyle(const SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
@@ -63,6 +72,9 @@ class _CaudalAppState extends State<CaudalApp> {
   Servicios? _s;
   bool _comprobando = true;
   final _navegador = GlobalKey<NavigatorState>();
+  // fija para toda la vida de la app: si cambiara al entrar, Flutter rehace
+  // el arbol y el navegador se queda con la pantalla vieja (el logo)
+  final _mensajero = GlobalKey<ScaffoldMessengerState>();
   CapturadorOculto? _capturador;
   DescargaInteligente? _inteligente;
 
@@ -179,7 +191,11 @@ class _CaudalAppState extends State<CaudalApp> {
     }
     Diagnostico.marcar('descargas');
     _capturador ??= CapturadorOculto();
-    if (!seguro) unawaited(_capturador!.preparar().catchError((_) {}));
+    if (!seguro) {
+      final cap = _capturador!;
+      // despues de que se vea la pantalla: el navegador frena el telefono unos segundos
+      unawaited(Future<void>.delayed(const Duration(seconds: 10), cap.preparar).catchError((_) {}));
+    }
     final descargas = GestorDescargas(coleccion: coleccion, ajustes: ajustes, capturador: _capturador!);
     // con wifi baja sola tus favoritas (si el ajuste esta activo)
     _inteligente?.detener();
@@ -211,6 +227,7 @@ class _CaudalAppState extends State<CaudalApp> {
       cuenta: c, ajustes: ajustes, coleccion: coleccion, reproductor: reproductor, streams: streams,
       descargas: descargas, sincronizador: sinc,
       cerrarSesion: () => _cerrarSesion(s),
+      mensajero: _mensajero,
     );
     if (!mounted) return;
     setState(() {
@@ -276,7 +293,7 @@ class _CaudalAppState extends State<CaudalApp> {
       debugShowCheckedModeBanner: false,
       theme: temaCaudal(),
       navigatorKey: _navegador,
-      scaffoldMessengerKey: s?.mensajero,
+      scaffoldMessengerKey: _mensajero,
       home: AnimatedSwitcher(
         duration: const Duration(milliseconds: 380),
         switchInCurve: Curves.easeOutCubic,
@@ -290,8 +307,11 @@ class _CaudalAppState extends State<CaudalApp> {
           child: hijo!,
         );
         if (s == null) return contenido;
-        // en la ventanita flotante solo se ve el video (la app sigue debajo intacta)
-        return ValueListenableBuilder<bool>(
+        // Caudal (lo que comparten las pantallas) va AQUI dentro y no envolviendo
+        // al MaterialApp: si la raiz cambiara de forma al entrar a la cuenta, el
+        // navegador se quedaria con la pantalla vieja (el fallo del logo eterno).
+        // Todo lo que se abre (pantallas, dialogos, hojas) cuelga de aqui.
+        return Caudal(s: s, child: ValueListenableBuilder<bool>(
           valueListenable: Pip.enVentana,
           builder: (_, enVentana, __) => Stack(children: [
             contenido,
@@ -303,10 +323,10 @@ class _CaudalAppState extends State<CaudalApp> {
                 ),
               ),
           ]),
-        );
+        ));
       },
     );
-    return s == null ? app : Caudal(s: s, child: app);
+    return app;
   }
 }
 

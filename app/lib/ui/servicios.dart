@@ -26,7 +26,8 @@ class Servicios {
     required this.cuenta, required this.ajustes, required this.coleccion,
     required this.reproductor, required this.streams, required this.descargas,
     this.sincronizador, required this.cerrarSesion,
-  });
+    GlobalKey<ScaffoldMessengerState>? mensajero,
+  }) : mensajero = mensajero ?? GlobalKey<ScaffoldMessengerState>();
 
   final Cuenta cuenta;
   final Ajustes ajustes;
@@ -37,8 +38,8 @@ class Servicios {
   final Sincronizador? sincronizador;
   final Future<void> Function() cerrarSesion;
 
-  /// Para avisos desde cualquier sitio.
-  final mensajero = GlobalKey<ScaffoldMessengerState>();
+  /// Para avisos desde cualquier sitio (la app pasa la suya, que no cambia).
+  final GlobalKey<ScaffoldMessengerState> mensajero;
 
   /// Cambiar de pestana desde cualquier pantalla (la pone el armazon).
   void Function(int)? irAPestana;
