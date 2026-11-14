@@ -6,12 +6,14 @@ import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 import 'package:permission_handler/permission_handler.dart';
+import 'package:share_plus/share_plus.dart';
 
 import 'nucleo/ajustes.dart';
 import 'nucleo/capturador_oculto.dart';
 import 'nucleo/catalogo.dart';
 import 'nucleo/coleccion.dart';
 import 'nucleo/descarga_inteligente.dart';
+import 'nucleo/diagnostico.dart';
 import 'nucleo/cuentas.dart';
 import 'nucleo/descargas.dart';
 import 'nucleo/motor_local.dart';
@@ -71,6 +73,18 @@ class _CaudalAppState extends State<CaudalApp> {
   }
 
   Future<void> _arrancar() async {
+    await Diagnostico.iniciar();
+    final d = Diagnostico.detalle;
+    if (d != null && mounted) {
+      // la vez anterior se trabo: primero se ensena el detalle (por si vuelve a pasar)
+      final seguir = Completer<void>();
+      setState(() => _aviso = (d, seguir));
+      Diagnostico.pintadoAviso();
+      await seguir.future;
+      Diagnostico.detalle = null;
+      if (mounted) setState(() => _aviso = null);
+    }
+    Diagnostico.marcar('cuenta');
     Cuenta? c;
     try {
       c = await Cuentas.recordada().timeout(const Duration(seconds: 20));
@@ -87,12 +101,22 @@ class _CaudalAppState extends State<CaudalApp> {
             _fallo = e;
             _cuentaFallida = c;
           });
+          _alDibujar();
         }
       }
     } else if (mounted) {
       setState(() => _comprobando = false);
+      _alDibujar();
     }
   }
+
+  /// Cuando la pantalla ya se ve: el arranque salio bien y, si la vez
+  /// anterior se trabo, se le cuenta al usuario.
+  void _alDibujar() {
+    WidgetsBinding.instance.addPostFrameCallback((_) => Diagnostico.pintado());
+  }
+
+  (String, Completer<void>)? _aviso;
 
   Object? _fallo;
   Cuenta? _cuentaFallida;
@@ -130,21 +154,32 @@ class _CaudalAppState extends State<CaudalApp> {
     } else {
       await Cuentas.olvidar();
     }
+    Diagnostico.marcar('ajustes');
     final ajustes = await _paso('ajustes', Ajustes.cargar(c.id));
     Catalogo.fijarRegion(ajustes.texto('region'));
     MotorLocal.bitrateMp3 = ajustes.texto('bitrate_mp3');
     ajustes.addListener(() => MotorLocal.bitrateMp3 = ajustes.texto('bitrate_mp3'));
+    Diagnostico.marcar('biblioteca');
     final coleccion = await _paso('biblioteca', Coleccion.abrir(c.id));
+    Diagnostico.marcar('reproductor');
     final streams = Streams(MotorLocal());
     final reproductor = Reproductor(ajustes, coleccion, streams);
+    Diagnostico.marcar('sesion');
     try {
       await reproductor.restaurarSesion().timeout(const Duration(seconds: 5));
     } catch (_) {} // si la ultima sesion no se puede leer, se empieza de cero
     // con tiempo maximo dentro: si Android tarda, la musica de fondo se engancha despues
-    await ServicioAudio.para(reproductor);
-    Pip.iniciar(reproductor);
+    // modo seguro (la vez anterior se trabo): sin las piezas nativas opcionales
+    final seguro = Diagnostico.modoSeguro;
+    if (!seguro) {
+      Diagnostico.marcar('notificacion');
+      await ServicioAudio.para(reproductor);
+      Diagnostico.marcar('ventana_flotante');
+      Pip.iniciar(reproductor);
+    }
+    Diagnostico.marcar('descargas');
     _capturador ??= CapturadorOculto();
-    unawaited(_capturador!.preparar().catchError((_) {}));
+    if (!seguro) unawaited(_capturador!.preparar().catchError((_) {}));
     final descargas = GestorDescargas(coleccion: coleccion, ajustes: ajustes, capturador: _capturador!);
     // con wifi baja sola tus favoritas (si el ajuste esta activo)
     _inteligente?.detener();
@@ -170,6 +205,7 @@ class _CaudalAppState extends State<CaudalApp> {
         sincr.pronto();
       });
     }
+    Diagnostico.marcar('pantalla');
     late final Servicios s;
     s = Servicios(
       cuenta: c, ajustes: ajustes, coleccion: coleccion, reproductor: reproductor, streams: streams,
@@ -181,6 +217,7 @@ class _CaudalAppState extends State<CaudalApp> {
       _s = s;
       _comprobando = false;
     });
+    _alDibujar();
     unawaited(_buscarVersion());
     unawaited(_pedirNotificaciones());
   }
@@ -222,7 +259,12 @@ class _CaudalAppState extends State<CaudalApp> {
   Widget build(BuildContext context) {
     final s = _s;
     final fallo = _fallo;
-    final Widget inicio = fallo != null
+    final aviso = _aviso;
+    final Widget inicio = aviso != null
+        ? _PantallaTraba(detalle: aviso.$1, continuar: () {
+            if (!aviso.$2.isCompleted) aviso.$2.complete();
+          })
+        : fallo != null
         ? _FalloArranque(error: fallo, reintentar: _reintentar, salir: _salirDeFallo)
         : _comprobando
         ? const _Arranque()
@@ -238,7 +280,7 @@ class _CaudalAppState extends State<CaudalApp> {
       home: AnimatedSwitcher(
         duration: const Duration(milliseconds: 380),
         switchInCurve: Curves.easeOutCubic,
-        child: KeyedSubtree(key: ValueKey(fallo != null ? 'fallo' : s?.cuenta.id ?? (_comprobando ? 'arranque' : 'acceso')), child: inicio),
+        child: KeyedSubtree(key: ValueKey(aviso != null ? 'aviso' : fallo != null ? 'fallo' : s?.cuenta.id ?? (_comprobando ? 'arranque' : 'acceso')), child: inicio),
       ),
       builder: (context, hijo) {
         // que la letra grande del sistema no rompa el diseno
@@ -327,6 +369,53 @@ class _Arranque extends StatelessWidget {
             ),
             child: const Icon(Icons.waves_rounded, size: 40, color: Colors.white),
           ),
+        ),
+      );
+}
+
+/// La vez anterior se quedo en el logo: se cuenta claro y se puede enviar el detalle.
+class _PantallaTraba extends StatelessWidget {
+  const _PantallaTraba({required this.detalle, required this.continuar});
+  final String detalle;
+  final VoidCallback continuar;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        backgroundColor: C.fondo,
+        body: SafeArea(
+          child: ListView(padding: const EdgeInsets.fromLTRB(24, 40, 24, 24), children: [
+            const Icon(Icons.healing_rounded, size: 52, color: C.acento),
+            const SizedBox(height: 16),
+            const Text('Caudal se trabó al abrir', textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
+            const SizedBox(height: 10),
+            Text(
+              Diagnostico.modoSeguro
+                  ? 'La vez anterior se quedó en el logo. Ahora abrirá en modo seguro: todo funciona, pero sin '
+                      'los controles de música en la notificación hasta la próxima versión.'
+                  : 'La vez anterior se quedó en el logo.',
+              textAlign: TextAlign.center, style: const TextStyle(color: C.texto2, height: 1.4),
+            ),
+            const SizedBox(height: 10),
+            const Text('Envía este detalle a quien te pasó Caudal: con él se arregla del todo.',
+                textAlign: TextAlign.center, style: TextStyle(color: C.texto2, height: 1.4)),
+            const SizedBox(height: 20),
+            FilledButton.icon(
+              icon: const Icon(Icons.share_rounded, size: 18),
+              label: const Text('Enviar detalle'),
+              onPressed: () => unawaited(SharePlus.instance
+                  .share(ShareParams(text: 'Caudal se trabó al abrir:\n$detalle'))
+                  .then((_) {}, onError: (_) {})),
+            ),
+            const SizedBox(height: 8),
+            OutlinedButton(onPressed: continuar, child: const Text('Continuar')),
+            const SizedBox(height: 20),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(color: C.superficie2, borderRadius: BorderRadius.circular(10)),
+              child: SelectableText(detalle, style: const TextStyle(fontSize: 10.5, color: C.texto3)),
+            ),
+          ]),
         ),
       );
 }

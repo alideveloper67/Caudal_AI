@@ -55,10 +55,14 @@ class _Motor {
       bufferSize: 48 * 1024 * 1024,
       logLevel: MPVLogLevel.error,
     ));
-    video = VideoController(player,
-        configuration: const VideoControllerConfiguration(enableHardwareAcceleration: true));
     _afinar();
   }
+
+  /// La pantalla del video se crea la primera vez que hace falta (no al abrir
+  /// la app): crearla pide una superficie grafica al sistema y, en algunos
+  /// telefonos, eso trababa el arranque aunque solo se fuera a oir musica.
+  late final VideoController video = VideoController(player,
+      configuration: const VideoControllerConfiguration(enableHardwareAcceleration: true));
 
   /// Lectura anticipada generosa: que un bajon de red no corte nada.
   Future<void> _afinar() async {
@@ -85,7 +89,6 @@ class _Motor {
   }
 
   late final Player player;
-  late final VideoController video;
   Fuente? fuente;
 
   NativePlayer? get nativo => player.platform is NativePlayer ? player.platform as NativePlayer : null;
@@ -660,6 +663,11 @@ class Reproductor extends ChangeNotifier {
 
   Future<void> _cargar(Json pista, {Duration inicio = Duration.zero, bool pausado = false,
       bool mismo = false, bool forzarStream = false}) async {
+    // en modo video, las dos pantallas listas antes de abrir (traspaso sin negro)
+    if (modo == 'video') {
+      _a.video;
+      _b.video;
+    }
     _cortarFundido();
     final gen = ++_gen;
     final cambio = !identical(pista, actual) || !mismo;

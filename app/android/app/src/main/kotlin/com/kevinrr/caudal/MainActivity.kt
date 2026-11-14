@@ -4,6 +4,7 @@ import android.app.PictureInPictureParams
 import android.content.Intent
 import android.content.res.Configuration
 import android.os.Build
+import android.os.Bundle
 import android.util.Rational
 import com.ryanheise.audioservice.AudioServiceActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -23,8 +24,19 @@ class MainActivity : AudioServiceActivity() {
     // true solo mientras hay un video sonando (lo decide el lado Dart)
     private var pipPermitido = false
 
+    override fun onCreate(savedInstanceState: Bundle?) {
+        // antes que nada: si el arranque se congela, queda anotado donde (Vigilante.kt)
+        Vigilante.iniciar(this)
+        super.onCreate(savedInstanceState)
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "caudal/diagnostico")
+            .setMethodCallHandler { llamada, resultado ->
+                if (llamada.method == "traba") resultado.success(Vigilante.leer(applicationContext))
+                else resultado.notImplemented()
+            }
         canal = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "caudal/compartido")
         canal?.setMethodCallHandler { llamada, resultado ->
             if (llamada.method == "inicial") {
