@@ -51,15 +51,40 @@ class ServicioAudio extends BaseAudioHandler with SeekHandler {
   static ServicioAudio? _unico;
 
   /// Inicia el servicio la primera vez; despues solo le cambia el reproductor.
-  static Future<ServicioAudio> para(Reproductor r, {Coleccion? coleccion}) async {
+  static Future<ServicioAudio>? _arrancando;
+  static Reproductor? _ultimoR;
+  static Coleccion? _ultimaColeccion;
+
+  /// Engancha el reproductor a la notificacion y la pantalla de bloqueo.
+  ///
+  /// En algunos telefonos el servicio de Android tarda (o no llega nunca) en
+  /// responder: no se espera mas de [espera] para que la app no se quede en
+  /// el logo. Si responde despues, se engancha solo al reproductor de ese momento.
+  static Future<ServicioAudio?> para(Reproductor r,
+      {Coleccion? coleccion, Duration espera = const Duration(seconds: 6)}) async {
+    _ultimoR = r;
+    _ultimaColeccion = coleccion;
     final u = _unico;
     if (u != null) {
       u.cambiar(r, coleccion: coleccion);
       return u;
     }
-    final nuevo = _unico = await iniciar(r, coleccion: coleccion);
-    unawaited(nuevo._sesion());
-    return nuevo;
+    _arrancando ??= iniciar(r, coleccion: coleccion).then((nuevo) {
+      _unico = nuevo;
+      unawaited(nuevo._sesion());
+      final ultimo = _ultimoR;
+      if (ultimo != null && !identical(ultimo, nuevo.r)) nuevo.cambiar(ultimo, coleccion: _ultimaColeccion);
+      return nuevo;
+    }, onError: (Object e) {
+      _arrancando = null; // que se pueda reintentar la proxima vez
+      throw e;
+    });
+    try {
+      return await _arrancando!.timeout(espera);
+    } catch (e) {
+      debugPrint('Caudal: la musica de fondo aun no arranca ($e)');
+      return null;
+    }
   }
 
   // ------------------------------------------------------------ foco de audio

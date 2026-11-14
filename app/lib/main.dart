@@ -76,11 +76,49 @@ class _CaudalAppState extends State<CaudalApp> {
       c = null;
     }
     if (c != null) {
-      await _abrir(c, true);
+      try {
+        await _abrir(c, true);
+      } catch (e) {
+        // nunca quedarse en el logo: se avisa y se puede reintentar
+        if (mounted) {
+          setState(() {
+            _fallo = e;
+            _cuentaFallida = c;
+          });
+        }
+      }
     } else if (mounted) {
       setState(() => _comprobando = false);
     }
   }
+
+  Object? _fallo;
+  Cuenta? _cuentaFallida;
+
+  Future<void> _reintentar() async {
+    final c = _cuentaFallida;
+    setState(() => _fallo = null);
+    if (c == null) return _arrancar();
+    try {
+      await _abrir(c, true);
+    } catch (e) {
+      if (mounted) setState(() => _fallo = e);
+    }
+  }
+
+  Future<void> _salirDeFallo() async {
+    await Cuentas.olvidar(_cuentaFallida).catchError((_) {});
+    if (!mounted) return;
+    setState(() {
+      _fallo = null;
+      _cuentaFallida = null;
+      _comprobando = false;
+    });
+  }
+
+  /// Un paso del arranque con tiempo maximo: si se pasa, se sabe cual fue.
+  static Future<T> _paso<T>(String nombre, Future<T> f, {int segundos = 15}) =>
+      f.timeout(Duration(seconds: segundos), onTimeout: () => throw ErrorArranque(nombre));
 
   /// Monta todo lo de una cuenta: su biblioteca, sus ajustes y el reproductor.
   Future<void> _abrir(Cuenta c, bool recordar) async {
@@ -90,14 +128,17 @@ class _CaudalAppState extends State<CaudalApp> {
     } else {
       await Cuentas.olvidar();
     }
-    final ajustes = await Ajustes.cargar(c.id);
+    final ajustes = await _paso('ajustes', Ajustes.cargar(c.id));
     Catalogo.fijarRegion(ajustes.texto('region'));
     MotorLocal.bitrateMp3 = ajustes.texto('bitrate_mp3');
     ajustes.addListener(() => MotorLocal.bitrateMp3 = ajustes.texto('bitrate_mp3'));
-    final coleccion = await Coleccion.abrir(c.id);
+    final coleccion = await _paso('biblioteca', Coleccion.abrir(c.id));
     final streams = Streams(MotorLocal());
     final reproductor = Reproductor(ajustes, coleccion, streams);
-    await reproductor.restaurarSesion();
+    try {
+      await reproductor.restaurarSesion().timeout(const Duration(seconds: 5));
+    } catch (_) {} // si la ultima sesion no se puede leer, se empieza de cero
+    // con tiempo maximo dentro: si Android tarda, la musica de fondo se engancha despues
     await ServicioAudio.para(reproductor);
     Pip.iniciar(reproductor);
     _capturador ??= CapturadorOculto();
@@ -166,7 +207,10 @@ class _CaudalAppState extends State<CaudalApp> {
   @override
   Widget build(BuildContext context) {
     final s = _s;
-    final Widget inicio = _comprobando
+    final fallo = _fallo;
+    final Widget inicio = fallo != null
+        ? _FalloArranque(error: fallo, reintentar: _reintentar, salir: _salirDeFallo)
+        : _comprobando
         ? const _Arranque()
         : s == null
             ? AccesoPagina(alEntrar: _abrir)
@@ -180,7 +224,7 @@ class _CaudalAppState extends State<CaudalApp> {
       home: AnimatedSwitcher(
         duration: const Duration(milliseconds: 380),
         switchInCurve: Curves.easeOutCubic,
-        child: KeyedSubtree(key: ValueKey(s?.cuenta.id ?? (_comprobando ? 'arranque' : 'acceso')), child: inicio),
+        child: KeyedSubtree(key: ValueKey(fallo != null ? 'fallo' : s?.cuenta.id ?? (_comprobando ? 'arranque' : 'acceso')), child: inicio),
       ),
       builder: (context, hijo) {
         // que la letra grande del sistema no rompa el diseno
@@ -208,6 +252,49 @@ class _CaudalAppState extends State<CaudalApp> {
     );
     return s == null ? app : Caudal(s: s, child: app);
   }
+}
+
+class ErrorArranque implements Exception {
+  const ErrorArranque(this.paso);
+  final String paso;
+  @override
+  String toString() => 'tardó demasiado: $paso';
+}
+
+/// Si algo falla al entrar: explicacion clara y dos salidas, nunca el logo eterno.
+class _FalloArranque extends StatelessWidget {
+  const _FalloArranque({required this.error, required this.reintentar, required this.salir});
+  final Object error;
+  final VoidCallback reintentar;
+  final VoidCallback salir;
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+        backgroundColor: C.fondo,
+        body: SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(28),
+            child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+              const Icon(Icons.wifi_tethering_error_rounded, size: 56, color: C.acento),
+              const SizedBox(height: 18),
+              const Text('No pudimos abrir tu música', textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 8),
+              const Text('Tu cuenta está bien. Revisa tu conexión y vuelve a intentarlo.',
+                  textAlign: TextAlign.center, style: TextStyle(color: C.texto2)),
+              const SizedBox(height: 26),
+              FilledButton(onPressed: reintentar, child: const Text('Reintentar')),
+              const SizedBox(height: 8),
+              TextButton(onPressed: salir, child: const Text('Entrar con otra cuenta')),
+              const SizedBox(height: 22),
+              // detalle pequeno: si lo cuentas, sabemos exactamente que paso
+              Text('Detalle: $error', textAlign: TextAlign.center,
+                  style: const TextStyle(fontSize: 11, color: C.texto3)),
+            ]),
+          ),
+        ),
+      );
 }
 
 class _Arranque extends StatelessWidget {
