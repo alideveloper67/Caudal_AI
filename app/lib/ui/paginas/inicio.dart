@@ -52,6 +52,15 @@ class _InicioPaginaState extends State<InicioPagina> with AutomaticKeepAliveClie
     if (!mounted) return;
     final s = Caudal.leer(context);
     final col = s.coleccion;
+    // lo ultimo que se vio sale al instante; lo nuevo llega por detras
+    if (_catalogo == null) {
+      try {
+        final guardado = await col.estado('catalogo_inicio');
+        if (guardado is Map && mounted && _catalogo == null) {
+          setState(() => _catalogo = Map<String, dynamic>.from(guardado));
+        }
+      } catch (_) {}
+    }
     final recientes = await col.escuchadoHacePoco(24);
     final atajos = <Json>[{'tipo': 'me_gusta', 'titulo': 'Tus me gusta'}];
     final vistos = <String>{};
@@ -104,6 +113,7 @@ class _InicioPaginaState extends State<InicioPagina> with AutomaticKeepAliveClie
         }
         _cacheCatalogo = datos;
         _cuando = DateTime.now();
+        unawaited(col.guardarEstado('catalogo_inicio', datos).catchError((_) {}));
         if (mounted) setState(() {
           _catalogo = datos;
           _sinRed = false;

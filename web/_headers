@@ -1,0 +1,9 @@
+# Lo pesado de la app web cambia poco: que el navegador lo guarde
+/app/canvaskit/*
+  Cache-Control: public, max-age=604800
+/app/assets/*
+  Cache-Control: public, max-age=86400
+/app/icons/*
+  Cache-Control: public, max-age=604800
+/app/sqlite3.wasm
+  Cache-Control: public, max-age=604800

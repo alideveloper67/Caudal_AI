@@ -47,7 +47,7 @@ void main() {
   });
 
   test('la version y el origen son los de Caudal_AI', () {
-    expect(versionApp, '2.1.0');
+    expect(versionApp, '2.1.1');
     expect(origen, 'alideveloper67/Caudal_AI');
   });
 

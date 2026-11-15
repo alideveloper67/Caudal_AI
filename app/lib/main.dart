@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
@@ -257,10 +258,41 @@ class _CaudalAppState extends State<CaudalApp> {
   /// notificacion ni el aviso de versiones nuevas. Android lo pregunta como
   /// mucho dos veces; si se dijo que no, no insiste.
   Future<void> _pedirNotificaciones() async {
-    if (defaultTargetPlatform != TargetPlatform.android) return;
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
     try {
-      await Future.delayed(const Duration(seconds: 2));
-      if (await Permission.notification.isDenied) await Permission.notification.request();
+      await Future.delayed(const Duration(seconds: 3));
+      final estado = await Permission.notification.status;
+      if (estado.isGranted) return;
+      // se explica una vez por version (sin insistir en cada arranque)
+      final p = await SharedPreferences.getInstance();
+      final clave = 'aviso_notificaciones_$versionApp';
+      if (p.getBool(clave) == true) return;
+      await p.setBool(clave, true);
+      final ctx = _navegador.currentContext;
+      if (ctx == null || !ctx.mounted) return;
+      final bloqueado = estado.isPermanentlyDenied;
+      final si = await showDialog<bool>(
+        context: ctx,
+        builder: (c) => AlertDialog(
+          title: const Text('Activa las notificaciones'),
+          content: Text(bloqueado
+              ? 'Las notificaciones de Caudal están apagadas. Actívalas en los ajustes del teléfono para '
+                  'enterarte cuando haya una versión nueva y tener los controles de la música en la pantalla bloqueada.'
+              : 'Así te avisamos cuando haya una versión nueva de Caudal, aunque no abras la app, y '
+                  'tienes los controles de la música en la pantalla bloqueada.'),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(c, false), child: const Text('Ahora no')),
+            FilledButton(onPressed: () => Navigator.pop(c, true),
+                child: Text(bloqueado ? 'Abrir ajustes' : 'Activar')),
+          ],
+        ),
+      );
+      if (si != true) return;
+      if (bloqueado) {
+        await openAppSettings();
+      } else {
+        await Permission.notification.request();
+      }
     } catch (_) {}
   }
 
@@ -337,7 +369,8 @@ class _CaudalAppState extends State<CaudalApp> {
               Positioned.fill(
                 child: ColoredBox(
                   color: Colors.black,
-                  child: Video(controller: s.reproductor.pantalla!, controls: NoVideoControls, fill: Colors.black),
+                  child: Video(controller: s.reproductor.pantalla!, controls: NoVideoControls, fill: Colors.black,
+                      pauseUponEnteringBackgroundMode: false),
                 ),
               ),
           ]),

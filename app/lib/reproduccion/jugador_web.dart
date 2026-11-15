@@ -33,11 +33,34 @@ web.HTMLDivElement _contenedor() {
   _estiloCaja(c);
   web.document.body!.append(c);
   _caja = c;
+  // mientras se escribe (chat, buscador...), el recuadro se aparta para no
+  // tapar la barra de escribir; la musica sigue sonando
+  web.document.addEventListener('focusin', ((web.Event e) {
+    final t = e.target;
+    if (t != null && _esCampo(t as web.Element)) {
+      _escribiendo = true;
+      _estiloCaja(c);
+    }
+  }).toJS);
+  web.document.addEventListener('focusout', ((web.Event e) {
+    _escribiendo = false;
+    Future<void>.delayed(const Duration(milliseconds: 150), () => _estiloCaja(c));
+  }).toJS);
   return c;
+}
+
+bool _escribiendo = false;
+
+bool _esCampo(web.Element el) {
+  final tag = el.tagName.toUpperCase();
+  return tag == 'INPUT' || tag == 'TEXTAREA';
 }
 
 void _estiloCaja(web.HTMLDivElement c) {
   final s = c.style;
+  // escribiendo (y fuera del reproductor) se esconde sin parar la musica
+  s.opacity = _escribiendo && _hueco == null ? '0' : '1';
+  s.pointerEvents = _escribiendo && _hueco == null ? 'none' : 'auto';
   s.position = 'fixed';
   s.zIndex = '20';
   s.overflow = 'hidden';

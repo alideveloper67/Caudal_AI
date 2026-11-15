@@ -326,20 +326,39 @@ class Reproductor extends ChangeNotifier {
     });
   }
 
-  bool _videoApagado = false;
+  /// Se pasó a audio al salir de la app: al volver, se vuelve al video.
+  bool volverAVideo = false;
 
-  /// iOS no deja dibujar con la GPU en segundo plano: el video se apaga
-  /// (sigue el sonido, como YouTube Premium) y vuelve al regresar.
+  /// Salir de la app o apagar la pantalla con un video sonando: pasa a modo
+  /// audio sin cortar (el video se apaga al momento y lo que suena sigue
+  /// mientras se prepara el audio), y al volver regresa al video en el mismo
+  /// punto. Así la música no se pausa ni gasta datos y batería en una imagen
+  /// que nadie ve. Con la ventanita flotante (PiP) no se llama: ahí el video
+  /// se sigue viendo.
   Future<void> segundoPlano(bool fuera) async {
-    if (!_ios) return;
-    if (fuera == _videoApagado) return;
-    if (fuera && modo != 'video') return;
-    _videoApagado = fuera;
+    if (kIsWeb) return;
+    if (fuera) {
+      if (volverAVideo || modo != 'video' || actual == null) return;
+      if (estado != EstadoRepro.sonando && estado != EstadoRepro.cargando) return;
+      volverAVideo = true;
+      // sin imagen ya mismo: en segundo plano no hay donde dibujarla (iOS no deja usar la GPU)
+      for (final m in [_a, _b]) {
+        try {
+          await m.player.setProperty('vid', 'no');
+        } catch (_) {}
+      }
+      await cambiarModo('audio');
+      return;
+    }
+    if (!volverAVideo) return;
+    volverAVideo = false;
     for (final m in [_a, _b]) {
       try {
-        await m.player.setProperty('vid', fuera ? 'no' : 'auto');
+        await m.player.setProperty('vid', 'auto');
       } catch (_) {}
     }
+    // si mientras tanto se eligió otra cosa a mano, se respeta
+    if (modo == 'audio' && actual != null) await cambiarModo('video');
   }
 
   Future<void> fijarVelocidad(double v, {bool guardar = true}) async {

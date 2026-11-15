@@ -310,7 +310,6 @@ class _AccesoPaginaState extends State<AccesoPagina>
                       textInputAction: TextInputAction.next,
                       autocorrect: false,
                       autofillHints: [_registro ? AutofillHints.newUsername : AutofillHints.username],
-                      inputFormatters: [FilteringTextInputFormatter.allow(RegExp(r'[a-zA-Z0-9._]'))],
                       decoration: _deco('Usuario', Icons.alternate_email_rounded),
                     ),
                     const SizedBox(height: 12),

@@ -140,7 +140,7 @@ class _MensajesPaginaState extends State<MensajesPagina> {
   }
 }
 
-/// Pide un usuario y abre (o crea) el chat con esa persona.
+/// Busca a alguien por su usuario (mientras se escribe) y abre el chat.
 Future<ResumenChat?> nuevoChat(BuildContext context) async {
   final chat = chatDe(context);
   final s = Caudal.leer(context);
@@ -148,20 +148,151 @@ Future<ResumenChat?> nuevoChat(BuildContext context) async {
     s.avisar('Los mensajes necesitan internet.');
     return null;
   }
-  final usuario = await pedirTexto(context, 'Escribir a…', '', );
-  if (usuario == null || usuario.trim().isEmpty) return null;
-  try {
-    final p = await chat.buscar(usuario);
-    if (p == null) {
-      s.avisar('No hay nadie con el usuario «${usuario.trim()}». Pídele que te diga el suyo exacto '
-          '(está en Ajustes, debajo de su nombre).');
-      return null;
+  return showDialog<ResumenChat>(
+    context: context,
+    useRootNavigator: true,
+    builder: (_) => _DialogoNuevoChat(chat: chat, yo: s.cuenta.usuario),
+  );
+}
+
+class _DialogoNuevoChat extends StatefulWidget {
+  const _DialogoNuevoChat({required this.chat, required this.yo});
+  final Chat chat;
+  final String yo;
+
+  @override
+  State<_DialogoNuevoChat> createState() => _DialogoNuevoChatState();
+}
+
+class _DialogoNuevoChatState extends State<_DialogoNuevoChat> {
+  static const _ayuda = 'Escribe su usuario de Caudal (el que usa para entrar).';
+  final _campo = TextEditingController();
+  Timer? _espera;
+  Persona? _persona;
+  String _estado = _ayuda;
+  bool _buscando = false;
+  bool _abriendo = false;
+
+  @override
+  void dispose() {
+    _espera?.cancel();
+    _campo.dispose();
+    super.dispose();
+  }
+
+  String get _escrito => _campo.text.trim().replaceFirst('@', '').toLowerCase();
+
+  void _alEscribir(String _) {
+    _espera?.cancel();
+    final u = _escrito;
+    setState(() {
+      _persona = null;
+      _buscando = u.length >= 3;
+      _estado = u.isEmpty ? _ayuda : u.length < 3 ? 'Sigue escribiendo…' : 'Buscando…';
+    });
+    if (u.length < 3) return;
+    if (u == widget.yo.toLowerCase()) {
+      setState(() {
+        _buscando = false;
+        _estado = 'Ese es tu propio usuario. Escribe el de la otra persona.';
+      });
+      return;
     }
-    final id = await chat.abrir(p.id);
-    return ResumenChat(id: id, otro: p.id, usuario: p.usuario, nombre: p.nombre, ultimo: DateTime.now());
-  } catch (e) {
-    s.avisar(_error(e));
-    return null;
+    _espera = Timer(const Duration(milliseconds: 450), () async {
+      try {
+        final p = await widget.chat.buscar(u);
+        if (!mounted || _escrito != u) return;
+        setState(() {
+          _buscando = false;
+          _persona = p;
+          _estado = p == null ? 'No hay nadie con el usuario «$u». Revisa que esté bien escrito.' : '';
+        });
+      } catch (e) {
+        if (mounted) {
+          setState(() {
+            _buscando = false;
+            _estado = _error(e);
+          });
+        }
+      }
+    });
+  }
+
+  Future<void> _abrir() async {
+    final p = _persona;
+    if (p == null || _abriendo) return;
+    setState(() => _abriendo = true);
+    try {
+      final id = await widget.chat.abrir(p.id);
+      if (!mounted) return;
+      Navigator.of(context).pop(ResumenChat(id: id, otro: p.id, usuario: p.usuario, nombre: p.nombre,
+          ultimo: DateTime.now()));
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _abriendo = false;
+          _estado = _error(e);
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final p = _persona;
+    final visible = p == null ? '' : (p.nombre.isNotEmpty ? p.nombre : p.usuario);
+    return AlertDialog(
+      backgroundColor: C.superficie2,
+      title: const Text('Nuevo mensaje'),
+      content: SizedBox(
+        width: 380,
+        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+          TextField(
+            controller: _campo,
+            autofocus: true,
+            autocorrect: false,
+            enableSuggestions: false,
+            textInputAction: TextInputAction.go,
+            decoration: InputDecoration(
+              prefixText: '@',
+              hintText: 'usuario',
+              filled: true,
+              fillColor: C.superficie3,
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+              suffixIcon: _buscando
+                  ? const Padding(padding: EdgeInsets.all(14),
+                      child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)))
+                  : null,
+            ),
+            onChanged: _alEscribir,
+            onSubmitted: (_) => _abrir(),
+          ),
+          const SizedBox(height: 12),
+          if (p != null)
+            Material(
+              color: C.superficie3,
+              borderRadius: BorderRadius.circular(12),
+              child: ListTile(
+                leading: CircleAvatar(backgroundColor: C.acento,
+                    child: Text(visible.substring(0, 1).toUpperCase(),
+                        style: TextStyle(color: C.acentoTexto, fontWeight: FontWeight.w900))),
+                title: Text(visible, style: const TextStyle(fontWeight: FontWeight.w700)),
+                subtitle: Text('@${p.usuario}', style: estiloSecundario),
+                onTap: _abrir,
+              ),
+            )
+          else
+            Text(_estado, style: estiloSecundario),
+        ]),
+      ),
+      actions: [
+        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancelar')),
+        FilledButton(
+          onPressed: p == null || _abriendo ? null : _abrir,
+          child: Text(_abriendo ? 'Abriendo…' : 'Escribir'),
+        ),
+      ],
+    );
   }
 }
 
@@ -380,6 +511,8 @@ class _ConversacionPaginaState extends State<ConversacionPagina> {
         SafeArea(
           top: false,
           child: Container(
+            // con algo sonando, el mini reproductor va encima: la barra sube
+            margin: EdgeInsets.only(bottom: s.reproductor.actual != null ? 74 : 0),
             padding: const EdgeInsets.fromLTRB(Esp.s, Esp.s, Esp.s, Esp.s),
             decoration: BoxDecoration(color: C.panel, border: Border(top: BorderSide(color: C.borde))),
             child: Row(children: [

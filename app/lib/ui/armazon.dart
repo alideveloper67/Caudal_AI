@@ -11,6 +11,9 @@ import '../nucleo/legal.dart';
 import '../reproduccion/reproductor.dart';
 import 'comunes.dart';
 import 'paginas/acceso.dart';
+import 'paginas/mensajes_pagina.dart';
+import 'paginas/resumen.dart';
+import 'paginas/ajustes_pagina.dart';
 import 'paginas/biblioteca.dart';
 import 'paginas/buscar.dart';
 import 'paginas/descargas_pagina.dart';
@@ -177,8 +180,10 @@ class _ArmazonState extends State<Armazon> {
           SystemNavigator.pop();
         }
       },
-      child: Scaffold(
-        body: Stack(children: [
+      child: LayoutBuilder(builder: (context, medidas) {
+        // pantallas anchas (navegador en la PC, tablets): el menu va a la izquierda
+        final ancho = medidas.maxWidth >= 900;
+        final contenido = Stack(children: [
           IndexedStack(
             index: _pestana,
             children: [
@@ -194,7 +199,18 @@ class _ArmazonState extends State<Armazon> {
           ),
           // capa propia: lo que cambia en el mini reproductor no repinta la pagina de debajo
           const Positioned(left: 8, right: 8, bottom: 6, child: RepaintBoundary(child: MiniReproductor())),
-        ]),
+        ]);
+        if (ancho) {
+          return Scaffold(
+            body: Row(children: [
+              _BarraLateral(pestana: _pestana, alIr: _ir, alAbrir: _abrirEnPestana),
+              VerticalDivider(width: 1, thickness: 1, color: C.borde),
+              Expanded(child: contenido),
+            ]),
+          );
+        }
+        return Scaffold(
+        body: contenido,
         bottomNavigationBar: NavigationBar(
           selectedIndex: _pestana,
           onDestinationSelected: _ir,
@@ -206,6 +222,88 @@ class _ArmazonState extends State<Armazon> {
             NavigationDestination(icon: Icon(Icons.download_outlined), selectedIcon: Icon(Icons.download_rounded), label: 'Descargar'),
           ],
         ),
+      );
+      }),
+    );
+  }
+
+  void _abrirEnPestana(Widget pagina) =>
+      _navegadores[_pestana].currentState?.push(MaterialPageRoute(builder: (_) => pagina));
+}
+
+/// El menu de la izquierda en pantallas anchas (como en las webs de musica).
+class _BarraLateral extends StatelessWidget {
+  const _BarraLateral({required this.pestana, required this.alIr, required this.alAbrir});
+  final int pestana;
+  final ValueChanged<int> alIr;
+  final ValueChanged<Widget> alAbrir;
+
+  @override
+  Widget build(BuildContext context) {
+    final s = Caudal.of(context);
+    Widget item(IconData icono, IconData activo, String texto, bool elegido, VoidCallback alPulsar) => Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+          child: Material(
+            color: elegido ? C.superficie2 : Colors.transparent,
+            borderRadius: BorderRadius.circular(10),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(10),
+              onTap: alPulsar,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+                child: Row(children: [
+                  Icon(elegido ? activo : icono, size: 22, color: elegido ? C.texto : C.texto2),
+                  const SizedBox(width: 14),
+                  Text(texto, style: TextStyle(fontSize: 14.5, fontWeight: elegido ? FontWeight.w800 : FontWeight.w600,
+                      color: elegido ? C.texto : C.texto2)),
+                ]),
+              ),
+            ),
+          ),
+        );
+    return SizedBox(
+      width: 232,
+      child: SafeArea(
+        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(22, 20, 16, 22),
+            child: Row(children: [
+              Container(
+                width: 34, height: 34,
+                decoration: BoxDecoration(borderRadius: BorderRadius.circular(9),
+                    gradient: LinearGradient(colors: [C.acento, C.violeta])),
+                child: const Icon(Icons.waves_rounded, size: 20, color: Colors.white),
+              ),
+              const SizedBox(width: 10),
+              const Text('Caudal', style: TextStyle(fontSize: 21, fontWeight: FontWeight.w900, letterSpacing: -0.5)),
+            ]),
+          ),
+          item(Icons.home_outlined, Icons.home_rounded, 'Inicio', pestana == 0, () => alIr(0)),
+          item(Icons.search_rounded, Icons.manage_search_rounded, 'Buscar', pestana == 1, () => alIr(1)),
+          item(Icons.library_music_outlined, Icons.library_music_rounded, 'Tu biblioteca', pestana == 2, () => alIr(2)),
+          item(Icons.download_outlined, Icons.download_rounded, 'Descargar', pestana == 3, () => alIr(3)),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(24, 18, 16, 6),
+            child: Text('TÚ Y TUS AMIGOS', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800,
+                letterSpacing: 1, color: C.texto3)),
+          ),
+          item(Icons.forum_outlined, Icons.forum_rounded, 'Mensajes', false, () => alAbrir(const MensajesPagina())),
+          item(Icons.groups_2_outlined, Icons.groups_2_rounded, 'Escuchar juntos', false,
+              () => alAbrir(const JuntosPagina())),
+          item(Icons.insights_rounded, Icons.insights_rounded, 'Tu resumen', false, () => ResumenPagina.abrir(context)),
+          const Spacer(),
+          item(Icons.settings_outlined, Icons.settings_rounded, 'Ajustes', false, () => alAbrir(const AjustesPagina())),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(22, 10, 16, 18),
+            child: Row(children: [
+              CircleAvatar(radius: 15, backgroundColor: C.acento,
+                  child: Text(s.cuenta.inicial, style: TextStyle(color: C.acentoTexto, fontWeight: FontWeight.w900))),
+              const SizedBox(width: 10),
+              Expanded(child: Text(s.cuenta.nombre, maxLines: 1, overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w700))),
+            ]),
+          ),
+        ]),
       ),
     );
   }

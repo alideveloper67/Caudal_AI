@@ -605,6 +605,7 @@ class _ChatSalaState extends State<_ChatSala> {
       SafeArea(
         top: false,
         child: Container(
+          margin: EdgeInsets.only(bottom: Caudal.of(context).reproductor.actual != null ? 74 : 0),
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(color: C.panel, border: Border(top: BorderSide(color: C.borde))),
           child: Row(children: [

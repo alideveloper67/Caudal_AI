@@ -102,20 +102,54 @@ class _CamposPerfilState extends State<CamposPerfil> {
     widget.alCambiar();
   }
 
-  Future<void> _elegirFecha() async {
-    final hoy = DateTime.now();
-    final f = await showDatePicker(
-      context: context,
-      initialDate: d.nacimiento ?? DateTime(hoy.year - 20, hoy.month, hoy.day),
-      firstDate: DateTime(1900),
-      lastDate: hoy,
-      initialEntryMode: DatePickerEntryMode.input,
-      helpText: 'Tu fecha de nacimiento',
-      fieldLabelText: 'Día/mes/año',
-      locale: const Locale('es'),
-    );
-    if (f != null) _cambio(() => d.nacimiento = f);
+  // la fecha se elige con tres listas: el calendario con teclado fallaba
+  // al borrar las barras en algunos telefonos
+  int? _dia, _mes, _anio;
+
+  @override
+  void initState() {
+    super.initState();
+    final n = d.nacimiento;
+    if (n != null) {
+      _dia = n.day;
+      _mes = n.month;
+      _anio = n.year;
+    }
   }
+
+  static const _meses = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto',
+    'septiembre', 'octubre', 'noviembre', 'diciembre'];
+
+  void _fecha({int? dia, int? mes, int? anio}) {
+    _cambio(() {
+      _dia = dia ?? _dia;
+      _mes = mes ?? _mes;
+      _anio = anio ?? _anio;
+      if (_dia != null && _mes != null && _anio != null) {
+        final ultimo = DateTime(_anio!, _mes! + 1, 0).day;
+        if (_dia! > ultimo) _dia = ultimo;
+        d.nacimiento = DateTime(_anio!, _mes!, _dia!);
+      } else {
+        d.nacimiento = null;
+      }
+    });
+  }
+
+  Widget _lista<T>(String texto, T? valor, List<(T, String)> opciones, ValueChanged<T?> alCambiar) =>
+      DropdownButtonFormField<T>(
+        initialValue: valor,
+        isExpanded: true,
+        menuMaxHeight: 320,
+        decoration: InputDecoration(
+          labelText: texto,
+          filled: true,
+          fillColor: C.superficie2,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 14),
+          border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
+        ),
+        items: [for (final (v, t) in opciones) DropdownMenuItem(value: v, child: Text(t, overflow: TextOverflow.ellipsis))],
+        onChanged: alCambiar,
+      );
 
   InputDecoration _deco(String texto, IconData icono) => InputDecoration(
         labelText: texto,
@@ -129,15 +163,25 @@ class _CamposPerfilState extends State<CamposPerfil> {
   Widget build(BuildContext context) {
     final n = d.nacimiento;
     return Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-      InkWell(
-        borderRadius: BorderRadius.circular(12),
-        onTap: _elegirFecha,
-        child: InputDecorator(
-          decoration: _deco('Fecha de nacimiento', Icons.cake_outlined),
-          child: Text(n == null ? 'Elegir' : '${n.day}/${n.month}/${n.year}  ·  ${d.edad} años',
-              style: TextStyle(color: n == null ? C.texto3 : C.texto)),
-        ),
+      Padding(
+        padding: const EdgeInsets.only(left: 4, bottom: 6),
+        child: Row(children: [
+          const Icon(Icons.cake_outlined, size: 18, color: C.texto3),
+          const SizedBox(width: 6),
+          Text(n == null ? 'Fecha de nacimiento' : 'Fecha de nacimiento · ${d.edad} años',
+              style: const TextStyle(fontSize: 13, color: C.texto2)),
+        ]),
       ),
+      Row(children: [
+        Expanded(flex: 3, child: _lista<int>('Día', _dia, [for (var i = 1; i <= 31; i++) (i, '$i')],
+            (v) => _fecha(dia: v))),
+        const SizedBox(width: 8),
+        Expanded(flex: 5, child: _lista<int>('Mes', _mes, [for (var i = 1; i <= 12; i++) (i, _meses[i - 1])],
+            (v) => _fecha(mes: v))),
+        const SizedBox(width: 8),
+        Expanded(flex: 4, child: _lista<int>('Año', _anio,
+            [for (var a = DateTime.now().year; a >= 1920; a--) (a, '$a')], (v) => _fecha(anio: v))),
+      ]),
       if (d.menor) ...[
         const SizedBox(height: 6),
         CheckboxListTile(

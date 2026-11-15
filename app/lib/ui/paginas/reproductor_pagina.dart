@@ -463,8 +463,9 @@ class _VideoEnLinea extends StatelessWidget {
               fullscreen: MaterialVideoControlsThemeData(
                 seekBarThumbColor: C.acento, seekBarPositionColor: C.acento,
               ),
+              // al salir de la app no se pausa: pasa a audio (Reproductor.segundoPlano)
               child: Video(controller: r.pantalla!, controls: MaterialVideoControls,
-                  fill: Colors.black),
+                  fill: Colors.black, pauseUponEnteringBackgroundMode: false),
             ),
           ),
         ),

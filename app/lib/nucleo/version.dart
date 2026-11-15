@@ -14,12 +14,13 @@ import 'dart:io';
 
 import 'package:dio/dio.dart';
 import 'package:open_filex/open_filex.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'plataforma.dart';
 
 /// Version que lleva esta copia. Sube tambien la de pubspec.yaml al publicar.
-const String versionApp = '2.1.0';
+const String versionApp = '2.1.1';
 
 /// Instalada desde una tienda (variante "play" de Android): las versiones
 /// nuevas llegan por la tienda, no por la propia app.
@@ -188,6 +189,17 @@ Future<String?> instalar(String rutaApk) async {
   if (!Plataforma.esAndroid) {
     return 'En iPhone la version nueva se instala desde su pagina, no desde la app.';
   }
+  // Android pide permiso para instalar apps fuera de la tienda: si falta, se
+  // abre su pantalla de ajustes y se sigue al volver
+  try {
+    if (!await Permission.requestInstallPackages.isGranted) {
+      final estado = await Permission.requestInstallPackages.request();
+      if (!estado.isGranted) {
+        return 'Para instalar la versión nueva, activa «Permitir de esta fuente» para Caudal '
+            '(Ajustes del teléfono → Instalar apps desconocidas) y vuelve a tocar «Instalar».';
+      }
+    }
+  } catch (_) {}
   final r = await OpenFilex.open(rutaApk, type: 'application/vnd.android.package-archive');
   if (r.type == ResultType.done) return null;
   if (r.type == ResultType.permissionDenied) {
