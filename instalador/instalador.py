@@ -125,6 +125,18 @@ def instalar(carpeta, al_progresar=None, crear_escritorio=True):
 
     os.makedirs(carpeta, exist_ok=True)
 
+    # el programa principal se quita primero: si alguien abre Caudal (acceso
+    # directo, reinicio de la propia app) mientras se copia, no arranca una
+    # instalacion a medias que revienta por faltarle librerias
+    principal = os.path.join(carpeta, f"{APP}.exe")
+    for _ in range(10):
+        try:
+            if os.path.exists(principal):
+                os.remove(principal)
+            break
+        except OSError:
+            cerrar_app()
+
     # una instalacion anterior se sustituye, pero se respetan los datos del usuario
     for nombre in os.listdir(carpeta):
         if nombre.lower() in ("datos", "descargas"):
@@ -142,7 +154,10 @@ def instalar(carpeta, al_progresar=None, crear_escritorio=True):
         al_progresar(8, "Copiando los archivos")
 
     with zipfile.ZipFile(paquete) as z:
-        miembros = z.infolist()
+        # el .exe principal va el ultimo: hasta que todo lo demas esta copiado
+        # no hay nada que se pueda abrir
+        miembros = sorted(z.infolist(),
+                          key=lambda m: os.path.basename(m.filename) == f"{APP}.exe")
         total = len(miembros) or 1
         for i, miembro in enumerate(miembros):
             z.extract(miembro, carpeta)

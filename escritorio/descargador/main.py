@@ -209,7 +209,13 @@ def main():
     servidor.close()
     # salida inmediata: una descarga o una busqueda a medio camino no deben
     # dejar el proceso vivo e invisible (todo lo importante ya esta guardado)
-    sys.stdout.flush()
+    # en el .exe sin consola sys.stdout/sys.stderr son None
+    for flujo in (sys.stdout, sys.stderr):
+        try:
+            if flujo is not None:
+                flujo.flush()
+        except Exception:  # noqa: BLE001
+            pass
     os._exit(codigo)
 
 
