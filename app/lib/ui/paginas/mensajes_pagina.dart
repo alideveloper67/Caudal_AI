@@ -362,18 +362,32 @@ class ConversacionPagina extends StatefulWidget {
   State<ConversacionPagina> createState() => _ConversacionPaginaState();
 }
 
+/// Un mensaje que ya se ve pero el servidor aún no confirmó.
+class _Pendiente {
+  _Pendiente(this.clave, this.texto, this.pista);
+  final int clave;
+  final String texto;
+  final Json? pista;
+  final DateTime creado = DateTime.now();
+  String? fallo; // por qué no se envió (null mientras va en camino)
+}
+
 class _ConversacionPaginaState extends State<ConversacionPagina> {
   final _campo = TextEditingController();
   final _scroll = ScrollController();
   List<Mensaje> _mensajes = [];
+  final List<_Pendiente> _pendientes = [];
+  int _siguiente = 0;
+  int _enCamino = 0;
   bool _cargado = false;
-  bool _enviando = false;
+  String? _errorCarga;
   Timer? _reloj;
   Chat? _chat;
 
   @override
   void initState() {
     super.initState();
+    _campo.addListener(() => setState(() {}));
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _chat = chatDe(context);
       _cargar();
@@ -389,52 +403,96 @@ class _ConversacionPaginaState extends State<ConversacionPagina> {
     super.dispose();
   }
 
+  /// Junta mensajes sin repetir (el sondeo y la confirmación pueden traer el mismo).
+  void _sumar(Iterable<Mensaje> llegan) {
+    final ids = {for (final m in _mensajes) m.id};
+    final nuevos = llegan.where((m) => ids.add(m.id)).toList();
+    if (nuevos.isEmpty) return;
+    _mensajes = [..._mensajes, ...nuevos]..sort((a, b) => a.id.compareTo(b.id));
+  }
+
   Future<void> _cargar() async {
     final c = _chat;
     if (c == null) return;
+    setState(() => _errorCarga = null);
     try {
       final l = await c.mensajes(widget.chat.id);
       if (!mounted) return;
       setState(() {
-        _mensajes = l;
+        _sumar(l);
         _cargado = true;
       });
       c.marcarLeido(widget.chat.id);
     } catch (e) {
       if (mounted) {
-        setState(() => _cargado = true);
-        Caudal.leer(context).avisar(_error(e));
+        setState(() {
+          _cargado = true;
+          _errorCarga = _error(e);
+        });
       }
     }
   }
 
   Future<void> _nuevos() async {
     final c = _chat;
-    if (c == null || !_cargado) return;
+    // mientras un envío va en camino no se pregunta: evita burbujas dobles
+    if (c == null || !_cargado || _enCamino > 0) return;
+    if (_errorCarga != null) return _cargar();
     try {
       final desde = _mensajes.isEmpty ? 0 : _mensajes.last.id;
       final l = await c.mensajes(widget.chat.id, desde: desde);
-      final nuevos = l.where((m) => !_mensajes.any((x) => x.id == m.id)).toList();
-      if (nuevos.isEmpty || !mounted) return;
-      setState(() => _mensajes = [..._mensajes, ...nuevos]);
-      c.marcarLeido(widget.chat.id);
+      if (!mounted) return;
+      final antes = _mensajes.length;
+      setState(() => _sumar(l));
+      if (_mensajes.length != antes) c.marcarLeido(widget.chat.id);
     } catch (_) {}
   }
 
-  Future<void> _enviar({Json? pista}) async {
-    final c = _chat;
-    final texto = _campo.text.trim();
-    if (c == null || _enviando || (texto.isEmpty && pista == null)) return;
-    setState(() => _enviando = true);
-    try {
-      final m = await c.enviar(widget.chat.id, texto: pista == null ? texto : '', pista: pista);
-      if (pista == null) _campo.clear();
-      if (mounted) setState(() => _mensajes = [..._mensajes, m]);
-    } catch (e) {
-      if (mounted) Caudal.leer(context).avisar(_error(e));
-    } finally {
-      if (mounted) setState(() => _enviando = false);
+  /// Se ve al momento con «Enviando…»; si falla, se toca para reintentar.
+  /// El campo nunca se bloquea: se puede seguir escribiendo mientras tanto.
+  void _enviar({Json? pista}) {
+    final texto = pista == null ? _campo.text.trim() : '';
+    if (_chat == null || (texto.isEmpty && pista == null)) return;
+    if (pista == null) _campo.clear();
+    final p = _Pendiente(++_siguiente, texto, pista);
+    setState(() => _pendientes.add(p));
+    if (_scroll.hasClients) {
+      _scroll.animateTo(0, duration: const Duration(milliseconds: 200), curve: Curves.easeOut);
     }
+    _mandar(p);
+  }
+
+  Future<void> _mandar(_Pendiente p) async {
+    final c = _chat;
+    if (c == null) return;
+    setState(() => p.fallo = null);
+    _enCamino++;
+    try {
+      final m = await c.enviar(widget.chat.id, texto: p.texto, pista: p.pista);
+      if (!mounted) return;
+      setState(() {
+        _pendientes.remove(p);
+        _sumar([m]);
+      });
+    } catch (e) {
+      if (mounted) setState(() => p.fallo = _error(e));
+    } finally {
+      _enCamino = (_enCamino - 1).clamp(0, 1 << 30);
+    }
+  }
+
+  void _enviarLoQueSuena() {
+    final s = Caudal.leer(context);
+    final p = s.reproductor.actual;
+    if (p == null) {
+      s.avisar('Ahora no suena nada. Pon una canción y vuelve a tocar 🎵');
+      return;
+    }
+    if ('${p['video_id'] ?? ''}'.isEmpty) {
+      s.avisar('Esa canción es un archivo del teléfono: solo se pueden enviar canciones de YouTube Music.');
+      return;
+    }
+    _enviar(pista: p);
   }
 
   Future<void> _mezcla() async {
@@ -456,11 +514,56 @@ class _ConversacionPaginaState extends State<ConversacionPagina> {
     }
   }
 
+  Widget _vacio(String texto, {VoidCallback? reintentar}) => Center(
+        child: Padding(
+          padding: const EdgeInsets.all(32),
+          child: Column(mainAxisSize: MainAxisSize.min, children: [
+            Text(texto, textAlign: TextAlign.center, style: estiloSecundario),
+            if (reintentar != null) ...[
+              const SizedBox(height: 12),
+              OutlinedButton.icon(onPressed: reintentar, icon: const Icon(Icons.refresh_rounded),
+                  label: const Text('Reintentar')),
+            ],
+          ]),
+        ),
+      );
+
   @override
   Widget build(BuildContext context) {
     final s = Caudal.of(context);
     final yo = s.cuenta.id;
-    final sonando = s.reproductor.actual;
+    final total = _pendientes.length + _mensajes.length;
+    Widget lista;
+    if (!_cargado) {
+      lista = const Center(child: CircularProgressIndicator());
+    } else if (total == 0 && _errorCarga != null) {
+      lista = _vacio('$_errorCarga\nPuedes escribir igual.', reintentar: _cargar);
+    } else if (total == 0) {
+      lista = _vacio('Aquí empieza tu conversación con ${widget.chat.visible}.\n'
+          'Escríbele algo o mándale lo que estás escuchando 🎵\n\n'
+          'Toca «Mezcla» para crear una lista con lo que escuchan los dos.');
+    } else {
+      lista = ListView.builder(
+        controller: _scroll,
+        reverse: true,
+        padding: const EdgeInsets.symmetric(horizontal: Esp.m, vertical: Esp.m),
+        itemCount: total,
+        itemBuilder: (_, i) {
+          // lo más nuevo abajo: primero los pendientes, luego los confirmados
+          if (i < _pendientes.length) {
+            final p = _pendientes[_pendientes.length - 1 - i];
+            return _Burbuja(
+              mensaje: Mensaje(id: -p.clave, autor: yo, texto: p.texto, pista: p.pista, creado: p.creado),
+              mio: true,
+              estado: p.fallo == null ? 'Enviando…' : '⚠ ${p.fallo} · Toca para reintentar',
+              alTocarEstado: p.fallo == null ? null : () => _mandar(p),
+            );
+          }
+          final m = _mensajes[_mensajes.length - 1 - (i - _pendientes.length)];
+          return _Burbuja(mensaje: m, mio: m.autor == yo);
+        },
+      );
+    }
     return Scaffold(
       appBar: AppBar(
         titleSpacing: 0,
@@ -485,76 +588,66 @@ class _ConversacionPaginaState extends State<ConversacionPagina> {
         ],
       ),
       body: Column(children: [
-        Expanded(
-          child: !_cargado
-              ? const Center(child: CircularProgressIndicator())
-              : _mensajes.isEmpty
-                  ? Center(
-                      child: Padding(
-                        padding: const EdgeInsets.all(32),
-                        child: Text('Escríbele algo o mándale lo que estás escuchando.\n\n'
-                            'Toca «Mezcla» para crear una lista con lo que escuchan los dos.',
-                            textAlign: TextAlign.center, style: estiloSecundario),
-                      ),
-                    )
-                  : ListView.builder(
-                      controller: _scroll,
-                      reverse: true,
-                      padding: const EdgeInsets.symmetric(horizontal: Esp.m, vertical: Esp.m),
-                      itemCount: _mensajes.length,
-                      itemBuilder: (_, i) {
-                        final m = _mensajes[_mensajes.length - 1 - i];
-                        return _Burbuja(mensaje: m, mio: m.autor == yo);
-                      },
-                    ),
-        ),
-        SafeArea(
-          top: false,
-          child: Container(
-            // con algo sonando, el mini reproductor va encima: la barra sube
-            margin: EdgeInsets.only(bottom: s.reproductor.actual != null ? 74 : 0),
-            padding: const EdgeInsets.fromLTRB(Esp.s, Esp.s, Esp.s, Esp.s),
-            decoration: BoxDecoration(color: C.panel, border: Border(top: BorderSide(color: C.borde))),
-            child: Row(children: [
-              if (sonando != null && '${sonando['video_id'] ?? ''}'.isNotEmpty)
-                IconButton(
-                  tooltip: 'Enviar lo que suena',
-                  icon: Icon(Icons.music_note_rounded, color: C.acento),
-                  onPressed: _enviando ? null : () => _enviar(pista: sonando),
-                ),
-              IconButton(
-                tooltip: 'Emojis',
-                icon: const Icon(Icons.emoji_emotions_outlined),
-                onPressed: () => elegirEmoji(context, (e) => insertarEnCampo(_campo, e)),
-              ),
-              Expanded(
-                child: TextField(
-                  controller: _campo,
-                  minLines: 1,
-                  maxLines: 4,
-                  maxLength: 2000,
-                  textCapitalization: TextCapitalization.sentences,
-                  decoration: InputDecoration(
-                    hintText: 'Mensaje',
-                    counterText: '',
-                    filled: true,
-                    fillColor: C.superficie2,
-                    isDense: true,
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(22), borderSide: BorderSide.none),
+        Expanded(child: lista),
+        // se repinta cuando cambia lo que suena (el botón dice qué manda y la barra sube)
+        ListenableBuilder(
+          listenable: s.reproductor,
+          builder: (context, _) {
+            final sonando = s.reproductor.actual;
+            final enviable = sonando != null && '${sonando['video_id'] ?? ''}'.isNotEmpty;
+            final hayTexto = _campo.text.trim().isNotEmpty;
+            return SafeArea(
+              top: false,
+              child: Container(
+                // con algo sonando, el mini reproductor va encima: la barra sube
+                margin: EdgeInsets.only(bottom: sonando != null ? 74 : 0),
+                padding: const EdgeInsets.fromLTRB(Esp.s, Esp.s, Esp.s, Esp.s),
+                decoration: BoxDecoration(color: C.panel, border: Border(top: BorderSide(color: C.borde))),
+                child: Row(children: [
+                  IconButton(
+                    tooltip: enviable
+                        ? 'Enviar «${sonando['titulo'] ?? 'lo que suena'}»'
+                        : 'Enviar la canción que suena',
+                    icon: Icon(Icons.music_note_rounded, color: enviable ? C.acento : C.texto3),
+                    onPressed: _enviarLoQueSuena,
                   ),
-                  onSubmitted: (_) => _enviar(),
-                ),
+                  IconButton(
+                    tooltip: 'Emojis',
+                    icon: const Icon(Icons.emoji_emotions_outlined),
+                    onPressed: () => elegirEmoji(context, (e) => insertarEnCampo(_campo, e)),
+                  ),
+                  Expanded(
+                    child: TextField(
+                      controller: _campo,
+                      minLines: 1,
+                      maxLines: 4,
+                      maxLength: 2000,
+                      textCapitalization: TextCapitalization.sentences,
+                      textInputAction: TextInputAction.send,
+                      decoration: InputDecoration(
+                        hintText: 'Escríbele a ${widget.chat.visible}',
+                        counterText: '',
+                        filled: true,
+                        fillColor: C.superficie2,
+                        isDense: true,
+                        contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(22), borderSide: BorderSide.none),
+                      ),
+                      onSubmitted: (_) => _enviar(),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  IconButton.filled(
+                    tooltip: 'Enviar',
+                    style: IconButton.styleFrom(backgroundColor: C.acento, foregroundColor: C.acentoTexto,
+                        disabledBackgroundColor: C.superficie3),
+                    onPressed: hayTexto ? () => _enviar() : null,
+                    icon: const Icon(Icons.send_rounded),
+                  ),
+                ]),
               ),
-              const SizedBox(width: 6),
-              IconButton.filled(
-                tooltip: 'Enviar',
-                style: IconButton.styleFrom(backgroundColor: C.acento, foregroundColor: C.acentoTexto),
-                onPressed: _enviando ? null : _enviar,
-                icon: const Icon(Icons.send_rounded),
-              ),
-            ]),
-          ),
+            );
+          },
         ),
       ]),
     );
@@ -562,9 +655,11 @@ class _ConversacionPaginaState extends State<ConversacionPagina> {
 }
 
 class _Burbuja extends StatelessWidget {
-  const _Burbuja({required this.mensaje, required this.mio});
+  const _Burbuja({required this.mensaje, required this.mio, this.estado, this.alTocarEstado});
   final Mensaje mensaje;
   final bool mio;
+  final String? estado; // «Enviando…» o el fallo, en lugar de la hora
+  final VoidCallback? alTocarEstado;
 
   @override
   Widget build(BuildContext context) {
@@ -596,27 +691,36 @@ class _Burbuja extends StatelessWidget {
     } else {
       contenido = Text(mensaje.texto, style: TextStyle(fontSize: 15.5, color: mio ? C.acentoTexto : C.texto, height: 1.3));
     }
+    final pie = Text(estado ?? _hora(mensaje.creado),
+        textAlign: TextAlign.right,
+        style: TextStyle(fontSize: 10.5, color: mio ? C.acentoTexto.withValues(alpha: 0.7) : C.texto3,
+            fontWeight: alTocarEstado != null ? FontWeight.w700 : FontWeight.w400));
     return Align(
       alignment: mio ? Alignment.centerRight : Alignment.centerLeft,
-      child: Container(
-        constraints: BoxConstraints(maxWidth: ancho),
-        margin: const EdgeInsets.symmetric(vertical: 3),
-        padding: EdgeInsets.fromLTRB(12, p != null ? 8 : 9, 12, 6),
-        decoration: BoxDecoration(
-          color: mio ? C.acento : C.superficie2,
-          borderRadius: BorderRadius.only(
-            topLeft: const Radius.circular(18),
-            topRight: const Radius.circular(18),
-            bottomLeft: Radius.circular(mio ? 18 : 4),
-            bottomRight: Radius.circular(mio ? 4 : 18),
+      child: Opacity(
+        opacity: estado != null && alTocarEstado == null ? 0.75 : 1,
+        child: Container(
+          constraints: BoxConstraints(maxWidth: ancho),
+          margin: const EdgeInsets.symmetric(vertical: 3),
+          padding: EdgeInsets.fromLTRB(12, p != null ? 8 : 9, 12, 6),
+          decoration: BoxDecoration(
+            color: mio ? C.acento : C.superficie2,
+            borderRadius: BorderRadius.only(
+              topLeft: const Radius.circular(18),
+              topRight: const Radius.circular(18),
+              bottomLeft: Radius.circular(mio ? 18 : 4),
+              bottomRight: Radius.circular(mio ? 4 : 18),
+            ),
           ),
+          child: Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
+            contenido,
+            const SizedBox(height: 2),
+            if (alTocarEstado != null)
+              InkWell(onTap: alTocarEstado, child: Padding(padding: const EdgeInsets.symmetric(vertical: 2), child: pie))
+            else
+              pie,
+          ]),
         ),
-        child: Column(crossAxisAlignment: CrossAxisAlignment.end, mainAxisSize: MainAxisSize.min, children: [
-          contenido,
-          const SizedBox(height: 2),
-          Text(_hora(mensaje.creado),
-              style: TextStyle(fontSize: 10.5, color: mio ? C.acentoTexto.withValues(alpha: 0.6) : C.texto3)),
-        ]),
       ),
     );
   }

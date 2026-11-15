@@ -224,8 +224,8 @@ class _AjustesPaginaState extends State<AjustesPagina> {
         ListTile(
           leading: Icon(Icons.palette_outlined, color: C.acento),
           title: const Text('Color y fondo de la app'),
-          subtitle: Text('${Aspecto.acentos[a.texto('acento')]?.$1 ?? 'Cian'} · '
-              '${Aspecto.fondos[a.texto('fondo')]?.$1 ?? 'Oscuro'}', style: estiloSecundario),
+          subtitle: Text('${Aspecto.acentoDe(a.texto('acento')).$1} · '
+              '${Aspecto.fondoDe(a.texto('fondo')).$1}', style: estiloSecundario),
           trailing: const Icon(Icons.chevron_right_rounded, color: C.texto3),
           onTap: () async {
             await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AspectoPagina()));

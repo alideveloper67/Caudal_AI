@@ -59,12 +59,58 @@ class Aspecto {
       Color(0xFF33373E), Color(0xFF2E3138)]),
   };
 
+  /// Un color propio guardado como «#RRGGBB» (en vez de un nombre de la lista).
+  static bool esPropio(String valor) => colorDe(valor) != null;
+
+  static Color? colorDe(String valor) {
+    final h = valor.trim();
+    if (!h.startsWith('#') || h.length != 7) return null;
+    final n = int.tryParse(h.substring(1), radix: 16);
+    return n == null ? null : Color(0xFF000000 | n);
+  }
+
+  static String hexDe(Color c) =>
+      '#${(c.toARGB32() & 0xFFFFFF).toRadixString(16).padLeft(6, '0').toUpperCase()}';
+
+  /// (etiqueta, acento, alto, texto encima) de un acento de la lista o de un
+  /// color propio. Los mismos cálculos que el escritorio (estilos.acento_de),
+  /// para que un mismo color se vea igual en las dos apps.
+  static (String, Color, Color, Color) acentoDe(String valor) {
+    final lista = acentos[valor];
+    if (lista != null) return lista;
+    var c = colorDe(valor);
+    if (c == null) return acentos['cian']!;
+    // demasiado oscuro no se ve sobre el fondo: se aclara lo justo
+    var vueltas = 0;
+    while (c!.computeLuminance() < 0.10 && vueltas++ < 30) {
+      c = Color.lerp(c, Colors.white, 0.12);
+    }
+    final alto = Color.lerp(c, Colors.white, 0.35)!;
+    final texto = c.computeLuminance() > 0.22 ? Color.lerp(c, Colors.black, 0.85)! : Colors.white;
+    return ('Tu color', c, alto, texto);
+  }
+
+  /// (etiqueta, [fondo, panel, superficie, superficie2, superficie3, borde]).
+  static (String, List<Color>) fondoDe(String valor) {
+    final lista = fondos[valor];
+    if (lista != null) return lista;
+    var c = colorDe(valor);
+    if (c == null) return fondos['oscuro']!;
+    // el fondo siempre oscuro (el texto de la app es claro)
+    var vueltas = 0;
+    while (c!.computeLuminance() > 0.035 && vueltas++ < 40) {
+      c = Color.lerp(c, Colors.black, 0.15);
+    }
+    final base = c;
+    return ('Tu fondo', [for (final t in [0.0, 0.035, 0.06, 0.09, 0.14, 0.12]) Color.lerp(base, Colors.white, t)!]);
+  }
+
   static void aplicar(String acento, String fondo) {
-    final a = acentos[acento] ?? acentos['cian']!;
+    final a = acentoDe(acento);
     C.acento = a.$2;
     C.acentoAlto = a.$3;
     C.acentoTexto = a.$4;
-    final f = (fondos[fondo] ?? fondos['oscuro']!).$2;
+    final f = fondoDe(fondo).$2;
     C.fondo = f[0];
     C.panel = f[1];
     C.superficie = f[2];
