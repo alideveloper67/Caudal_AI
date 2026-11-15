@@ -34,7 +34,8 @@ def pintar_secciones(ctx, layout, secciones, desde=0):
         mas = None
         if s.get("mas") and s["mas"].get("id"):
             m = s["mas"]
-            mas = (lambda m=m, t=s["titulo"]: ctx.navegar(
+            # el clic manda `checked` como primer argumento: no debe pisar `m`
+            mas = (lambda *_a, m=m, t=s["titulo"]: ctx.navegar(
                 {"pagina": "genero", "id": m["id"], "params": m.get("params"), "titulo": t}))
         if s.get("estilo") == "filas" and all(e.get("tipo") == "pista" for e in elementos):
             layout.addWidget(RejillaRapida(ctx, s["titulo"], elementos,

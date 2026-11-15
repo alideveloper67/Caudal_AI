@@ -24,7 +24,7 @@ from .panel_lateral import PanelLateral
 EXT_AUDIO = {".mp3", ".m4a", ".opus", ".ogg", ".flac", ".wav", ".aac", ".wma", ".webm"}
 EXT_VIDEO = {".mp4", ".mkv", ".mov", ".avi", ".webm", ".m4v", ".wmv", ".flv", ".ts"}
 
-SINGLETONS = ("descargas", "video")
+SINGLETONS = ("descargas", "video", "letra")
 
 
 class _Teclas(QObject):
@@ -396,6 +396,10 @@ class Ventana(QWidget):
         elif pag == "mensajes":
             from .paginas.mensajes import PaginaMensajes
             w = PaginaMensajes(self.ctx)
+        elif pag == "letra":
+            from .letra_viva import PaginaLetra
+            w = PaginaLetra(self.ctx)
+            w.volver.connect(self.cerrar_letra)
         elif pag == "video":
             from .video import VistaVideo
             w = VistaVideo(self.ctx)
@@ -461,6 +465,7 @@ class Ventana(QWidget):
     def _mostrar(self, destino, w):
         cambio = self.pila.currentWidget() is not w
         self.pila.setCurrentWidget(w)
+        self._ajustar_barra(destino.get("pagina"))
         if cambio and destino.get("pagina") != "video":
             from .componentes import aparecer
             aparecer(w)
@@ -477,8 +482,20 @@ class Ventana(QWidget):
         self.bt_mensajes.set_activo(pag == "mensajes" or self._sin_leer > 0, punto=self._sin_leer > 0)
         self.bt_descargas.set_activo(pag == "descargas", punto=False)
         self.bt_ajustes.set_activo(pag == "ajustes", punto=False)
+        if hasattr(self, "barra") and hasattr(self, "panel_der"):
+            self.barra.bt_letras.set_activo(pag == "letra" or (
+                self.panel_der.isVisible() and self.panel_der.actual == "letras"))
         titulo = getattr(w, "titulo", "") or ""
         self.setWindowTitle(f"{titulo} · {APP_NOMBRE}" if titulo and pag != "inicio" else APP_NOMBRE)
+
+    def _ajustar_barra(self, pagina=None):
+        """La vista de video trae sus propios controles: la barra de abajo se
+        oculta ahi para no mostrar dos reproductores a la vez."""
+        if not hasattr(self, "barra"):
+            return
+        if pagina is None:
+            pagina = self.historia[self.indice][0].get("pagina") if 0 <= self.indice < len(self.historia) else ""
+        self.barra.setVisible(not getattr(self, "en_completa", False) and pagina != "video")
 
     def _mirar_mensajes(self):
         from .paginas.mensajes import chat_de
@@ -555,6 +572,7 @@ class Ventana(QWidget):
         self.lateral.ir.connect(self.navegar)
         self.lateral.traer_lista.connect(self._traer_lista)
         self.barra.pidio_panel.connect(self.alternar_panel)
+        self.barra.pidio_letra.connect(self.alternar_letra)
         self.barra.pidio_video.connect(self._ver_video)
         self.barra.pidio_mini.connect(self.alternar_mini)
         self.barra.pidio_ecualizador.connect(self.abrir_ecualizador)
@@ -594,7 +612,7 @@ class Ventana(QWidget):
               and os.startfile(self.ajustes["carpeta"]))
         atajo("Ctrl+D", lambda: self.navegar({"pagina": "descargas"}))
         atajo("Ctrl+,", lambda: self.navegar({"pagina": "ajustes"}))
-        atajo("Ctrl+Shift+L", lambda: self.alternar_panel("letras"))
+        atajo("Ctrl+Shift+L", self.alternar_letra)
         atajo("Ctrl+Shift+Q", lambda: self.alternar_panel("cola"))
         atajo("Ctrl+M", self.alternar_mini)
         atajo("F11", self.alternar_completa)
@@ -658,6 +676,20 @@ class Ventana(QWidget):
             self.r.cambiar_modo("video")
         self.mostrar_video()
 
+    def alternar_letra(self):
+        """La letra a pantalla completa; si ya esta abierta, se vuelve."""
+        actual = self.historia[self.indice][0] if 0 <= self.indice < len(self.historia) else {}
+        if actual.get("pagina") == "letra":
+            self.cerrar_letra()
+        else:
+            self.navegar({"pagina": "letra"})
+
+    def cerrar_letra(self):
+        if self.indice > 0:
+            self.atras()
+        else:
+            self.navegar({"pagina": "inicio"})
+
     def alternar_panel(self, nombre):
         if nombre is None or (self.panel_der.isVisible() and self.panel_der.actual == nombre):
             self.panel_der.hide()
@@ -706,6 +738,7 @@ class Ventana(QWidget):
             maximizada, panel = getattr(self, "_antes_completa", (False, True))
             for w in (self.lateral, self.barra, self.centro.layout().itemAt(0).widget()):
                 w.show()
+            self._ajustar_barra()
             if panel:
                 self.panel_der.show()
             self.layout().setContentsMargins(8, 8, 8, 0)

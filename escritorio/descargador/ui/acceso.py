@@ -119,8 +119,8 @@ class _Campo(QWidget):
         return self.e.text()
 
 
-# Se enciende cuando Google este configurado en Supabase (cuentas.con_google ya funciona).
-CON_GOOGLE = False
+# El boton de Google aparece solo cuando Supabase tiene el proveedor activado
+# (se pregunta al abrir la ventana; ver _mostrar_google).
 
 
 class VentanaAcceso(QWidget):
@@ -258,9 +258,13 @@ class VentanaAcceso(QWidget):
             "QPushButton:pressed{background:#DADFE6;}")
         self.bt_google.clicked.connect(self._google)
         vc.addWidget(self.bt_google)
-        # entrar con Google: listo pero apagado hasta configurar el proveedor en Supabase
-        separador.setVisible(CON_GOOGLE)
-        self.bt_google.setVisible(CON_GOOGLE)
+        # entrar con Google: oculto hasta comprobar que Supabase lo tiene activado
+        self._sep_google = separador
+        separador.setVisible(False)
+        self.bt_google.setVisible(False)
+        from .. import nube
+        from ..hilos import en_segundo_plano
+        en_segundo_plano(nube.google_activo, ok=self._mostrar_google, dueno=self)
 
         pie = QLabel("La misma cuenta sirve en Windows y en Android. Lo que descargas "
                      "se queda en cada equipo.")
@@ -322,6 +326,11 @@ class VentanaAcceso(QWidget):
             self.cuentas.olvidar()
         self.cuentas.anotar_ultimo(cuenta["usuario"])
         self.entro.emit(cuenta, recordar)
+
+    def _mostrar_google(self, activo):
+        if activo:
+            self._sep_google.setVisible(True)
+            self.bt_google.setVisible(True)
 
     def _google(self):
         # mientras se espera al navegador, el mismo boton cancela

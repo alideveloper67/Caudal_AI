@@ -268,12 +268,7 @@ class _BarraLateral extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.fromLTRB(22, 20, 16, 22),
             child: Row(children: [
-              Container(
-                width: 34, height: 34,
-                decoration: BoxDecoration(borderRadius: BorderRadius.circular(9),
-                    gradient: LinearGradient(colors: [C.acento, C.violeta])),
-                child: const Icon(Icons.waves_rounded, size: 20, color: Colors.white),
-              ),
+              Image.asset('assets/logo/caudal.png', width: 34, height: 34, filterQuality: FilterQuality.high),
               const SizedBox(width: 10),
               const Text('Caudal', style: TextStyle(fontSize: 21, fontWeight: FontWeight.w900, letterSpacing: -0.5)),
             ]),

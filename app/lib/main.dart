@@ -431,15 +431,7 @@ class _Arranque extends StatelessWidget {
   Widget build(BuildContext context) => Scaffold(
         backgroundColor: C.fondo,
         body: Center(
-          child: Container(
-            width: 74, height: 74,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(22),
-              gradient: LinearGradient(colors: [C.acento, C.violeta],
-                  begin: Alignment.topLeft, end: Alignment.bottomRight),
-            ),
-            child: const Icon(Icons.waves_rounded, size: 40, color: Colors.white),
-          ),
+          child: Image.asset('assets/logo/caudal.png', width: 74, height: 74, filterQuality: FilterQuality.high),
         ),
       );
 }

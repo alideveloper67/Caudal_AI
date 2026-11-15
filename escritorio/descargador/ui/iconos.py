@@ -676,44 +676,18 @@ def flechas_qss():
 
 
 def icono_app(tam=64):
-    """Icono de Caudal: un boton de reproducir del que sale una corriente."""
-    from PySide6.QtGui import QLinearGradient
+    """Icono de Caudal: el logo (nota musical sobre una corriente de agua)."""
+    import base64
+
+    from .logo_png import LOGO_B64
 
     clave = ("app", tam)
     if clave in _CACHE:
         return _CACHE[clave]
-    pm, p = _lienzo(tam)
-    e = tam / 64.0
-    degradado = QLinearGradient(0, 0, tam, tam)
-    degradado.setColorAt(0.0, QColor("#3BE3F7"))
-    degradado.setColorAt(1.0, QColor("#2563EB"))
-    p.setPen(Qt.NoPen)
-    p.setBrush(degradado)
-    p.drawRoundedRect(QRectF(0, 0, tam, tam), 15 * e, 15 * e)
-
-    # triangulo de reproducir
-    p.setBrush(QColor("#FFFFFF"))
-    ruta = QPainterPath()
-    ruta.moveTo(22 * e, 14 * e)
-    ruta.lineTo(46 * e, 28.5 * e)
-    ruta.lineTo(22 * e, 43 * e)
-    ruta.closeSubpath()
-    p.drawPath(ruta)
-
-    # la corriente: dos ondas bajo el triangulo
-    lapiz = QPen(QColor(255, 255, 255, 235))
-    lapiz.setWidthF(3.6 * e)
-    lapiz.setCapStyle(Qt.RoundCap)
-    p.setPen(lapiz)
-    p.setBrush(Qt.NoBrush)
-    for dy, alfa in ((49, 235), (55.5, 150)):
-        lapiz.setColor(QColor(255, 255, 255, alfa))
-        p.setPen(lapiz)
-        onda = QPainterPath()
-        onda.moveTo(13 * e, dy * e)
-        onda.cubicTo(20 * e, (dy - 5) * e, 26 * e, (dy + 5) * e, 32 * e, dy * e)
-        onda.cubicTo(38 * e, (dy - 5) * e, 44 * e, (dy + 5) * e, 51 * e, dy * e)
-        p.drawPath(onda)
-    p.end()
+    if "_logo" not in _CACHE:
+        pm0 = QPixmap()
+        pm0.loadFromData(base64.b64decode("".join(LOGO_B64)), "PNG")
+        _CACHE["_logo"] = pm0
+    pm = _CACHE["_logo"].scaled(tam, tam, Qt.KeepAspectRatio, Qt.SmoothTransformation)
     _CACHE[clave] = pm
     return pm

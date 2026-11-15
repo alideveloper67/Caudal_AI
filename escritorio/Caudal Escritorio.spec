@@ -3,7 +3,7 @@ from PyInstaller.utils.hooks import collect_all
 
 datas = [('bin', 'bin'), ('descargador/legal', 'descargador/legal')]
 binaries = []
-hiddenimports = ['descargador.juntos', 'descargador.ui.paginas.juntos', 'descargador.mixes', 'descargador.ui.paginas.resumen', 'descargador.descarga_inteligente', 'websocket', 'descargador.ui.actualizador', 'descargador.ui.dialogo_listas', 'descargador.conversion', 'descargador.listas',
+hiddenimports = ['descargador.juntos', 'descargador.ui.letra_viva', 'descargador.registro_fallos', 'descargador.ui.paginas.juntos', 'descargador.mixes', 'descargador.ui.paginas.resumen', 'descargador.descarga_inteligente', 'websocket', 'descargador.ui.actualizador', 'descargador.ui.dialogo_listas', 'descargador.conversion', 'descargador.listas',
                  'descargador.ui.paginas.inicio', 'descargador.ui.paginas.buscar', 'descargador.ui.paginas.explorar',
                  'descargador.ui.paginas.artista', 'descargador.ui.paginas.coleccion', 'descargador.ui.paginas.biblioteca',
                  'descargador.ui.paginas.descargas', 'descargador.ui.paginas.ajustes', 'descargador.ui.video',

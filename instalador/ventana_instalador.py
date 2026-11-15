@@ -24,29 +24,14 @@ ACENTO = "#22D3EE"
 
 
 def gota(tam=56):
-    """El icono de la marca, dibujado sin depender de archivos."""
-    pm = QPixmap(tam, tam)
-    pm.fill(Qt.transparent)
-    p = QPainter(pm)
-    p.setRenderHint(QPainter.Antialiasing, True)
-    p.setPen(Qt.NoPen)
-    p.setBrush(QColor(ACENTO))
-    p.drawRoundedRect(0, 0, tam, tam, tam * 0.24, tam * 0.24)
+    """El logo de Caudal, incrustado en el codigo (sin depender de archivos)."""
+    import base64
 
-    e = tam / 64.0
-    lapiz = QPen(QColor("#04202A"))
-    lapiz.setWidthF(5.4 * e)
-    lapiz.setCapStyle(Qt.RoundCap)
-    lapiz.setJoinStyle(Qt.RoundJoin)
-    p.setPen(lapiz)
-    p.setBrush(Qt.NoBrush)
-    from PySide6.QtCore import QPointF
-    p.drawLine(QPointF(32 * e, 14 * e), QPointF(32 * e, 38 * e))
-    p.drawPolyline([QPointF(21 * e, 28 * e), QPointF(32 * e, 39.5 * e),
-                    QPointF(43 * e, 28 * e)])
-    p.drawLine(QPointF(18 * e, 48 * e), QPointF(46 * e, 48 * e))
-    p.end()
-    return pm
+    from logo_png import LOGO_B64
+
+    pm = QPixmap()
+    pm.loadFromData(base64.b64decode("".join(LOGO_B64)), "PNG")
+    return pm.scaled(tam, tam, Qt.KeepAspectRatio, Qt.SmoothTransformation)
 
 
 class Trabajo(QThread):

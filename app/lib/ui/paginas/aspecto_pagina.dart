@@ -26,6 +26,8 @@ class _AspectoPaginaState extends State<AspectoPagina> {
         : (Aspecto.colorDe(a.texto('acento')) ?? Aspecto.acentoDe(a.texto('acento')).$2);
     final elegido = await showModalBottomSheet<Color>(
       context: context,
+      // por encima del mini reproductor y de la barra de abajo
+      useRootNavigator: true,
       isScrollControlled: true,
       useSafeArea: true,
       backgroundColor: C.panel,
@@ -150,9 +152,13 @@ class _SelectorColorState extends State<SelectorColor> {
     final hex = Aspecto.hexDe(_color);
     final acento = widget.fondo ? (C.acento, C.acentoTexto) : (Aspecto.acentoDe(hex).$2, Aspecto.acentoDe(hex).$4);
     final capas = widget.fondo ? Aspecto.fondoDe(hex).$2 : [C.fondo, C.panel, C.superficie, C.superficie2, C.superficie3, C.borde];
+    // lo de arriba se desplaza; Cancelar / Usar este quedan siempre fijos abajo
     return Padding(
       padding: EdgeInsets.fromLTRB(Esp.lado, 0, Esp.lado, Esp.lado + MediaQuery.viewInsetsOf(context).bottom),
       child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        Flexible(
+          child: SingleChildScrollView(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
         Text(widget.fondo ? 'Tu fondo' : 'Tu color',
             style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w900)),
         const SizedBox(height: 4),
@@ -223,6 +229,9 @@ class _SelectorColorState extends State<SelectorColor> {
           const SizedBox(width: 8),
           Text(hex, style: const TextStyle(fontWeight: FontWeight.w700, fontFamily: 'monospace')),
         ]),
+            ]),
+          ),
+        ),
         const SizedBox(height: Esp.m),
         Row(children: [
           Expanded(

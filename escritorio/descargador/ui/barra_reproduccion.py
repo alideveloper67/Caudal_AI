@@ -34,6 +34,7 @@ class EnlaceTexto(QPushButton):
 
 class BarraReproduccion(QFrame):
     pidio_panel = Signal(str)         # sonando | cola | letras
+    pidio_letra = Signal()            # la letra a pantalla completa
     pidio_video = Signal()
     pidio_mini = Signal()
     pidio_ecualizador = Signal()
@@ -142,8 +143,8 @@ class BarraReproduccion(QFrame):
         self.bt_video = BotonIcono("video", 18, "Ver el video", 32)
         self.bt_video.clicked.connect(self._video)
         der.addWidget(self.bt_video)
-        self.bt_letras = BotonIcono("letras", 18, "Letra", 32)
-        self.bt_letras.clicked.connect(lambda: self.pidio_panel.emit("letras"))
+        self.bt_letras = BotonIcono("letras", 18, "Letra  (Ctrl+Mayús+L)", 32)
+        self.bt_letras.clicked.connect(self.pidio_letra.emit)
         der.addWidget(self.bt_letras)
         self.bt_cola = BotonIcono("cola", 18, "Cola", 32)
         self.bt_cola.clicked.connect(lambda: self.pidio_panel.emit("cola"))

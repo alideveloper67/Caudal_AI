@@ -1,8 +1,8 @@
 # Política de privacidad de Caudal
 
-Versión 2026-11-14 · Vigente desde el 14 de noviembre de 2026
+Versión 2026-11-15 · Vigente desde el 15 de noviembre de 2026
 
-Esta política explica qué datos usa Caudal (la app para Android, iPhone y Windows), para qué, con quién se comparten y cómo puedes decidir sobre ellos. Está escrita para cumplir la Ley N.º 29733 de Protección de Datos Personales del Perú y su reglamento, y las normas de Google Play y del App Store.
+Esta política explica qué datos usa Caudal (la app para Android y Windows), para qué, con quién se comparten y cómo puedes decidir sobre ellos. Está escrita para cumplir la Ley N.º 29733 de Protección de Datos Personales del Perú y su reglamento, y las normas de Google Play.
 
 ## 1. Quién es responsable
 
@@ -11,13 +11,20 @@ El responsable de tus datos es el titular de Caudal. Puedes contactarnos en la p
 ## 2. Qué datos usamos
 
 **Los que nos das al crear la cuenta**
-- Tu usuario y tu nombre.
+- Tu usuario y tu nombre (con Google, tu correo y tu nombre de Google).
 - Tu fecha de nacimiento, para comprobar que tienes la edad mínima (punto 9) y, solo si das tu permiso, para estadísticas anónimas por rango de edad.
 - Tu país.
 - Tu género, si quieres decirlo (puedes elegir «Prefiero no decirlo»).
 - Tu contraseña. No la vemos: la guarda cifrada nuestro proveedor de cuentas (Supabase).
 - Tu aceptación de estos textos, con la versión y la fecha.
 - Si quieres o no compartir datos de uso anónimos (punto 5).
+
+**Si entras con Google («Continuar con Google»)**
+- Recibimos de Google tu **correo electrónico**, tu **nombre** y el identificador de tu cuenta de Google. No recibimos tu contraseña de Google ni acceso a tu Gmail, tus contactos, tu Drive ni a ningún otro servicio de Google.
+- Los usamos solo para crear y reconocer tu cuenta de Caudal. No los vendemos ni los usamos para publicidad.
+- El uso que Caudal haga de la información recibida de las API de Google se ajusta a la Política de datos de usuario de los servicios de las API de Google (https://developers.google.com/terms/api-services-user-data-policy), incluidos los requisitos de Uso Limitado.
+- Aun así, te pedimos tu fecha de nacimiento, tu país y que aceptes estos textos la primera vez que entras.
+- Puedes quitar el acceso de Caudal a tu cuenta de Google cuando quieras en myaccount.google.com/permissions.
 
 **Los que se generan al usar Caudal**
 - Tu biblioteca: canciones que te gustan, tus listas, lo que guardas y tus ajustes.
@@ -46,6 +53,7 @@ La base para usar tus datos es tu consentimiento y que son necesarios para darte
 Para funcionar, Caudal se apoya en estos servicios. Algunos están fuera del Perú (por ejemplo, en Estados Unidos), por lo que hay transferencia internacional de datos; solo usamos proveedores con medidas de seguridad adecuadas:
 
 - **Supabase** (cuentas y base de datos): guarda tu cuenta, tu biblioteca, tu historial y tus mensajes.
+- **Google (Acceso con Google)**: solo si eliges entrar con tu cuenta de Google; ver punto 2.
 - **YouTube / YouTube Music** (Google): de ahí sale la música y los videos. Al reproducir o buscar, tu dispositivo se conecta con ellos.
 - **LRCLIB**: letras de canciones (se envía el título y el artista).
 - **Google Translate y MyMemory**: traducción de letras (se envía solo el texto de la letra).

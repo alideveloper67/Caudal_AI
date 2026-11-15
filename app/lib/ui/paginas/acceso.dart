@@ -28,8 +28,9 @@ class _AccesoPaginaState extends State<AccesoPagina>
   static const _canal = MethodChannel('caudal/compartido');
   static const _claveVerificador = 'google.verificador';
 
-  /// El boton de Google se enciende cuando el proveedor este configurado en Supabase.
-  static const _conGoogle = false;
+  /// El boton de Google aparece solo cuando Supabase tiene el proveedor activado
+  /// (se pregunta al abrir la pantalla; sin respuesta, no se muestra).
+  bool _conGoogle = false;
   bool _esperandoGoogle = false;
   final _datos = DatosPerfil();
   bool _acepta = false;
@@ -49,6 +50,9 @@ class _AccesoPaginaState extends State<AccesoPagina>
   @override
   void initState() {
     super.initState();
+    Nube.googleActivo().then((si) {
+      if (mounted && si) setState(() => _conGoogle = true);
+    });
     WidgetsBinding.instance.addObserver(this);
     _canal.setMethodCallHandler((llamada) async {
       if (llamada.method != 'compartido') return;
@@ -239,16 +243,7 @@ class _AccesoPaginaState extends State<AccesoPagina>
                 child: AutofillGroup(
                   child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
                     Entrada(child: Center(
-                      child: Container(
-                        width: 74, height: 74,
-                        decoration: BoxDecoration(
-                          borderRadius: BorderRadius.circular(22),
-                          gradient: LinearGradient(colors: [C.acento, C.violeta],
-                              begin: Alignment.topLeft, end: Alignment.bottomRight),
-                          boxShadow: const [BoxShadow(color: Color(0x5522D3EE), blurRadius: 30, offset: Offset(0, 10))],
-                        ),
-                        child: const Icon(Icons.waves_rounded, size: 40, color: Colors.white),
-                      ),
+                      child: Image.asset('assets/logo/caudal.png', width: 74, height: 74, filterQuality: FilterQuality.high),
                     )),
                     const SizedBox(height: 18),
                     const Entrada(indice: 1, child: Text('Caudal', textAlign: TextAlign.center,
@@ -392,7 +387,7 @@ class _AccesoPaginaState extends State<AccesoPagina>
                             : Text(_registro ? 'Crear mi cuenta' : 'Entrar'),
                       ),
                     )),
-                    // entrar con Google: listo pero apagado por ahora (ver _conGoogle)
+                    // entrar con Google: solo si Supabase lo tiene activado (ver _conGoogle)
                     if (_conGoogle) ...[
                     const SizedBox(height: 14),
                     Row(children: [

@@ -79,6 +79,7 @@ def construir(version):
         "--add-data", f"{VERSION_TXT};.",
         "--paths", AQUI,
         "--hidden-import", "instalador",
+        "--hidden-import", "logo_png",
         "--exclude-module", "tkinter",
         "--exclude-module", "matplotlib",
         "--exclude-module", "numpy",

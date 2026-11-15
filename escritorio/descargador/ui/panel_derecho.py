@@ -1,20 +1,19 @@
 # -*- coding: utf-8 -*-
 """Panel de la derecha: lo que suena, la cola y la letra sincronizada."""
 
-import bisect
-
-from PySide6.QtCore import QEasingCurve, QPropertyAnimation, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFont
+from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea,
                                QVBoxLayout, QWidget)
 
-from .. import catalogo, traductor
+from .. import catalogo
 from ..hilos import en_segundo_plano
-from . import iconos, imagenes
+from . import iconos
 from .componentes import BotonIcono, FilaPista, Portada, _borrar_layout, fuente
 from .estilos import C
+from .letra_viva import CACHE_LETRAS, LienzoLetra
 
-_CACHE_LETRAS = {}
+_CACHE_LETRAS = CACHE_LETRAS  # compartida con la pagina de la letra
 _CACHE_ARTISTAS = {}
 
 
@@ -361,232 +360,11 @@ class VistaCola(QScrollArea):
         self.v.addWidget(fila)
 
 
-class _Linea(QLabel):
-    pulsada = Signal(int)
+class VistaLetras(LienzoLetra):
+    """La letra viva en el panel lateral (version compacta de la pagina)."""
 
-    def __init__(self, texto, ms, padre=None):
-        super().__init__(texto or "♪", padre)
-        self.ms = ms
-        self.setWordWrap(True)
-        self.setCursor(Qt.PointingHandCursor)
-        self.estado = None
-
-    def mousePressEvent(self, e):
-        if e.button() == Qt.LeftButton:
-            self.pulsada.emit(self.ms)
-
-
-class VistaLetras(QScrollArea):
     def __init__(self, ctx, padre=None):
-        super().__init__(padre)
-        self.ctx = ctx
-        self.setObjectName("lienzo")
-        self.setWidgetResizable(True)
-        self.setFrameShape(QFrame.NoFrame)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.interior = QWidget()
-        self.interior.setAutoFillBackground(True)
-        self.v = QVBoxLayout(self.interior)
-        self.v.setContentsMargins(22, 22, 22, 140)
-        self.v.setSpacing(14)
-        self.setWidget(self.interior)
-        self.lineas = []
-        self.tiempos = []
-        self.actual = -1
-        self.clave = None
-        self.color = QColor("#2A3240")
-        self.anim = QPropertyAnimation(self.verticalScrollBar(), b"value", self)
-        self.anim.setDuration(450)
-        self.anim.setEasingCurve(QEasingCurve.OutCubic)
-        self._ultimo_toque = 0
-        self.verticalScrollBar().sliderPressed.connect(self._toque)
-        r = ctx.reproductor
-        r.pista_cambio.connect(self._pista)
-        r.posicion_cambio.connect(self._posicion)
-        self._mensaje("Pon algo a sonar para ver su letra.")
-
-    def _toque(self):
-        import time
-        self._ultimo_toque = time.time()
-
-    def wheelEvent(self, e):
-        self._toque()
-        super().wheelEvent(e)
-
-    def _fondo(self, color):
-        c = QColor(color)
-        h, s, v, _a = c.getHsv()
-        # un tono vivo y medio: la linea actual (blanca) y las que vienen
-        # (oscuras) se leen las dos, como en Spotify
-        c.setHsv(max(0, h), min(200, max(90, s)), 165)
-        self.color = c
-        self.interior.setStyleSheet(f"background:{c.name()};")
-
-    def _mensaje(self, texto):
-        _borrar_layout(self.v)
-        self.lineas, self.tiempos, self.actual = [], [], -1
-        et = QLabel(texto)
-        et.setWordWrap(True)
-        et.setAlignment(Qt.AlignCenter)
-        et.setStyleSheet("font-size:16px;font-weight:700;color:rgba(255,255,255,0.85);")
-        self.v.addSpacing(60)
-        self.v.addWidget(et)
-        self.v.addStretch(1)
-
-    def showEvent(self, e):
-        super().showEvent(e)
-        p = self.ctx.reproductor.actual
-        if p and (p.get("clave") or p.get("video_id")) != self.clave:
-            self._pista(p)
-
-    def _pista(self, p):
-        if not p:
-            self.clave = None
-            self._mensaje("Pon algo a sonar para ver su letra.")
-            return
-        clave = p.get("clave") or p.get("video_id")
-        if not self.isVisible():
-            return
-        if clave == self.clave:
-            return
-        self.clave = clave
-        url = p.get("miniatura") or ""
-        if url:
-            imagenes.imagen(url, lambda img, c=clave: self.clave == c and self._fondo(
-                imagenes.color_dominante(img)))
-        if clave in _CACHE_LETRAS:
-            self._pintar(_CACHE_LETRAS[clave])
-            return
-        self._mensaje("Buscando la letra…")
-        en_segundo_plano(catalogo.letras, p, ok=lambda d, c=clave: self._llegaron(c, d),
-                         error=lambda _e, c=clave: self.clave == c and self._mensaje(
-                             "No se pudo conseguir la letra."), dueno=self)
-
-    def _llegaron(self, clave, datos):
-        _CACHE_LETRAS[clave] = datos
-        if clave == self.clave:
-            self._pintar(datos)
-
-    def _boton_traducir(self):
-        on = bool(self.ctx.ajustes["traducir_letra"])
-        b = QPushButton("  Traducir")
-        b.setIcon(iconos.icono("idioma", 15, "#06070A" if on else "#FFFFFF"))
-        b.setCursor(Qt.PointingHandCursor)
-        b.setToolTip("Quitar la traducción" if on else "Traducir la letra")
-        b.setStyleSheet(
-            "QPushButton{border:none;border-radius:13px;padding:5px 12px;font-size:12.5px;"
-            "font-weight:800;" + ("background:#FFFFFF;color:#06070A;}" if on else
-                                  "background:rgba(255,255,255,0.16);color:#FFFFFF;}"))
-        b.clicked.connect(self._alternar_traduccion)
-        fila = QHBoxLayout()
-        fila.addStretch(1)
-        fila.addWidget(b)
-        return fila
-
-    def _alternar_traduccion(self):
-        self.ctx.ajustes["traducir_letra"] = not self.ctx.ajustes["traducir_letra"]
-        self.ctx.ajustes.guardar()
-        if self.clave in _CACHE_LETRAS:
-            self._pintar(_CACHE_LETRAS[self.clave])
-
-    def _pintar(self, datos):
-        _borrar_layout(self.v)
-        self.lineas, self.tiempos, self.actual = [], [], -1
-        self.traducciones = []
-        textos = []
-        if datos.get("sincronizada") and datos.get("lineas"):
-            self.v.addLayout(self._boton_traducir())
-            for ms, texto in datos["lineas"]:
-                et = _Linea(texto, ms)
-                et.pulsada.connect(lambda ms: self.ctx.reproductor.buscar(ms / 1000))
-                self._estilo(et, "futura")
-                self.v.addWidget(et)
-                self.lineas.append(et)
-                self.tiempos.append(ms)
-                textos.append(texto or "")
-                tr = QLabel("")
-                tr.setWordWrap(True)
-                tr.hide()
-                self.v.addWidget(tr)
-                self.traducciones.append(tr)
-        elif datos.get("texto"):
-            self.v.addLayout(self._boton_traducir())
-            nota = QLabel("Esta letra no está sincronizada.")
-            nota.setStyleSheet("color:rgba(255,255,255,0.6);font-size:12px;")
-            self.v.addWidget(nota)
-            for texto in datos["texto"].split("\n"):
-                et = QLabel(texto)
-                et.setWordWrap(True)
-                et.setTextInteractionFlags(Qt.TextSelectableByMouse)
-                et.setStyleSheet("font-size:19px;font-weight:700;color:#FFFFFF;")
-                self.v.addWidget(et)
-                textos.append(texto)
-                tr = QLabel("")
-                tr.setWordWrap(True)
-                tr.hide()
-                tr.setStyleSheet("font-size:15px;font-weight:600;color:rgba(255,255,255,0.72);")
-                self.v.addWidget(tr)
-                self.traducciones.append(tr)
-        else:
-            self._mensaje("No hay letra para esta canción.\n\nA veces aparece con el nombre "
-                          "exacto del artista; prueba desde el álbum oficial.")
-            return
-        if datos.get("fuente"):
-            f = QLabel(f"Letra de {datos['fuente']}")
-            f.setStyleSheet("color:rgba(255,255,255,0.55);font-size:11.5px;margin-top:20px;")
-            self.v.addWidget(f)
-        self.v.addStretch(1)
-        self._posicion(self.ctx.reproductor._posicion)
-        if self.ctx.ajustes["traducir_letra"] and textos:
-            clave = self.clave
-            en_segundo_plano(traductor.traducir, clave, textos,
-                             ok=lambda t, c=clave: self._llego_traduccion(c, t), dueno=self)
-
-    def _llego_traduccion(self, clave, t):
-        if clave != self.clave or not isinstance(t, list):
-            return  # otra cancion, ya en español o sin conexion
-        for tr, texto in zip(self.traducciones, t):
-            if texto:
-                tr.setText(texto)
-                tr.show()
-        for et in self.lineas:  # recolorea tambien la traduccion de cada linea
-            estado, et.estado = et.estado, None
-            self._estilo(et, estado or "futura")
-
-    def _estilo(self, et, estado):
-        if et.estado == estado:
-            return
-        et.estado = estado
-        color = {"actual": "#FFFFFF", "pasada": "rgba(255,255,255,0.62)",
-                 "futura": "rgba(6,7,10,0.82)"}[estado]
-        et.setStyleSheet(f"font-size:22px;font-weight:800;color:{color};background:transparent;")
-        # su traduccion, debajo, mas pequena y del mismo tono
-        i = self.lineas.index(et) if et in self.lineas else -1
-        trs = getattr(self, "traducciones", [])
-        if 0 <= i < len(trs):
-            tono = {"actual": "rgba(255,255,255,0.85)", "pasada": "rgba(255,255,255,0.5)",
-                    "futura": "rgba(6,7,10,0.62)"}[estado]
-            trs[i].setStyleSheet(f"font-size:16px;font-weight:600;color:{tono};"
-                                 "background:transparent;")
-
-    def _posicion(self, seg):
-        if not self.tiempos or not self.isVisible():
-            return
-        ms = seg * 1000 + 250
-        i = bisect.bisect_right(self.tiempos, ms) - 1
-        if i == self.actual:
-            return
-        self.actual = i
-        for j, et in enumerate(self.lineas):
-            self._estilo(et, "actual" if j == i else ("pasada" if j < i else "futura"))
-        import time
-        if i >= 0 and time.time() - self._ultimo_toque > 4:
-            et = self.lineas[i]
-            destino = max(0, et.y() - self.viewport().height() // 3)
-            self.anim.stop()
-            self.anim.setStartValue(self.verticalScrollBar().value())
-            self.anim.setEndValue(destino)
-            self.anim.start()
+        super().__init__(ctx, compacto=True, padre=padre)
 
 
 class PanelDerecho(QFrame):

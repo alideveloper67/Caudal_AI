@@ -106,6 +106,19 @@ class Nube {
 
   // ------------------------------------------------------------ Google
 
+  /// ¿Tiene Supabase activado el acceso con Google? El boton solo aparece si si:
+  /// asi no hay un boton roto mientras el proveedor no este configurado.
+  static Future<bool> googleActivo() async {
+    try {
+      final r = await _peticion('GET', '/auth/v1/settings');
+      if (r.statusCode != 200) return false;
+      final d = jsonDecode(r.body);
+      return d is Map && d['external'] is Map && (d['external'] as Map)['google'] == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   /// A donde vuelve el navegador despues de elegir la cuenta de Google.
   static const vueltaGoogle = 'caudal://acceso';
 

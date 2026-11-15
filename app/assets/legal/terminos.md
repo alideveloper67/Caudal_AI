@@ -1,8 +1,8 @@
 # Términos y condiciones de Caudal
 
-Versión 2026-11-14 · Vigentes desde el 14 de noviembre de 2026
+Versión 2026-11-15 · Vigentes desde el 15 de noviembre de 2026
 
-Al crear una cuenta o usar Caudal (la app para Android, iPhone y Windows) aceptas estos términos. Léelos con calma; si no estás de acuerdo, no uses la app.
+Al crear una cuenta o usar Caudal (la app para Android y Windows) aceptas estos términos. Léelos con calma; si no estás de acuerdo, no uses la app.
 
 ## 1. Qué es Caudal
 

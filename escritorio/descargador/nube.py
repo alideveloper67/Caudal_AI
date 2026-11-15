@@ -101,6 +101,16 @@ def _motivo_sin_conexion(e):
 
 # ---------------------------------------------------------------- cuentas
 
+
+def google_activo():
+    """¿Tiene Supabase activado el acceso con Google? Sin respuesta, no."""
+    try:
+        r = _peticion("GET", "/auth/v1/settings")
+        return r.status_code == 200 and bool((r.json().get("external") or {}).get("google"))
+    except Exception:
+        return False
+
+
 def usuario_libre(usuario):
     r = _peticion("POST", "/rest/v1/rpc/usuario_libre", json={"p_usuario": usuario})
     if r.status_code != 200:

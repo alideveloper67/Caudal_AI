@@ -9,7 +9,7 @@ todos se les pide aceptarlos de nuevo.
 import os
 from datetime import date
 
-VERSION = "2026-11-14"
+VERSION = "2026-11-15"
 EDAD_MINIMA = 14     # sin permiso de la madre, el padre o un tutor (Ley 29733, Perú)
 
 PAISES = {

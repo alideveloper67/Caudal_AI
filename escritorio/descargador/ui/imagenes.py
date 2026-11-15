@@ -118,11 +118,27 @@ class _Bajada(QRunnable):
         _senales.listo.emit(self.url, img)
 
 
+# las originales se guardan por peso, no por cantidad: una miniatura de
+# YouTube a 1280x720 ocupa ~3,7 MB en memoria, y 260 de ellas eran casi 1 GB.
+# Las que salen se vuelven a leer del disco (no de internet) si hacen falta.
+TOPE_ORIGINALES = 160 * 1024 * 1024
+_peso = {"total": 0}
+
+
+def _guardar_original(url, img):
+    viejo = _IMAGENES.pop(url, None)
+    if viejo is not None:
+        _peso["total"] -= viejo.sizeInBytes()
+    _IMAGENES[url] = img
+    _peso["total"] += img.sizeInBytes()
+    while _peso["total"] > TOPE_ORIGINALES and len(_IMAGENES) > 1:
+        _u, sale = _IMAGENES.popitem(last=False)
+        _peso["total"] -= sale.sizeInBytes()
+
+
 def _al_bajar(url, img):
     if not img.isNull():
-        _IMAGENES[url] = img
-        while len(_IMAGENES) > 260:
-            _IMAGENES.popitem(last=False)
+        _guardar_original(url, img)
     with _cerrojo:
         callbacks = _esperando.pop(url, [])
     for cb in callbacks:
@@ -185,6 +201,25 @@ def formar(img, ancho, alto, forma="cuadrada", radio=6):
     return destino
 
 
+TOPE_RECORTES = 120 * 1024 * 1024
+_peso_recortes = {"total": 0}
+
+
+def _bytes(pm):
+    return pm.width() * pm.height() * 4
+
+
+def _guardar_recorte(clave, pm):
+    viejo = _MEMORIA.pop(clave, None)
+    if viejo is not None:
+        _peso_recortes["total"] -= _bytes(viejo)
+    _MEMORIA[clave] = pm
+    _peso_recortes["total"] += _bytes(pm)
+    while (_peso_recortes["total"] > TOPE_RECORTES or len(_MEMORIA) > 1500) and len(_MEMORIA) > 1:
+        _c, sale = _MEMORIA.popitem(last=False)
+        _peso_recortes["total"] -= _bytes(sale)
+
+
 def pedir(url, ancho, alto, forma="cuadrada", radio=6, callback=None):
     """Devuelve el QPixmap si ya esta en memoria; si no, llama a callback luego."""
     clave = (url, ancho, alto, forma, radio)
@@ -198,16 +233,14 @@ def pedir(url, ancho, alto, forma="cuadrada", radio=6, callback=None):
         if img.isNull():
             return None
         pm = formar(img, ancho, alto, forma, radio)
-        _MEMORIA[clave] = pm
+        _guardar_recorte(clave, pm)
         return pm
 
     def listo(img):
         if img is None or img.isNull():
             return
         pm = formar(img, ancho, alto, forma, radio)
-        _MEMORIA[clave] = pm
-        while len(_MEMORIA) > 900:
-            _MEMORIA.popitem(last=False)
+        _guardar_recorte(clave, pm)
         if callback:
             callback(pm)
 

@@ -10,7 +10,7 @@ import 'nube.dart';
 class Legal {
   Legal._();
 
-  static const version = '2026-11-14';
+  static const version = '2026-11-15';
 
   /// Edad mínima sin permiso de la madre, el padre o un tutor (Ley 29733, Perú).
   static const edadMinima = 14;

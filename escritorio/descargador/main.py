@@ -44,6 +44,14 @@ def main():
     if _avisar_a_la_abierta(argumentos):
         return
 
+    # lo que falle queda escrito en fallos.log (en el .exe no hay consola)
+    try:
+        from descargador import registro_fallos
+        from descargador.config import carpeta_datos
+        registro_fallos.activar(carpeta_datos())
+    except Exception:  # noqa: BLE001
+        pass
+
     from descargador.config import APP_NOMBRE, Ajustes
     from descargador import catalogo
     from descargador.coleccion import Coleccion
