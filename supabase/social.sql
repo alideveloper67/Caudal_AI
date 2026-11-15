@@ -28,6 +28,7 @@ alter table public.perfiles add column if not exists frase text not null default
 alter table public.perfiles add column if not exists color_perfil text;
 alter table public.perfiles add column if not exists perfil_publico boolean not null default false;
 alter table public.perfiles add column if not exists mostrar_top boolean not null default true;
+alter table public.perfiles add column if not exists banner_url text;   -- imagen de fondo: <mi id>/banner.jpg
 
 alter table public.perfiles drop constraint if exists perfil_limites;
 alter table public.perfiles add constraint perfil_limites check (
@@ -38,6 +39,7 @@ alter table public.perfiles add constraint perfil_limites check (
     and (color_perfil is null or color_perfil ~ '^#[0-9A-Fa-f]{6}$')
     and (cancion_fav is null or pg_column_size(cancion_fav) < 3000)
     and (foto_url is null or foto_url like id::text || '/%')
+    and (banner_url is null or banner_url like id::text || '/%')
 );
 
 -- Número de usuario: el orden de llegada, que nunca se reutiliza ni cambia aunque alguien borre su cuenta.
@@ -96,6 +98,10 @@ create policy "avatar: subir el mio" on storage.objects for insert to authentica
     with check (bucket_id = 'avatares' and (storage.foldername(name))[1] = auth.uid()::text);
 drop policy if exists "avatar: cambiar el mio" on storage.objects;
 create policy "avatar: cambiar el mio" on storage.objects for update to authenticated
+    using (bucket_id = 'avatares' and (storage.foldername(name))[1] = auth.uid()::text);
+-- Sin esta política la subida falla con «no tienes permiso»: el almacén lee la fila al guardarla.
+drop policy if exists "avatar: ver el mio" on storage.objects;
+create policy "avatar: ver el mio" on storage.objects for select to authenticated
     using (bucket_id = 'avatares' and (storage.foldername(name))[1] = auth.uid()::text);
 drop policy if exists "avatar: borrar el mio" on storage.objects;
 create policy "avatar: borrar el mio" on storage.objects for delete to authenticated
@@ -357,14 +363,33 @@ create table if not exists public.canciones_subidas (
     ruta      text not null,              -- "<usuario>/<archivo>" en el bucket musica
     portada   text not null,              -- ruta de la carátula: es obligatoria
     tamano    bigint not null default 0,
-    estado    text not null default 'publicada' check (estado in ('publicada', 'revision', 'retirada')),
+    estado    text not null default 'pendiente' check (estado in ('pendiente', 'publicada', 'revision', 'retirada')),
+    nota      text not null default '',   -- motivo si se rechaza
     escuchas  int not null default 0,
     creado    timestamptz not null default now(),
     check (ruta like user_id::text || '/%'),
     check (portada like user_id::text || '/%')
 );
+-- (si la tabla ya existía con los tres estados de antes)
+alter table public.canciones_subidas drop constraint if exists canciones_subidas_estado_check;
+alter table public.canciones_subidas add constraint canciones_subidas_estado_check
+    check (estado in ('pendiente', 'publicada', 'revision', 'retirada'));
+alter table public.canciones_subidas add column if not exists nota text not null default '';
 create index if not exists subidas_usuario on public.canciones_subidas (user_id, estado, creado desc);
 create index if not exists subidas_creado on public.canciones_subidas (estado, creado desc);
+
+-- Quien revisa la música que sube la gente. Solo se añaden desde la base: ninguna política, nadie la lee desde la app.
+create table if not exists public.moderadores (
+    user_id  uuid primary key references auth.users (id) on delete cascade,
+    creado   timestamptz not null default now()
+);
+alter table public.moderadores enable row level security;
+
+create or replace function public.puede_publicar(p_id uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+    select exists (select 1 from public.moderadores where user_id = p_id)
+        or exists (select 1 from public.titulos_especiales where user_id = p_id and titulo = 'fundador_caudal');
+$$;
 
 -- ---------------------------------------------------------------- me gusta a perfiles
 create table if not exists public.likes_perfil (
@@ -411,7 +436,7 @@ create function public.explorar_perfiles(p_busqueda text default '', p_limite in
                                          p_desde int default 0)
 returns table (id uuid, usuario text, nombre text, foto_url text, bio text,
                cancion_fav jsonb, color_perfil text, relacion text, likes int, di_like boolean,
-               num_subidas int, es_artista boolean, fundador boolean, fundador_caudal boolean, titulos jsonb)
+               num_subidas int, es_artista boolean, fundador boolean, fundador_caudal boolean, titulos jsonb, banner_url text)
 language sql stable security definer set search_path = public as $$
     select p.id, p.usuario, p.nombre, p.foto_url, p.bio, p.cancion_fav, p.color_perfil,
            public.relacion_con(p.id),
@@ -422,7 +447,8 @@ language sql stable security definer set search_path = public as $$
            coalesce(p.numero <= 100, false),
            exists (select 1 from public.titulos_especiales te where te.user_id = p.id and te.titulo = 'fundador_caudal'),
            coalesce((select jsonb_agg(jsonb_build_object('clave', te.titulo, 'nombre', te.nombre) order by te.creado)
-                       from public.titulos_especiales te where te.user_id = p.id), '[]'::jsonb)
+                       from public.titulos_especiales te where te.user_id = p.id), '[]'::jsonb),
+           p.banner_url
     from public.perfiles p
     where auth.uid() is not null
       and p.id <> auth.uid()
@@ -474,7 +500,7 @@ begin
     visible := p.id = yo or rel = 'amigo' or (p.perfil_publico and public.es_mayor(p.id));
     if not visible then
         return jsonb_build_object('id', p.id, 'usuario', p.usuario, 'nombre', p.nombre,
-                                  'foto_url', p.foto_url, 'relacion', rel, 'privado', true,
+                                  'foto_url', p.foto_url, 'banner_url', p.banner_url, 'relacion', rel, 'privado', true,
                                   'fundador', coalesce(p.numero <= 100, false), 'numero', p.numero,
                                   'fundador_caudal', exists (select 1 from public.titulos_especiales te
                                       where te.user_id = p.id and te.titulo = 'fundador_caudal'),
@@ -487,7 +513,7 @@ begin
     select coalesce(jsonb_agg(jsonb_build_object(
                'id', s.id, 'titulo', s.titulo, 'artista', s.artista, 'album', s.album,
                'duracion', s.duracion, 'ruta', s.ruta, 'portada', s.portada,
-               'escuchas', s.escuchas, 'estado', s.estado, 'creado', s.creado)
+               'escuchas', s.escuchas, 'estado', s.estado, 'nota', s.nota, 'creado', s.creado)
                order by s.creado desc), '[]') into subidas
       from (select * from public.canciones_subidas
              where user_id = p.id and (estado = 'publicada' or p.id = yo)
@@ -533,6 +559,7 @@ begin
     end if;
     return jsonb_build_object(
         'id', p.id, 'usuario', p.usuario, 'nombre', p.nombre, 'foto_url', p.foto_url,
+        'banner_url', p.banner_url,
         'bio', p.bio, 'cancion_fav', p.cancion_fav, 'artista_fav', p.artista_fav,
         'generos', to_jsonb(p.generos), 'frase', p.frase, 'color_perfil', p.color_perfil,
         'creado', p.creado, 'relacion', rel, 'es_mio', p.id = yo,
@@ -563,6 +590,9 @@ on conflict (id) do update set public = true, file_size_limit = 15728640,
 drop policy if exists "musica: subir la mia" on storage.objects;
 create policy "musica: subir la mia" on storage.objects for insert to authenticated
     with check (bucket_id = 'musica' and (storage.foldername(name))[1] = auth.uid()::text);
+drop policy if exists "musica: ver la mia" on storage.objects;
+create policy "musica: ver la mia" on storage.objects for select to authenticated
+    using (bucket_id = 'musica' and (storage.foldername(name))[1] = auth.uid()::text);
 drop policy if exists "musica: borrar la mia" on storage.objects;
 create policy "musica: borrar la mia" on storage.objects for delete to authenticated
     using (bucket_id = 'musica' and (storage.foldername(name))[1] = auth.uid()::text);
@@ -604,9 +634,10 @@ begin
          where user_id = yo and creado > now() - interval '1 day') >= 10 then
         raise exception 'hoy ya subiste 10 canciones: sigue manana';
     end if;
-    insert into public.canciones_subidas (user_id, titulo, artista, album, duracion, ruta, portada, tamano)
+    insert into public.canciones_subidas (user_id, titulo, artista, album, duracion, ruta, portada, tamano, estado)
     values (yo, trim(p_titulo), coalesce(trim(p_artista), ''), coalesce(trim(p_album), ''),
-            greatest(coalesce(p_duracion, 0), 0), p_ruta, p_portada, coalesce(p_tamano, 0))
+            greatest(coalesce(p_duracion, 0), 0), p_ruta, p_portada, coalesce(p_tamano, 0),
+            case when public.puede_publicar(yo) then 'publicada' else 'pendiente' end)
     returning id into nuevo;
     return nuevo;
 end $$;
@@ -656,6 +687,61 @@ begin
        and (select count(*) from public.reportes_subidas where cancion = p_id) >= 3;
 end $$;
 
+-- ---------------------------------------------------------------- revisión de la música
+-- ¿publica sin revisión? (fundadores de Caudal y moderadores) y ¿soy moderador?
+drop function if exists public.publica_directo();
+create function public.publica_directo()
+returns boolean language sql stable security definer set search_path = public as $$
+    select auth.uid() is not null and public.puede_publicar(auth.uid());
+$$;
+
+drop function if exists public.soy_moderador();
+create function public.soy_moderador()
+returns boolean language sql stable security definer set search_path = public as $$
+    select exists (select 1 from public.moderadores where user_id = auth.uid());
+$$;
+
+-- lo que espera revisión: canciones nuevas y las que la gente reportó
+drop function if exists public.revision_pendientes(int);
+create function public.revision_pendientes(p_limite int default 60)
+returns table (id uuid, user_id uuid, usuario text, nombre text, titulo text, artista text, album text,
+               duracion int, ruta text, portada text, tamano bigint, estado text, reportes int,
+               motivos jsonb, creado timestamptz)
+language sql stable security definer set search_path = public as $$
+    select s.id, s.user_id, p.usuario, p.nombre, s.titulo, s.artista, s.album, s.duracion, s.ruta,
+           s.portada, s.tamano, s.estado,
+           (select count(*)::int from public.reportes_subidas r where r.cancion = s.id),
+           coalesce((select jsonb_agg(r.motivo) from public.reportes_subidas r
+                      where r.cancion = s.id and r.motivo <> ''), '[]'::jsonb),
+           s.creado
+    from public.canciones_subidas s join public.perfiles p on p.id = s.user_id
+    where public.soy_moderador() and s.estado in ('pendiente', 'revision')
+    order by s.creado
+    limit least(greatest(p_limite, 1), 200);
+$$;
+
+drop function if exists public.revision_contar();
+create function public.revision_contar()
+returns int language sql stable security definer set search_path = public as $$
+    select case when public.soy_moderador()
+                then (select count(*)::int from public.canciones_subidas where estado in ('pendiente', 'revision'))
+                else 0 end;
+$$;
+
+-- aprobar (se publica) o rechazar (se retira, con el motivo que verá quien la subió)
+drop function if exists public.revision_resolver(uuid, boolean, text);
+create function public.revision_resolver(p_id uuid, p_aprobar boolean, p_nota text default '')
+returns void language plpgsql security definer set search_path = public as $$
+begin
+    if not public.soy_moderador() then raise exception 'no tienes permiso para revisar'; end if;
+    update public.canciones_subidas
+       set estado = case when p_aprobar then 'publicada' else 'retirada' end,
+           nota = case when p_aprobar then '' else left(coalesce(trim(p_nota), ''), 300) end
+     where id = p_id and estado in ('pendiente', 'revision');
+    if not found then raise exception 'esa cancion ya no esta pendiente'; end if;
+    if p_aprobar then delete from public.reportes_subidas where cancion = p_id; end if;
+end $$;
+
 -- ---------------------------------------------------------------- borrar la cuenta
 -- Al borrar la cuenta desaparece TODO lo suyo: filas (en cascada) y también las fotos y la
 -- música que subió (lo exige Google Play).
@@ -683,7 +769,8 @@ begin
         'quitar_amigo(uuid)', 'bloquear(uuid)', 'desbloquear(uuid)', 'mis_bloqueados()',
         'mis_solicitudes()', 'mis_enviadas()', 'mis_amigos()', 'buscar_persona(text)',
         'abrir_chat(uuid)', 'mis_chats()', 'explorar_perfiles(text, int, int)', 'ver_perfil(text)',
-        'dar_like(uuid)', 'quitar_like(uuid)', 'registrar_subida(text, text, text, int, text, text, bigint)', 'borrar_subida(uuid)',
+        'dar_like(uuid)', 'quitar_like(uuid)', 'publica_directo()', 'soy_moderador()',
+        'revision_pendientes(int)', 'revision_contar()', 'revision_resolver(uuid, boolean, text)', 'registrar_subida(text, text, text, int, text, text, bigint)', 'borrar_subida(uuid)',
         'explorar_subidas(text, int, int)', 'contar_escucha_subida(uuid)', 'reportar_subida(uuid, text)']
     loop
         execute format('revoke execute on function public.%s from public, anon', f);
@@ -692,7 +779,7 @@ begin
 end $$;
 -- ayudas internas: nadie las llama desde la app
 revoke execute on function public.es_mayor(uuid), public.relacion_con(uuid),
-    public.afinidad_entre(uuid, uuid) from public, anon, authenticated;
+    public.afinidad_entre(uuid, uuid), public.puede_publicar(uuid) from public, anon, authenticated;
 -- estas dos las usan las políticas de seguridad, así que quien escribe debe poder ejecutarlas
 -- (por dentro solo responden sobre quien las llama)
 revoke execute on function public.son_amigos(uuid, uuid), public.hay_bloqueo(uuid, uuid) from public, anon;
