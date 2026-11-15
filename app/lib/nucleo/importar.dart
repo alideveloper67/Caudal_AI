@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
 
 import 'catalogo.dart';
@@ -77,8 +78,10 @@ class Importar {
 
   static Future<String> _pagina(String url, String sitio) async {
     http.Response r;
+    // en el navegador esas webs no contestan a otras: se lee por la funcion de Caudal
+    final uri = kIsWeb ? Uri.parse('/api/pagina').replace(queryParameters: {'url': url}) : Uri.parse(url);
     try {
-      r = await http.get(Uri.parse(url), headers: {
+      r = await http.get(uri, headers: {
         'User-Agent': _agente,
         'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
       }).timeout(const Duration(seconds: 25));

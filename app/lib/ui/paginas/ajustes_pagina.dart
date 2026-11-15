@@ -1,4 +1,5 @@
 import 'package:dio/dio.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import '../../nucleo/ajustes.dart';
@@ -233,7 +234,7 @@ class _AjustesPaginaState extends State<AjustesPagina> {
         ),
 
         _seccion('Sonido'),
-        ListTile(
+        if (!kIsWeb) ListTile(
           leading: const Icon(Icons.graphic_eq_rounded, color: C.texto2),
           title: const Text('Ecualizador, súper volumen y velocidad'),
           subtitle: Text([
@@ -282,6 +283,8 @@ class _AjustesPaginaState extends State<AjustesPagina> {
           value: a.sino('sponsorblock_videos'), onChanged: (v) => _sino('sponsorblock_videos', v),
         ),
 
+        // en el navegador no hay descargas ni calidad de video propia (es el reproductor de YouTube)
+        if (!kIsWeb) ...[
         _seccion('Video'),
         _opcion('Calidad del video', 'calidad_video', const [
           ('maxima', 'La mejor posible'), ('2160', '4K'), ('1440', '1440p'), ('1080', '1080p'),
@@ -322,6 +325,8 @@ class _AjustesPaginaState extends State<AjustesPagina> {
             ('1', '1 GB'), ('2', '2 GB'), ('5', '5 GB'), ('10', '10 GB'), ('20', '20 GB'), ('50', '50 GB'),
           ], ayuda: 'cuando se llena deja de bajar'),
 
+        ],
+
         _seccion('General'),
         _opcion('País del catálogo', 'region', const [
           ('PE', 'Perú'), ('MX', 'México'), ('AR', 'Argentina'), ('CO', 'Colombia'), ('CL', 'Chile'),
@@ -344,7 +349,8 @@ class _AjustesPaginaState extends State<AjustesPagina> {
         ListTile(
           leading: const Icon(Icons.system_update_rounded, color: C.texto2),
           title: Text(actualizaLaTienda ? 'Versión de Caudal' : 'Buscar actualizaciones'),
-          subtitle: Text(actualizaLaTienda ? 'Versión $versionApp · se actualiza desde Google Play'
+          subtitle: Text(kIsWeb ? 'Versión web $versionApp · siempre la última'
+              : actualizaLaTienda ? 'Versión $versionApp · se actualiza desde Google Play'
               : 'Versión $versionApp', style: estiloSecundario),
           trailing: _buscandoVersion
               ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator.adaptive(strokeWidth: 2))

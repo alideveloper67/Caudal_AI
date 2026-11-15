@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import '../../nucleo/importar_archivos.dart';
@@ -24,7 +25,7 @@ Future<void> hojaTraer(BuildContext context) async {
           subtitle: const Text('Spotify, Apple Music o YouTube Music, con su enlace', style: estiloSecundario),
           onTap: () => Navigator.pop(ctx, 'lista'),
         ),
-        ListTile(
+        if (!kIsWeb) ListTile(
           leading: CircleAvatar(backgroundColor: C.superficie3, child: Icon(Icons.library_music_rounded, color: C.acento)),
           title: const Text('Canciones de tu teléfono', style: TextStyle(fontWeight: FontWeight.w700)),
           subtitle: const Text('Las que ya tienes descargadas (MP3, M4A, FLAC...)', style: estiloSecundario),

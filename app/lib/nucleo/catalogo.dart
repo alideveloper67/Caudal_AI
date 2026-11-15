@@ -28,6 +28,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io' show SocketException, HttpException;
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:http/http.dart' as http;
 
 /// Error del catalogo, con un texto en espanol listo para ensenar al usuario.
@@ -335,8 +336,18 @@ class Catalogo {
       'context': {'client': contexto, 'user': <String, dynamic>{}},
       ...cuerpo,
     };
-    final uri = Uri.parse('$dominio/youtubei/v1/$metodo?prettyPrint=false$extra');
-    final cabeceras = <String, String>{
+    // en el navegador YouTube Music no contesta a otras webs: se pasa por la
+    // funcion de la propia web de Caudal (netlify/functions/yt.mjs)
+    final uri = kIsWeb
+        ? Uri.parse('/api/yt').replace(queryParameters: {
+            'm': metodo,
+            'd': dominio.contains('music.') ? 'music' : 'www',
+            if (extra.isNotEmpty) 'extra': extra,
+          })
+        : Uri.parse('$dominio/youtubei/v1/$metodo?prettyPrint=false$extra');
+    final cabeceras = kIsWeb
+        ? <String, String>{'content-type': 'application/json'}
+        : <String, String>{
       'user-agent': _agente,
       'accept': '*/*',
       'accept-language': 'en-US,en;q=0.9',
@@ -350,6 +361,7 @@ class Catalogo {
     // la de un visitante nuevo y YouTube entrega la portada estandar (con
     // "Selección rápida"), sin personalizar segun lo buscado antes.
     if (visitante.isNotEmpty) cabeceras['x-goog-visitor-id'] = visitante;
+    if (kIsWeb) cabeceras.remove('user-agent');
     http.Response r;
     try {
       r = await _http

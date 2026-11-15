@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:io';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'coleccion.dart';
 import 'nube.dart';
@@ -88,7 +88,8 @@ class CanalRealtime {
   final String _urlBase;
   final String _clave;
 
-  WebSocket? _ws;
+  WebSocketChannel? _ws;
+  bool _wsAbierto = false;
   Timer? _latido;
   Timer? _reintento;
   int _ref = 0;
@@ -123,14 +124,23 @@ class CanalRealtime {
 
   Future<void> _conectar() async {
     try {
-      final ws = await WebSocket.connect(_uri.toString()).timeout(const Duration(seconds: 10));
+      // web_socket_channel: el mismo canal en el teléfono, la PC y el navegador
+      final ws = WebSocketChannel.connect(_uri);
+      await ws.ready.timeout(const Duration(seconds: 10));
       if (_cerrado) {
-        await ws.close();
+        await ws.sink.close();
         return;
       }
       _ws = ws;
+      _wsAbierto = true;
       _intentos = 0;
-      ws.listen(_recibir, onDone: _caido, onError: (_) => _caido(), cancelOnError: true);
+      ws.stream.listen(_recibir, onDone: () {
+        _wsAbierto = false;
+        _caido();
+      }, onError: (_) {
+        _wsAbierto = false;
+        _caido();
+      }, cancelOnError: true);
       _refUnion = _siguienteRef();
       _enviarCrudo('phx_join', {
         'config': {
@@ -143,10 +153,11 @@ class CanalRealtime {
       _latidoPendiente = null;
       _latido?.cancel();
       _latido = Timer.periodic(const Duration(seconds: 25), (_) => _latir());
-    } on WebSocketException catch (e) {
-      _fallo(ErrorJuntos(e.message.contains('404') || e.message.contains('403')
+    } on WebSocketChannelException catch (e) {
+      final m = '${e.message}';
+      _fallo(ErrorJuntos(m.contains('404') || m.contains('403')
           ? 'El servicio de salas (Supabase Realtime) no está habilitado en el proyecto.'
-          : 'No se pudo abrir la sala: ${e.message}'));
+          : 'No se pudo abrir la sala: $m'));
     } catch (_) {
       _fallo(const ErrorJuntos('Sin conexión con el servicio de salas.'));
     }
@@ -164,17 +175,17 @@ class CanalRealtime {
   void _latir() {
     if (_latidoPendiente != null) {
       // el anterior no volvio: la conexion esta muerta aunque no lo parezca
-      _ws?.close();
+      _ws?.sink.close();
       return;
     }
     _latidoPendiente = _siguienteRef();
-    _ws?.add(jsonEncode({'topic': 'phoenix', 'event': 'heartbeat', 'payload': {}, 'ref': _latidoPendiente}));
+    _ws?.sink.add(jsonEncode({'topic': 'phoenix', 'event': 'heartbeat', 'payload': {}, 'ref': _latidoPendiente}));
   }
 
   void _enviarCrudo(String evento, Map<String, dynamic> datos, {String? ref}) {
     final ws = _ws;
-    if (ws == null || ws.readyState != WebSocket.open) return;
-    ws.add(jsonEncode({
+    if (ws == null || !_wsAbierto) return;
+    ws.sink.add(jsonEncode({
       'topic': tema, 'event': evento, 'payload': datos, 'ref': ref ?? _siguienteRef(), 'join_ref': _refUnion,
     }));
   }
@@ -236,7 +247,7 @@ class CanalRealtime {
         alMensaje?.call(ev, p);
       case 'phx_error':
       case 'phx_close':
-        if (!_cerrado) _ws?.close();
+        if (!_cerrado) _ws?.sink.close();
       case 'system':
         if (datos['status'] == 'error') {
           final u = _union;
@@ -290,7 +301,7 @@ class CanalRealtime {
     unido = false;
     _ws = null;
     try {
-      await ws?.close(1000);
+      await ws?.sink.close(1000);
     } catch (_) {}
   }
 }

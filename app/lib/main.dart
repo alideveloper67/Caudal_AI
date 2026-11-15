@@ -195,7 +195,8 @@ class _CaudalAppState extends State<CaudalApp> {
     } catch (_) {} // si la ultima sesion no se puede leer, se empieza de cero
     // con tiempo maximo dentro: si Android tarda, la musica de fondo se engancha despues
     // modo seguro (la vez anterior se trabo): sin las piezas nativas opcionales
-    final seguro = Diagnostico.modoSeguro;
+    // en el navegador no hay notificacion de musica, ventana flotante ni descargas
+    final seguro = Diagnostico.modoSeguro || kIsWeb;
     if (!seguro) {
       Diagnostico.marcar('notificacion');
       await ServicioAudio.para(reproductor);
@@ -212,7 +213,7 @@ class _CaudalAppState extends State<CaudalApp> {
     final descargas = GestorDescargas(coleccion: coleccion, ajustes: ajustes, capturador: _capturador!);
     // con wifi baja sola tus favoritas (si el ajuste esta activo)
     _inteligente?.detener();
-    _inteligente = DescargaInteligente(coleccion, descargas, ajustes)..iniciar();
+    _inteligente = kIsWeb ? null : (DescargaInteligente(coleccion, descargas, ajustes)..iniciar());
     Sincronizador? sinc;
     if (c.sesion != null) {
       sinc = Sincronizador(coleccion, c.sesion!, alRenovar: () => Cuentas.actualizarRecordada(c),
@@ -332,11 +333,11 @@ class _CaudalAppState extends State<CaudalApp> {
           valueListenable: Pip.enVentana,
           builder: (_, enVentana, __) => Stack(children: [
             contenido,
-            if (enVentana)
+            if (enVentana && s.reproductor.pantalla != null)
               Positioned.fill(
                 child: ColoredBox(
                   color: Colors.black,
-                  child: Video(controller: s.reproductor.pantalla, controls: NoVideoControls, fill: Colors.black),
+                  child: Video(controller: s.reproductor.pantalla!, controls: NoVideoControls, fill: Colors.black),
                 ),
               ),
           ]),

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/services.dart' show appFlavor;
 // Avisar de versiones nuevas y, en Android, instalarlas sin salir de la app.
 //
@@ -22,7 +23,7 @@ const String versionApp = '2.1.0';
 
 /// Instalada desde una tienda (variante "play" de Android): las versiones
 /// nuevas llegan por la tienda, no por la propia app.
-bool get actualizaLaTienda => appFlavor == 'play';
+bool get actualizaLaTienda => kIsWeb || appFlavor == 'play';
 
 /// usuario/repositorio de GitHub donde se publican las versiones
 const String origen = 'alideveloper67/Caudal_AI';

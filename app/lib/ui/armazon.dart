@@ -1,5 +1,8 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -74,6 +77,7 @@ class _ArmazonState extends State<Armazon> {
       }
     });
     WidgetsBinding.instance.addPostFrameCallback((_) => _revisarTerminos());
+    WidgetsBinding.instance.addPostFrameCallback((_) => _avisoWebEnTelefono());
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       try {
         final inicial = AccesoPagina.enlacePendiente ?? await _canal.invokeMethod<String>('inicial');
@@ -81,6 +85,36 @@ class _ArmazonState extends State<Armazon> {
         if (inicial != null && mounted) Caudal.leer(context).abrirEnlace?.call(inicial);
       } catch (_) {}
     });
+  }
+
+  /// En el navegador de un teléfono, YouTube pausa la música al bloquearlo:
+  /// se avisa una vez y se ofrece la app, que sí sigue sonando.
+  Future<void> _avisoWebEnTelefono() async {
+    final telefono = defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS;
+    if (!kIsWeb || !telefono) return;
+    final p = await SharedPreferences.getInstance();
+    if (p.getBool('aviso_web_telefono') == true || !mounted) return;
+    await p.setBool('aviso_web_telefono', true);
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Estás en el navegador'),
+        content: const Text('Aquí la música se pausa si bloqueas el teléfono o cambias de app: así lo hace '
+            'el reproductor de YouTube en los navegadores. Para escuchar con la pantalla bloqueada, '
+            'instala la app de Caudal (entras con esta misma cuenta).'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Seguir en el navegador')),
+          FilledButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              launchUrl(Uri.parse('https://caudal-musica.netlify.app/#descargar'));
+            },
+            child: const Text('Instalar la app'),
+          ),
+        ],
+      ),
+    );
   }
 
   /// Cuentas de antes de los términos (o con una versión vieja, o sin los

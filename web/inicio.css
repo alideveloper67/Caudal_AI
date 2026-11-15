@@ -173,7 +173,7 @@
 /* ---------- descargar */
 .descargar { padding: 110px 0; background: linear-gradient(180deg, var(--cauce) 0%, #08223A 100%); }
 .descargar .sub { color: #C6D6E0; font-size: 17px; margin: 0 0 36px; }
-.plataformas { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+.plataformas { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
 .plataforma {
   display: flex; flex-direction: column; gap: 6px; padding: 26px; border-radius: 22px; color: #fff;
   border: 1px solid rgba(143,167,184,.22); background: rgba(255,255,255,.02); transition: border-color .2s, background .2s, transform .2s;
@@ -210,3 +210,9 @@ a:focus-visible, summary:focus-visible, .boton:focus-visible { outline: 2px soli
   .amigos, .descubrir, .descargar, .preguntas-sec { padding: 72px 0; }
   .versos { min-height: 0; }
 }
+
+.inicio .boton.secundario { background: transparent; color: #fff !important; border: 1px solid rgba(255,255,255,.35); }
+.inicio .boton.secundario:hover { background: rgba(255,255,255,.08); border-color: #fff; }
+.enlace-barra { color: #C6D6E0; font-weight: 600; font-size: 15px; }
+.enlace-barra:hover { color: #fff; }
+@media (max-width: 980px) { .enlace-barra { display: none; } }

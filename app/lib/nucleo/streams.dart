@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
 import 'motor_local.dart';
@@ -22,6 +23,8 @@ class Streams {
 
   Future<Fuente> resolver(String videoId,
       {required bool video, String calidad = 'maxima', String codec = 'auto', int intento = 0}) async {
+    // en la web suena el reproductor oficial de YouTube: basta con el id
+    if (kIsWeb) return Fuente(url: 'yt:$videoId', audioCodec: 'YouTube');
     final clave = '$videoId|$video|$calidad|$codec';
     final guardado = _cache[clave];
     if (intento == 0 && guardado != null &&
@@ -142,6 +145,7 @@ class Fuente {
   /// Lo que se muestra en la insignia de calidad.
   String get insignia {
     if (local) return 'EN EL TELÉFONO';
+    if (url.startsWith('yt:')) return 'YOUTUBE';
     if (alto > 0) {
       final nombre = {4320: '8K', 2160: '4K', 1440: '2K'}[alto] ?? '${alto}p';
       return '$nombre${fps > 30 ? '$fps' : ''}';

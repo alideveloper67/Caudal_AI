@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
 
@@ -375,7 +376,7 @@ class Servicios {
                       'tipo': 'similares', 'id': vid, 'titulo': 'Similares a «${pista['titulo']}»',
                       'miniatura': '${pista['miniatura'] ?? ''}', 'pista': pista,
                     }))),
-              if (vid.isNotEmpty)
+              if (vid.isNotEmpty && !kIsWeb)
                 _opcion(Icons.download_rounded, coleccion.estaDescargada(pista) ? 'Descargar otra vez (otro formato)' : 'Descargar',
                     () => hacer(() => hojaDescargar(context, [pista]))),
               for (final a in artistas)

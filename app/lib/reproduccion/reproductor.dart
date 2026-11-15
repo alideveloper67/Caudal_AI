@@ -2,7 +2,6 @@ import 'dart:async';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
-import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
 import '../nucleo/ajustes.dart';
@@ -12,6 +11,7 @@ import '../nucleo/recomendador.dart';
 import '../nucleo/red.dart';
 import '../nucleo/streams.dart';
 import '../nucleo/transiciones.dart';
+import 'jugador.dart';
 
 const frecuenciasEq = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
 const presetsEq = <String, List<int>>{
@@ -57,14 +57,10 @@ bool get _filtrosMinimos =>
 
 enum EstadoRepro { parado, cargando, sonando, pausa }
 
-/// Uno de los dos motores (libmpv via media_kit) con su pantalla de video.
+/// Uno de los dos motores (libmpv en el teléfono y la PC; el reproductor de
+/// YouTube en la web, ver [Jugador]) con su pantalla de video.
 class _Motor {
   _Motor() {
-    player = Player(configuration: const PlayerConfiguration(
-      title: 'Caudal',
-      bufferSize: 48 * 1024 * 1024,
-      logLevel: MPVLogLevel.warn,
-    ));
     // lo que dice el motor por dentro (403, certificados, red...) al registro del sistema
     player.stream.log.listen((l) {
       if (l.level == 'error' || l.level == 'fatal' || l.level == 'warn') {
@@ -74,16 +70,14 @@ class _Motor {
     _afinar();
   }
 
-  /// La pantalla del video se crea la primera vez que hace falta (no al abrir
-  /// la app): crearla pide una superficie grafica al sistema y, en algunos
-  /// telefonos, eso trababa el arranque aunque solo se fuera a oir musica.
-  late final VideoController video = VideoController(player,
-      configuration: const VideoControllerConfiguration(enableHardwareAcceleration: true));
+  final Jugador player = Jugador.crear();
+
+  /// La pantalla del video de mpv: se crea la primera vez que hace falta (no al
+  /// abrir la app). En la web es null: el video es el recuadro de YouTube.
+  VideoController? get video => player.video;
 
   /// Lectura anticipada generosa: que un bajon de red no corte nada.
   Future<void> _afinar() async {
-    final n = nativo;
-    if (n == null) return;
     final opciones = {
       'cache': 'yes',
       'cache-secs': '60',
@@ -99,30 +93,19 @@ class _Motor {
     };
     for (final e in opciones.entries) {
       try {
-        await n.setProperty(e.key, e.value);
+        await player.setProperty(e.key, e.value);
       } catch (_) {}
     }
   }
 
-  late final Player player;
   Fuente? fuente;
-
-  NativePlayer? get nativo => player.platform is NativePlayer ? player.platform as NativePlayer : null;
 
   Future<void> abrir(Fuente f, {Duration inicio = Duration.zero, bool pausado = false,
       double volumen = 100, double velocidad = 1}) async {
     fuente = f;
     await player.setVolume(volumen);
     await player.setRate(velocidad);
-    final aparte = f.audioUrl != null;
-    // con el sonido aparte se abre en pausa y se arranca cuando ya estan las
-    // dos pistas: si no, el video corre un instante mudo y luego da un salto
-    await player.open(Media(f.url, start: inicio > const Duration(seconds: 1) ? inicio : null),
-        play: !pausado && !aparte);
-    if (aparte) {
-      await player.setAudioTrack(AudioTrack.uri(f.audioUrl!));
-      if (!pausado) await player.play();
-    }
+    await player.open(f, inicio: inicio > const Duration(seconds: 1) ? inicio : null, play: !pausado);
   }
 
   /// Devuelve si tenia algo cargado (en iPhone, cerrar su salida de sonido
@@ -170,7 +153,7 @@ class Reproductor extends ChangeNotifier {
   bool _usaA = true;
 
   /// La pantalla del video que suena (la que pinta la vista de video).
-  VideoController get pantalla => _activo.video;
+  VideoController? get pantalla => _activo.video;
 
   // estado publico
   Json? actual;
@@ -300,14 +283,14 @@ class Reproductor extends ChangeNotifier {
     var af = cadenaFiltros();
     for (final m in [_a, _b]) {
       try {
-        await m.nativo?.setProperty('af', af);
+        await m.player.setProperty('af', af);
       } catch (_) {
         if (af.contains('@caudal:')) {
           // sin el medidor de nivel: se queda el resto y el DJ tira de SponsorBlock
           _filtroNivel = false;
           af = cadenaFiltros();
           try {
-            await m.nativo?.setProperty('af', af);
+            await m.player.setProperty('af', af);
           } catch (_) {}
         }
         // si el filtro no esta disponible en este telefono, suena sin el
@@ -339,7 +322,7 @@ class Reproductor extends ChangeNotifier {
     _revivir = Timer(const Duration(milliseconds: 350), () {
       final vivo = _activo;
       if (vivo.fuente == null || !vivo.player.state.playing) return;
-      vivo.nativo?.command(['ao-reload']).catchError((_) {});
+      vivo.player.command(['ao-reload']).catchError((_) {});
     });
   }
 
@@ -354,7 +337,7 @@ class Reproductor extends ChangeNotifier {
     _videoApagado = fuera;
     for (final m in [_a, _b]) {
       try {
-        await m.nativo?.setProperty('vid', fuera ? 'no' : 'auto');
+        await m.player.setProperty('vid', fuera ? 'no' : 'auto');
       } catch (_) {}
     }
   }
@@ -1041,7 +1024,7 @@ class Reproductor extends ChangeNotifier {
       unawaited(() async {
         for (final x in [_a, _b]) {
           try {
-            await x.nativo?.setProperty('af', '');
+            await x.player.setProperty('af', '');
           } catch (_) {}
         }
         if (pista != null && identical(pista, actual)) {
@@ -1095,9 +1078,8 @@ class Reproductor extends ChangeNotifier {
 
   /// Lee el nivel que mide el filtro `@caudal` de un motor (sin solaparse).
   void _medirNivelDe(_Motor m, void Function(double?) usar) {
-    final n = m.nativo;
-    if (n == null || !_midiendo.add(m)) return;
-    n.getProperty('af-metadata/caudal').then((t) => usar(nivelDeMetadatos(t))).catchError((_) {})
+    if (Jugador.esWeb || !_midiendo.add(m)) return;
+    m.player.getProperty('af-metadata/caudal').then((t) => usar(nivelDeMetadatos(t))).catchError((_) {})
         .whenComplete(() => _midiendo.remove(m));
   }
 

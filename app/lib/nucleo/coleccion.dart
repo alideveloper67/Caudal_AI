@@ -7,6 +7,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 
+import 'base_datos_io.dart' if (dart.library.js_interop) 'base_datos_web.dart';
 import 'plataforma.dart';
 
 typedef Json = Map<String, dynamic>;
@@ -31,6 +32,14 @@ class Coleccion extends ChangeNotifier {
   final Map<String, List<Json>> _porVideo = {};
 
   static Future<Coleccion> abrir(String cuentaId) async {
+    if (kIsWeb) {
+      // navegador: la base en su almacenamiento; sin carpetas ni archivos
+      await prepararBaseDeDatos();
+      final db = await openDatabase('caudal_$cuentaId.db', version: 1, onCreate: (db, _) => _crear(db));
+      final c = Coleccion._(db, 'caudal_$cuentaId.db');
+      await c._cargarMemoria();
+      return c;
+    }
     // En iPhone, Documentos es lo que el usuario ve en la app Archivos: ahi
     // van solo las descargas. La base va aparte, donde no se vea ni se borre
     // por error. En Android se queda donde siempre estuvo.
@@ -502,7 +511,7 @@ class Coleccion extends ChangeNotifier {
     final ahora = DateTime.now().millisecondsSinceEpoch;
     final dato = _existeCache[ruta];
     if (dato != null && ahora - dato.$2 < 20000) return dato.$1;
-    final existe = ruta.isNotEmpty && File(ruta).existsSync();
+    final existe = !kIsWeb && ruta.isNotEmpty && File(ruta).existsSync();
     _existeCache[ruta] = (existe, ahora);
     return existe;
   }

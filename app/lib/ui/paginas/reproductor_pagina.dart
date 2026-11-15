@@ -8,6 +8,7 @@ import '../../nucleo/ajustes.dart';
 import '../../nucleo/catalogo.dart';
 import '../../nucleo/coleccion.dart';
 import '../../nucleo/traductor.dart';
+import '../../reproduccion/jugador.dart';
 import '../../reproduccion/reproductor.dart';
 import '../comunes.dart';
 import '../plataforma.dart';
@@ -194,7 +195,10 @@ class _ReproductorPaginaState extends State<ReproductorPagina> {
                     // ---- portada o video
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 22),
-                      child: video
+                      child: Jugador.esWeb
+                          // web: aqui va el video de YouTube (el recuadro se coloca encima)
+                          ? const _HuecoVideoWeb()
+                          : video
                           ? _VideoEnLinea(r: r)
                           : PortadaDeslizable(
                               pista: p,
@@ -442,7 +446,10 @@ class _VideoEnLinea extends StatelessWidget {
   final Reproductor r;
 
   @override
-  Widget build(BuildContext context) => ClipRRect(
+  Widget build(BuildContext context) => r.pantalla == null
+      // web: el video es el recuadro de YouTube de la esquina
+      ? const _VideoWeb()
+      : ClipRRect(
         borderRadius: BorderRadius.circular(8),
         child: AspectRatio(
           aspectRatio: 16 / 9,
@@ -456,7 +463,7 @@ class _VideoEnLinea extends StatelessWidget {
               fullscreen: MaterialVideoControlsThemeData(
                 seekBarThumbColor: C.acento, seekBarPositionColor: C.acento,
               ),
-              child: Video(controller: r.pantalla, controls: MaterialVideoControls,
+              child: Video(controller: r.pantalla!, controls: MaterialVideoControls,
                   fill: Colors.black),
             ),
           ),
@@ -920,6 +927,94 @@ class BotonTraducir extends StatelessWidget {
           ),
         );
       },
+    );
+  }
+}
+
+
+/// En la web el video es el del reproductor de YouTube (el recuadro de la
+/// esquina): aquí se agranda o se achica.
+class _VideoWeb extends StatefulWidget {
+  const _VideoWeb();
+
+  @override
+  State<_VideoWeb> createState() => _VideoWebState();
+}
+
+class _VideoWebState extends State<_VideoWeb> {
+  bool _grande = false;
+
+  @override
+  void dispose() {
+    LienzoVideoWeb.mostrarGrande(false);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => AspectRatio(
+        aspectRatio: 16 / 9,
+        child: DecoratedBox(
+          decoration: BoxDecoration(color: C.superficie2, borderRadius: BorderRadius.circular(12)),
+          child: Center(
+            child: FilledButton.icon(
+              onPressed: () {
+                setState(() => _grande = !_grande);
+                LienzoVideoWeb.mostrarGrande(_grande);
+              },
+              icon: Icon(_grande ? Icons.close_fullscreen_rounded : Icons.open_in_full_rounded),
+              label: Text(_grande ? 'Achicar el video' : 'Ver el video en grande'),
+            ),
+          ),
+        ),
+      );
+}
+
+
+/// El hueco donde se coloca el reproductor de YouTube en la web. Se mide cada
+/// vez que se pinta (y al desplazar) para que el recuadro lo siga.
+class _HuecoVideoWeb extends StatefulWidget {
+  const _HuecoVideoWeb();
+
+  @override
+  State<_HuecoVideoWeb> createState() => _HuecoVideoWebState();
+}
+
+class _HuecoVideoWebState extends State<_HuecoVideoWeb> {
+  final _llave = GlobalKey();
+  ScrollPosition? _scroll;
+
+  void _medir() {
+    if (!mounted) return;
+    final caja = _llave.currentContext?.findRenderObject() as RenderBox?;
+    if (caja == null || !caja.attached) return;
+    final o = caja.localToGlobal(Offset.zero);
+    LienzoVideoWeb.colocar(o & caja.size);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _scroll?.removeListener(_medir);
+    _scroll = Scrollable.maybeOf(context)?.position;
+    _scroll?.addListener(_medir);
+  }
+
+  @override
+  void dispose() {
+    _scroll?.removeListener(_medir);
+    LienzoVideoWeb.colocar(null);
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    WidgetsBinding.instance.addPostFrameCallback((_) => _medir());
+    return AspectRatio(
+      key: _llave,
+      aspectRatio: 16 / 9,
+      child: DecoratedBox(
+        decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(10)),
+      ),
     );
   }
 }
