@@ -18,6 +18,16 @@ from urllib.parse import urlencode
 
 import requests
 
+# Usar los certificados de Windows (los mismos que el navegador) en lugar de la
+# lista fija de certifi. Sin esto, en PCs con antivirus que revisa HTTPS
+# (Avast, AVG, Kaspersky, ESET...) o con proxy, el navegador funciona pero la
+# app rechaza la conexion y parece que "no hay internet".
+try:
+    import truststore
+    truststore.inject_into_ssl()
+except Exception:  # sin truststore se sigue con certifi
+    pass
+
 URL = "https://nztirmwqykbxadidpzzt.supabase.co"
 CLAVE_PUBLICA = "sb_publishable_ga4gKRk0czj044G-xPptSQ_BZ_sTZLl"
 DOMINIO = "usuarios.caudal.app"
@@ -64,7 +74,29 @@ def _peticion(metodo, ruta, token=None, **kw):
     try:
         return requests.request(metodo, URL + ruta, headers=cab, timeout=TIEMPO, **kw)
     except requests.RequestException as e:
-        raise SinConexion("No hay conexión con el servidor de cuentas. Revisa tu internet.") from e
+        raise SinConexion(_motivo_sin_conexion(e)) from e
+
+
+def _motivo_sin_conexion(e):
+    """Explica por qué no se llegó al servidor, para que el usuario sepa qué tocar."""
+    texto = str(e).lower()
+    if isinstance(e, requests.exceptions.SSLError) or "certificate" in texto or "ssl" in texto:
+        return ("No se pudo abrir una conexión segura con el servidor de cuentas. "
+                "Revisa que la fecha y la hora de Windows estén bien; si usas un antivirus "
+                "que revisa HTTPS (Avast, AVG, Kaspersky, ESET...), permite Caudal en él.")
+    if isinstance(e, requests.exceptions.ProxyError):
+        return ("Un proxy de esta PC está bloqueando la conexión con el servidor de cuentas. "
+                "Revisa la configuración de proxy de Windows.")
+    if isinstance(e, requests.exceptions.Timeout):
+        return ("El servidor de cuentas tardó demasiado en responder. "
+                "Vuelve a intentarlo en un momento.")
+    if "getaddrinfo" in texto or "name resolution" in texto or "nameresolution" in texto:
+        return ("Esta PC no encuentra el servidor de cuentas (fallo de DNS). "
+                "Revisa tu internet o prueba con otra red.")
+    if "10013" in texto or "forbidden by its access permissions" in texto:
+        return ("El firewall o el antivirus de esta PC está bloqueando a Caudal. "
+                "Permite Caudal en él y vuelve a intentarlo.")
+    return "No hay conexión con el servidor de cuentas. Revisa tu internet."
 
 
 # ---------------------------------------------------------------- cuentas
