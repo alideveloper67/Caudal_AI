@@ -31,9 +31,10 @@ class Lector(QThread):
 
 
 class DialogoListas(QDialog):
-    """Pega un enlace, elige las canciones y se van a la cola de descargas."""
+    """Pega un enlace, elige las canciones y guárdalas como lista (o descárgalas)."""
 
     descargar = Signal(list)      # [{titulo, artista, url|busqueda}]
+    guardar = Signal(list, str)   # canciones elegidas y el nombre de la lista
 
     def __init__(self, ajustes, padre=None):
         super().__init__(padre)
@@ -74,7 +75,7 @@ class DialogoListas(QDialog):
 
         self.bt_leer = QPushButton("  Leer")
         self.bt_leer.setObjectName("principal")
-        self.bt_leer.setIcon(iconos.icono("lupa", 16, "#04202A"))
+        self.bt_leer.setIcon(iconos.icono("lupa", 16, C["acento_texto"]))
         self.bt_leer.setCursor(Qt.PointingHandCursor)
         self.bt_leer.clicked.connect(self._leer)
         fila.addWidget(self.bt_leer)
@@ -108,13 +109,22 @@ class DialogoListas(QDialog):
         self.bt_cancelar.clicked.connect(self.reject)
         fila2.addWidget(self.bt_cancelar)
 
+        self.bt_guardar = QPushButton("  Guardar como lista")
+        self.bt_guardar.setObjectName("principal")
+        self.bt_guardar.setIcon(iconos.icono("anadir_lista", 16, C["acento_texto"]))
+        self.bt_guardar.setCursor(Qt.PointingHandCursor)
+        self.bt_guardar.setEnabled(False)
+        self.bt_guardar.setToolTip("Se guarda en Tu biblioteca y aparece también en el teléfono y en la web")
+        self.bt_guardar.clicked.connect(self._guardar)
+
         self.bt_descargar = QPushButton("  Descargar")
-        self.bt_descargar.setObjectName("principal")
-        self.bt_descargar.setIcon(iconos.icono("descargar", 16, "#04202A"))
+        self.bt_descargar.setObjectName("contorno")
+        self.bt_descargar.setIcon(iconos.icono("descargar", 16, C["texto"]))
         self.bt_descargar.setCursor(Qt.PointingHandCursor)
         self.bt_descargar.setEnabled(False)
         self.bt_descargar.clicked.connect(self._descargar)
         fila2.addWidget(self.bt_descargar)
+        fila2.addWidget(self.bt_guardar)
         raiz.addLayout(fila2)
 
     # ------------------------------------------------------------ leer
@@ -163,6 +173,7 @@ class DialogoListas(QDialog):
 
         hay = datos["total"] > 0
         self.bt_descargar.setEnabled(hay)
+        self.bt_guardar.setEnabled(hay)
         self.casilla_todas.setEnabled(hay)
         self.casilla_todas.setChecked(True)
         self._actualizar_boton()
@@ -192,9 +203,16 @@ class DialogoListas(QDialog):
 
     def _actualizar_boton(self, *_):
         n = len(self._elegidas())
-        self.bt_descargar.setText(
-            f"  Descargar {n}" if n else "  Descargar")
+        self.bt_descargar.setText(f"  Descargar {n}" if n else "  Descargar")
         self.bt_descargar.setEnabled(n > 0)
+        self.bt_guardar.setText(f"  Guardar {n} como lista" if n else "  Guardar como lista")
+        self.bt_guardar.setEnabled(n > 0)
+
+    def _guardar(self):
+        elegidas = self._elegidas()
+        if elegidas:
+            self.guardar.emit(elegidas, (self.lista or {}).get("titulo") or "Lista traída")
+            self.accept()
 
     def _descargar(self):
         elegidas = self._elegidas()

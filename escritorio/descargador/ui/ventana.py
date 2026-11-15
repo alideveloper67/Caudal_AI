@@ -150,6 +150,7 @@ class Ventana(QWidget):
             self.panel_der.mostrar(panel if panel in ("sonando", "cola", "letras") else "sonando")
         self.barra.marcar_panel(self.panel_der.actual if self.panel_der.isVisible() else "")
         self.r.restaurar_sesion()
+        self._seguir_tras_reabrir()
         if not self.r.disponible:
             QTimer.singleShot(800, lambda: QMessageBox.warning(
                 self, APP_NOMBRE, "No se encontró el motor de reproducción (libmpv), así que no "
@@ -492,7 +493,7 @@ class Ventana(QWidget):
             self.bt_mensajes.set_activo(en_mensajes or self._sin_leer > 0, punto=self._sin_leer > 0)
             self.bt_mensajes.setToolTip(f"Mensajes ({self._sin_leer} sin leer)" if self._sin_leer else "Mensajes")
 
-        en_segundo_plano(c.sin_leer, ok=listo, error=lambda _e: None, dueno=self)
+        en_segundo_plano(c.sin_leer, ok=listo, error=lambda _e: None, dueno=self, urgente=True)
 
     def atras(self):
         if self.indice > 0:
@@ -741,58 +742,62 @@ class Ventana(QWidget):
         from .dialogo_listas import DialogoListas
         dialogo = DialogoListas(self.ajustes, self)
         dialogo.descargar.connect(self._lista_traida)
+        dialogo.guardar.connect(self._guardar_lista_traida)
         dialogo.exec()
 
     def _lista_traida(self, canciones):
-        """Una lista de Spotify / Apple: se guarda como lista de Caudal, lista para sonar."""
+        """«Descargar»: las canciones elegidas van a la cola de descargas en MP3."""
         if not canciones:
             return
-        caja = QMessageBox(self)
-        caja.setWindowTitle("Traer la lista")
-        caja.setText(f"{len(canciones)} canciones. ¿Qué hacemos con ellas?")
-        guardar = caja.addButton("Guardarla como lista", QMessageBox.AcceptRole)
-        bajar = caja.addButton("Descargarlas en MP3", QMessageBox.ActionRole)
-        caja.addButton("Cancelar", QMessageBox.RejectRole)
-        caja.exec()
-        if caja.clickedButton() is bajar:
-            for c in canciones:
-                enlace = c.get("url") or ("ytsearch1:" + (c.get("busqueda") or c.get("titulo") or ""))
-                nombre = c.get("titulo") or ""
-                if c.get("artista"):
-                    nombre = f"{c['artista']} - {nombre}"
-                self.ctx.gestor.agregar(enlace, tipo="audio", titulo=nombre)
-            self.aviso.mostrar(f"{len(canciones)} canciones en la cola de descargas")
-            return
-        if caja.clickedButton() is not guardar:
+        for c in canciones:
+            enlace = c.get("url") or ("ytsearch1:" + (c.get("busqueda") or c.get("titulo") or ""))
+            nombre = c.get("titulo") or ""
+            if c.get("artista"):
+                nombre = f"{c['artista']} - {nombre}"
+            self.ctx.gestor.agregar(enlace, tipo="audio", titulo=nombre)
+        self.aviso.mostrar(f"{len(canciones)} canciones en la cola de descargas")
+
+    def _guardar_lista_traida(self, canciones, titulo):
+        """«Guardar como lista»: se busca cada canción y queda como lista tuya
+        (sincronizada: también aparece en el teléfono y en la web)."""
+        if not canciones:
             return
 
-        def resolver():
-            pistas = []
-            for c in canciones:
-                vid = catalogo.video_id_de(c.get("url") or "")
-                if vid:
-                    pistas.append(catalogo.nueva_pista(vid, c.get("titulo") or "",
-                                                       [{"nombre": c.get("artista") or "", "id": ""}]))
-                    continue
-                consulta = c.get("busqueda") or f"{c.get('artista', '')} {c.get('titulo', '')}"
+        def una(c):
+            vid = catalogo.video_id_de(c.get("url") or "")
+            if vid:
+                return catalogo.nueva_pista(vid, c.get("titulo") or "",
+                                            [{"nombre": c.get("artista") or "", "id": ""}])
+            consulta = c.get("busqueda") or f"{c.get('artista', '')} {c.get('titulo', '')}"
+            for _ in range(2):
                 try:
                     hallado = catalogo.buscar(consulta.strip(), "canciones", 1)
-                except Exception:
-                    hallado = []
-                if hallado:
-                    pistas.append(hallado[0])
-            return pistas
+                    return hallado[0] if hallado else None
+                except Exception:  # noqa: BLE001
+                    continue
+            return None
+
+        def resolver():
+            # de cuatro en cuatro: una lista de 50 tarda segundos, no un minuto
+            from concurrent.futures import ThreadPoolExecutor
+            with ThreadPoolExecutor(max_workers=4) as grupo:
+                return [p for p in grupo.map(una, canciones) if p]
 
         def listo(pistas):
             if not pistas:
                 self.aviso.mostrar("No se encontró ninguna de esas canciones")
                 return
-            nombre = self.ctx.coleccion.nombre_libre("Lista traída")
-            lista_id = self.ctx.coleccion.crear_lista(nombre)
-            self.ctx.coleccion.agregar_a_lista(lista_id, pistas)
+            col = self.ctx.coleccion
+            nombre = (titulo or "Lista traída").strip()[:80]
+            if any(l["nombre"] == nombre for l in col.listas()):
+                nombre = col.nombre_libre(nombre)
+            lista_id = col.crear_lista(nombre)
+            col.agregar_a_lista(lista_id, pistas)
             self.ctx.listas_cambio.emit()
             self.navegar({"pagina": "mi_lista", "id": lista_id})
-            self.aviso.mostrar(f"Lista guardada: {len(pistas)} de {len(canciones)} canciones")
+            faltan = len(canciones) - len(pistas)
+            self.aviso.mostrar(f"Lista «{nombre}» guardada con {len(pistas)} canciones"
+                               + (f" ({faltan} no se encontraron)" if faltan else ""))
 
         self.aviso.mostrar(f"Buscando {len(canciones)} canciones en YouTube Music…", 8000)
         en_segundo_plano(resolver, ok=listo, error=lambda e: self.aviso.mostrar(str(e)), dueno=self)
@@ -993,6 +998,63 @@ class Ventana(QWidget):
                 "Caudal sigue sonando",
                 "Está junto al reloj. Clic para abrirlo; clic derecho → Salir para cerrarlo.",
                 QSystemTrayIcon.Information, 4000)
+
+    def reabrir_con_aspecto(self):
+        """«Aplicar ahora» en Ajustes › Aspecto: Caudal se reabre con los colores
+        nuevos y la música sigue donde iba (y en la misma pantalla de Ajustes)."""
+        import time as _t
+        sonando = self.r.estado == "sonando"
+        try:
+            self.r.guardar_sesion()
+            self.ctx.coleccion.guardar_estado("reabrir", {"cuando": _t.time(), "sonando": sonando,
+                                                         "pagina": "ajustes"})
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            self._guardar_estado()
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            cuenta = getattr(self.ctx, "cuenta", None)
+            if cuenta and cuenta.get("sesion"):
+                from ..cuentas import Cuentas
+                Cuentas().actualizar_recordada(cuenta)   # el token renovado, para la nueva
+        except Exception:  # noqa: BLE001
+            pass
+        reiniciar = getattr(self.ctx, "reiniciar", None)
+        if reiniciar is None:
+            return
+        self.hide()
+        if self.mini:
+            self.mini.hide()
+        if self.bandeja:
+            self.bandeja.hide()
+        try:
+            self.r.cerrar()
+        except Exception:  # noqa: BLE001
+            pass
+        reiniciar()
+
+    def _seguir_tras_reabrir(self):
+        """Tras «Aplicar ahora»: vuelve a Ajustes y retoma la canción."""
+        import time as _t
+        try:
+            datos = self.ctx.coleccion.estado("reabrir")
+        except Exception:  # noqa: BLE001
+            return
+        if not datos:
+            return
+        try:
+            self.ctx.coleccion.guardar_estado("reabrir", None)
+        except Exception:  # noqa: BLE001
+            pass
+        if _t.time() - float(datos.get("cuando") or 0) > 120:
+            return
+        if datos.get("pagina"):
+            QTimer.singleShot(0, lambda: self.navegar({"pagina": datos["pagina"]}))
+        QTimer.singleShot(0, lambda: self.aviso.mostrar("Listo: Caudal ya tiene sus colores nuevos"))
+        if datos.get("sonando") and self.r.actual is not None:
+            QTimer.singleShot(400, self.r.reanudar)
 
     def salir(self):
         """La unica salida: guarda, para todo y termina el proceso de verdad."""

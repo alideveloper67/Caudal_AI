@@ -51,10 +51,15 @@ class _Trabajo(QRunnable):
 
 _POOL = QThreadPool()
 _POOL.setMaxThreadCount(8)
+# carril aparte para lo que la persona espera al instante (enviar un mensaje,
+# abrir un chat): asi no se queda en cola detras de la musica, las letras o
+# el analisis de las transiciones, que pueden ocupar el carril normal un rato
+_POOL_RAPIDO = QThreadPool()
+_POOL_RAPIDO.setMaxThreadCount(4)
 _vivos = set()
 
 
-def en_segundo_plano(funcion, *args, ok=None, error=None, dueno=None, **kwargs):
+def en_segundo_plano(funcion, *args, ok=None, error=None, dueno=None, urgente=False, **kwargs):
     trabajo = _Trabajo(funcion, args, kwargs)
     senales = trabajo.senales
     _vivos.add(senales)
@@ -75,9 +80,10 @@ def en_segundo_plano(funcion, *args, ok=None, error=None, dueno=None, **kwargs):
 
     senales.listo.connect(_ok)
     senales.fallo.connect(_error)
-    _POOL.start(trabajo)
+    (_POOL_RAPIDO if urgente else _POOL).start(trabajo)
     return trabajo
 
 
 def esperar_todo(ms=3000):
     _POOL.waitForDone(ms)
+    _POOL_RAPIDO.waitForDone(ms)

@@ -1,16 +1,20 @@
 # -*- coding: utf-8 -*-
 """Ventanas de los términos, los datos básicos y la privacidad (escritorio)."""
 
+import calendar
 from datetime import date
 
-from PySide6.QtCore import QDate, Qt, Signal
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QDateEdit, QDialog, QHBoxLayout, QInputDialog,
+from PySide6.QtCore import Qt, QTimer, Signal
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QHBoxLayout, QInputDialog,
                                QLabel, QLineEdit, QMessageBox, QPushButton, QTextBrowser, QVBoxLayout,
                                QWidget)
 
 from .. import legal
 from . import iconos
 from .estilos import C, hoja
+
+MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto",
+         "septiembre", "octubre", "noviembre", "diciembre"]
 
 
 def _estilo(w):
@@ -44,7 +48,12 @@ def abrir_legal(nombre, padre=None):
 
 
 class CamposPerfil(QWidget):
-    """Fecha de nacimiento, país, género y el permiso del tutor (si es menor)."""
+    """Fecha de nacimiento, país, género y el permiso del tutor (si es menor).
+
+    La fecha son tres listas (día, mes, año): el campo de fecha de Qt salía en
+    blanco y obligaba a ir mes a mes por el calendario. Al elegir el día se
+    abre el mes, y al elegir el mes, el año; el día nunca puede quedar
+    imposible (31 de febrero) y debajo se confirma la edad que resulta."""
     cambio = Signal()
 
     def __init__(self, padre=None, perfil=None):
@@ -52,62 +61,140 @@ class CamposPerfil(QWidget):
         perfil = perfil or {}
         v = QVBoxLayout(self)
         v.setContentsMargins(0, 0, 0, 0)
-        v.setSpacing(8)
-        fila = QHBoxLayout()
-        col1 = QVBoxLayout()
-        et = QLabel("Fecha de nacimiento")
-        et.setObjectName("ayuda")
-        col1.addWidget(et)
-        self.fecha = QDateEdit()
-        self.fecha.setCalendarPopup(True)
-        self.fecha.setDisplayFormat("dd/MM/yyyy")
-        self.fecha.setMinimumDate(QDate(1900, 1, 1))
-        self.fecha.setMaximumDate(QDate.currentDate())
-        self.fecha.setSpecialValueText("Elegir")
+        v.setSpacing(5)
+        v.addWidget(self._etiqueta("Fecha de nacimiento"))
+        fecha = QHBoxLayout()
+        fecha.setSpacing(8)
         nac = perfil.get("nacimiento")
-        self.fecha.setDate(QDate(nac.year, nac.month, nac.day) if nac else self.fecha.minimumDate())
-        self.fecha.dateChanged.connect(self._al_cambiar)
-        col1.addWidget(self.fecha)
-        fila.addLayout(col1, 1)
-        col2 = QVBoxLayout()
-        et2 = QLabel("País")
-        et2.setObjectName("ayuda")
-        col2.addWidget(et2)
-        self.pais = QComboBox()
-        for k, n in legal.PAISES.items():
-            self.pais.addItem(n, k)
-        i = self.pais.findData(perfil.get("pais") or "PE")
-        self.pais.setCurrentIndex(max(0, i))
-        col2.addWidget(self.pais)
-        fila.addLayout(col2, 1)
-        v.addLayout(fila)
-        et3 = QLabel("Género (opcional)")
-        et3.setObjectName("ayuda")
-        v.addWidget(et3)
-        self.genero = QComboBox()
-        self.genero.addItem("Elegir (opcional)", "")
-        for k, n in legal.GENEROS.items():
-            self.genero.addItem(n, k)
-        self.genero.setCurrentIndex(max(0, self.genero.findData(perfil.get("genero") or "")))
-        v.addWidget(self.genero)
-        self.tutor = QCheckBox("Soy la madre, el padre o el tutor y doy permiso para que use Caudal")
-        self.tutor.hide()
-        v.addWidget(self.tutor)
+        self.dia = self._lista("Día", [(str(i), i) for i in range(1, 32)])
+        self.mes = self._lista("Mes", [(m.capitalize(), i) for i, m in enumerate(MESES, 1)])
+        hoy = date.today().year
+        self.anio = self._lista("Año", [(str(a), a) for a in range(hoy, hoy - 101, -1)])
+        self.anio.setToolTip("Escribe el año con el teclado para saltar a él (por ejemplo 1998)")
+        for c, estira in ((self.dia, 2), (self.mes, 4), (self.anio, 3)):
+            fecha.addWidget(c, estira)
+        v.addLayout(fecha)
+        if nac:
+            self.anio.setCurrentIndex(max(0, self.anio.findData(nac.year)))
+            self.mes.setCurrentIndex(max(0, self.mes.findData(nac.month)))
+            self._ajustar_dias()
+            self.dia.setCurrentIndex(max(0, self.dia.findData(nac.day)))
+        # el siguiente se abre solo: tres clics y listo
+        self.dia.activated.connect(lambda _i: self._siguiente(self.dia, self.mes))
+        self.dia.activated.connect(lambda _i: setattr(self, "_dia_querido", self.dia.currentData()))
+        self.mes.activated.connect(lambda _i: self._siguiente(self.mes, self.anio))
+        for c in (self.dia, self.mes, self.anio):
+            c.currentIndexChanged.connect(self._al_cambiar)
+        self.edad = QLabel("")
+        self.edad.setObjectName("ayuda")
+        self.edad.setWordWrap(True)
+        v.addWidget(self.edad)
 
+        v.addSpacing(6)
+        fila = QHBoxLayout()
+        fila.setSpacing(10)
+        col_p = QVBoxLayout()
+        col_p.setSpacing(5)
+        col_p.addWidget(self._etiqueta("País"))
+        self.pais = self._lista(None, [(n, k) for k, n in legal.PAISES.items()])
+        self.pais.setCurrentIndex(max(0, self.pais.findData(perfil.get("pais") or "PE")))
+        col_p.addWidget(self.pais)
+        fila.addLayout(col_p, 1)
+        col_g = QVBoxLayout()
+        col_g.setSpacing(5)
+        col_g.addWidget(self._etiqueta("Género (opcional)"))
+        self.genero = self._lista("Prefiero no elegir", [(n, k) for k, n in legal.GENEROS.items()], vacio="")
+        self.genero.setCurrentIndex(max(0, self.genero.findData(perfil.get("genero") or "")))
+        col_g.addWidget(self.genero)
+        fila.addLayout(col_g, 1)
+        v.addLayout(fila)
+        self.tutor = QCheckBox("Soy la madre, el padre o el tutor y doy permiso para que use Caudal")
+        self.tutor.setCursor(Qt.PointingHandCursor)
+        self.tutor.hide()
+        self.tutor.toggled.connect(lambda _v: self.cambio.emit())
+        v.addSpacing(4)
+        v.addWidget(self.tutor)
+        self._al_cambiar()
+
+    # ------------------------------------------------------------ piezas
+    def _etiqueta(self, texto):
+        et = QLabel(texto)
+        et.setStyleSheet("font-size:13px;font-weight:700;")
+        return et
+
+    def _lista(self, vacio_texto, opciones, vacio=0):
+        c = QComboBox()
+        c.setMinimumHeight(42)
+        c.setMinimumWidth(0)
+        c.setSizeAdjustPolicy(QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        c.setMinimumContentsLength(3)
+        c.setMaxVisibleItems(12)
+        c.setCursor(Qt.PointingHandCursor)
+        c.setStyleSheet(f"QComboBox{{font-size:14px;border-radius:10px;padding:8px 12px;"
+                        f"background:{C['superficie2']};border:1px solid {C['borde_claro']};}}"
+                        f"QComboBox:focus{{border:2px solid {C['acento']};}}")
+        if vacio_texto:
+            c.addItem(vacio_texto, vacio)
+        for texto, valor in opciones:
+            c.addItem(texto, valor)
+        return c
+
+    def _siguiente(self, actual, siguiente):
+        if actual.currentData() and not siguiente.currentData():
+            siguiente.setFocus()
+            QTimer.singleShot(60, siguiente.showPopup)
+
+    def _ajustar_dias(self):
+        """Los días que tiene ese mes (febrero de un año bisiesto incluido)."""
+        m, a = self.mes.currentData(), self.anio.currentData()
+        tope = calendar.monthrange(a or 2000, m)[1] if m else 31
+        elegido = self.dia.currentData()
+        if self.dia.count() - 1 == tope:
+            return
+        self.dia.blockSignals(True)
+        while self.dia.count() - 1 > tope:
+            self.dia.removeItem(self.dia.count() - 1)
+        while self.dia.count() - 1 < tope:
+            n = self.dia.count()
+            self.dia.addItem(str(n), n)
+        querido = getattr(self, "_dia_querido", 0) or elegido   # el 31 vuelve al salir de febrero
+        if querido:
+            self.dia.setCurrentIndex(min(querido, tope))
+        self.dia.blockSignals(False)
+
+    # ------------------------------------------------------------ valores
     def nacimiento(self):
-        d = self.fecha.date()
-        if d == self.fecha.minimumDate():
+        d, m, a = self.dia.currentData(), self.mes.currentData(), self.anio.currentData()
+        if not (d and m and a):
             return None
-        return date(d.year(), d.month(), d.day())
+        return date(a, m, min(d, calendar.monthrange(a, m)[1]))
 
     def _al_cambiar(self, *_):
+        self._ajustar_dias()
         n = self.nacimiento()
-        self.tutor.setVisible(n is not None and legal.edad(n) < legal.EDAD_MINIMA)
+        if n is None:
+            faltan = [t for t, c in (("el día", self.dia), ("el mes", self.mes), ("el año", self.anio))
+                      if not c.currentData()]
+            self.edad.setStyleSheet("")
+            if len(faltan) == 3:
+                self.edad.setText("Solo la usamos para comprobar tu edad. No se muestra a nadie.")
+            else:
+                self.edad.setText("Falta elegir " + " y ".join(faltan) + ".")
+            self.tutor.hide()
+        else:
+            e = legal.edad(n)
+            menor = e < legal.EDAD_MINIMA
+            self.edad.setStyleSheet(f"color:{C['aviso'] if menor else C['exito']};font-weight:600;")
+            self.edad.setText(f"{n.day} de {MESES[n.month - 1]} de {n.year} · tienes {e} años"
+                              + (f". Al ser menor de {legal.EDAD_MINIMA}, una persona adulta "
+                                 "responsable tiene que dar su permiso aquí abajo." if menor else " ✓"))
+            self.tutor.setVisible(menor)
         self.cambio.emit()
 
     def valores(self):
         return {"nacimiento": self.nacimiento(), "pais": self.pais.currentData(),
-                "genero": self.genero.currentData() or None, "permiso_tutor": self.tutor.isChecked()}
+                "genero": self.genero.currentData() or None,
+                "permiso_tutor": self.tutor.isChecked() and not self.tutor.isHidden()}
 
 
 class CasillasLegales(QWidget):

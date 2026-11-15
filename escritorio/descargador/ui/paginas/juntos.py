@@ -463,7 +463,7 @@ class PaginaJuntos(QWidget):
         hora = time.strftime("%H:%M", time.localtime((m.get("t") or 0) / 1000))
         quien = "" if mio else f"<b style='color:{C['acento']}'>{_html(m.get('nombre'))}</b><br>"
         burbuja.setText(f"{quien}{_html(m.get('texto'))}"
-                        f"<span style='color:{'#2A5A66' if mio else C['texto3']};font-size:10px'>  {hora}</span>")
+                        f"<span style='color:{C['acento_texto'] if mio else C['texto3']};font-size:10px'>  {hora}</span>")
         burbuja.setStyleSheet(
             f"background:{C['acento'] if mio else C['superficie2']};color:{C['acento_texto'] if mio else C['texto']};"
             "border-radius:12px;padding:7px 10px;")

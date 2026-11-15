@@ -52,11 +52,83 @@ FONDOS = {
 }
 
 
+# lo que se está viendo ahora mismo (lo que se aplicó al arrancar)
+ACTUAL = {"acento": "cian", "fondo": "oscuro"}
+
+
+def _rgb(hexa):
+    h = str(hexa or "").strip().lstrip("#")
+    if len(h) == 3:
+        h = "".join(c * 2 for c in h)
+    if len(h) != 6:
+        return None
+    try:
+        return tuple(int(h[i:i + 2], 16) for i in (0, 2, 4))
+    except ValueError:
+        return None
+
+
+def _hex(rgb):
+    return "#%02X%02X%02X" % tuple(max(0, min(255, round(c))) for c in rgb)
+
+
+def _mezcla(a, b, t):
+    """De a hacia b (t = 0 → a, t = 1 → b)."""
+    return tuple(x + (y - x) * t for x, y in zip(a, b))
+
+
+def _luz(rgb):
+    def canal(c):
+        c /= 255
+        return c / 12.92 if c <= 0.04045 else ((c + 0.055) / 1.055) ** 2.4
+    r, g, b = (canal(c) for c in rgb)
+    return 0.2126 * r + 0.7152 * g + 0.0722 * b
+
+
+def es_color(valor):
+    """True si es un color propio (#RRGGBB) y no uno de la lista."""
+    return str(valor or "").startswith("#") and _rgb(valor) is not None
+
+
+def acento_de(valor):
+    """(etiqueta, acento, alto, bajo, texto) de un acento de la lista o de un color propio."""
+    if valor in ACENTOS:
+        return ACENTOS[valor]
+    rgb = _rgb(valor) if es_color(valor) else None
+    if rgb is None:
+        return ACENTOS["cian"]
+    # un acento demasiado oscuro no se ve sobre el fondo: se aclara lo justo
+    while _luz(rgb) < 0.10:
+        rgb = _mezcla(rgb, (255, 255, 255), 0.12)
+    alto = _mezcla(rgb, (255, 255, 255), 0.35)
+    bajo = _mezcla(rgb, (0, 0, 0), 0.18)
+    # texto encima del acento: oscuro teñido del mismo color, o blanco si el acento es oscuro
+    texto = _mezcla(rgb, (0, 0, 0), 0.85) if _luz(rgb) > 0.22 else (255, 255, 255)
+    return ("Tu color", _hex(rgb), _hex(alto), _hex(bajo), _hex(texto))
+
+
+def fondo_de(valor):
+    """(etiqueta, fondo, panel, superficie, superficie2, superficie3, hover, borde)."""
+    if valor in FONDOS:
+        return FONDOS[valor]
+    rgb = _rgb(valor) if es_color(valor) else None
+    if rgb is None:
+        return FONDOS["oscuro"]
+    # el fondo siempre oscuro (el texto es claro): se baja la luz si hace falta
+    while _luz(rgb) > 0.035:
+        rgb = _mezcla(rgb, (0, 0, 0), 0.15)
+    blanco = (255, 255, 255)
+    capas = [_mezcla(rgb, blanco, t) for t in (0.0, 0.035, 0.06, 0.09, 0.14, 0.11, 0.12)]
+    return ("Tu fondo",) + tuple(_hex(c) for c in capas)
+
+
 def aplicar_aspecto(acento, fondo):
-    """Cambia la paleta. Se llama al arrancar, antes de construir la ventana."""
-    a = ACENTOS.get(acento) or ACENTOS["cian"]
+    """Cambia la paleta. Se llama al arrancar, antes de construir la ventana.
+    Acepta los nombres de la lista (los mismos del teléfono) o un color propio #RRGGBB."""
+    ACTUAL["acento"], ACTUAL["fondo"] = acento, fondo
+    a = acento_de(acento)
     C.update(acento=a[1], acento_alto=a[2], acento_bajo=a[3], acento_texto=a[4])
-    f = FONDOS.get(fondo) or FONDOS["oscuro"]
+    f = fondo_de(fondo)
     C.update(fondo=f[1], panel=f[2], superficie=f[3], superficie2=f[4], superficie3=f[5],
              hover=f[6], borde=f[7])
 

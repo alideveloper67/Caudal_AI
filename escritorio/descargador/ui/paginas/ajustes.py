@@ -88,6 +88,15 @@ class PaginaAjustes(Pagina):
         self.cuerpo.addWidget(t)
         self.cuerpo.setSpacing(16)
 
+        # ---------------- aspecto
+        from ..aspecto import SelectorAspecto
+        from ..estilos import ACTUAL
+        s = Seccion("Aspecto")
+        self.selector_aspecto = SelectorAspecto(a, (ACTUAL["acento"], ACTUAL["fondo"]))
+        self.selector_aspecto.aplicar.connect(self._aplicar_aspecto)
+        s.v.addWidget(self.selector_aspecto)
+        self.cuerpo.addWidget(s)
+
         # ---------------- reproduccion
         s = Seccion("Reproducción")
         self.calidad_audio = _combo([("Máxima (Opus ~160 kbps, o 256 kbps con Premium)", "maxima"),
@@ -152,24 +161,6 @@ class PaginaAjustes(Pagina):
         self._conectar(self.region, "region", lambda: catalogo.fijar_region(self.a["region"]))
         s.fila("País para las recomendaciones", "Inicio, novedades y tendencias de este país.",
                self.region)
-        self.cuerpo.addWidget(s)
-
-        # ---------------- aspecto
-        from ..estilos import ACENTOS, FONDOS
-        s = Seccion("Aspecto")
-        self.acento = _combo([(v[0], k) for k, v in ACENTOS.items()], a["acento"], 200)
-        self._conectar(self.acento, "acento", self._aspecto_cambiado)
-        s.fila("Color de la app", "Botones, lo que suena y los detalles de la app.", self.acento)
-        self.fondo = _combo([(v[0], k) for k, v in FONDOS.items()], a["fondo"], 200)
-        self._conectar(self.fondo, "fondo", self._aspecto_cambiado)
-        s.fila("Fondo de la app", "Del negro puro al azul noche.", self.fondo)
-        self.bt_reiniciar = QPushButton("Reiniciar Caudal para verlo")
-        self.bt_reiniciar.setObjectName("principal")
-        self.bt_reiniciar.setCursor(Qt.PointingHandCursor)
-        self.bt_reiniciar.clicked.connect(lambda: getattr(ctx, "reiniciar", lambda: None)())
-        self.bt_reiniciar.hide()
-        s.fila("", "El nuevo aspecto se ve al volver a abrir Caudal (no se pierde nada).",
-               self.bt_reiniciar)
         self.cuerpo.addWidget(s)
 
         # ---------------- sonido
@@ -431,8 +422,12 @@ class PaginaAjustes(Pagina):
             widget.currentIndexChanged.connect(
                 lambda _i: (self._poner(clave, widget.currentData()), despues and despues()))
 
-    def _aspecto_cambiado(self):
-        self.bt_reiniciar.show()
+    def _aplicar_aspecto(self):
+        ventana = getattr(self.ctx, "ventana", None)
+        if ventana is not None and hasattr(ventana, "reabrir_con_aspecto"):
+            ventana.reabrir_con_aspecto()
+        else:
+            getattr(self.ctx, "reiniciar", lambda: None)()
 
     def _fundido(self, v, guardar=True):
         self.et_fundido.setText(f"{v} s" if v else "Sin fundido")

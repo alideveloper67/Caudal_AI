@@ -192,7 +192,7 @@ class VentanaAcceso(QWidget):
         # --- crear
         p2 = QWidget()
         v2 = QVBoxLayout(p2)
-        v2.setContentsMargins(0, 6, 0, 0)
+        v2.setContentsMargins(0, 6, 14, 0)   # sitio para la barra de desplazamiento
         v2.setSpacing(10)
         self.n_nombre = _Campo("Tu nombre y apellido", "como aparece en tu documento")
         self.n_usuario = _Campo("Usuario", "de 3 a 30 letras o números, sin espacios")
@@ -210,6 +210,7 @@ class VentanaAcceso(QWidget):
         envoltura = QScrollArea()
         envoltura.setWidgetResizable(True)
         envoltura.setFrameShape(QFrame.NoFrame)
+        envoltura.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         envoltura.setWidget(p2)
         envoltura.setStyleSheet("QScrollArea{background:transparent;}")
         p2.setStyleSheet("background:transparent;")

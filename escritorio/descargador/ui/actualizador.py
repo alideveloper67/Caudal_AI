@@ -7,6 +7,7 @@ from PySide6.QtWidgets import (QDialog, QHBoxLayout, QLabel, QProgressBar,
 
 from .. import version
 from . import iconos
+from .estilos import C
 
 
 class Buscador(QThread):
@@ -89,7 +90,7 @@ class DialogoActualizacion(QDialog):
 
         self.bt_instalar = QPushButton("  Instalar ahora")
         self.bt_instalar.setObjectName("principal")
-        self.bt_instalar.setIcon(iconos.icono("descargar", 16, "#04202A"))
+        self.bt_instalar.setIcon(iconos.icono("descargar", 16, C["acento_texto"]))
         self.bt_instalar.setCursor(Qt.PointingHandCursor)
         self.bt_instalar.clicked.connect(self._instalar)
         fila.addWidget(self.bt_instalar)

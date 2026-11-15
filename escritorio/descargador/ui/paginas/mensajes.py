@@ -5,7 +5,7 @@ la derecha, con canciones que se tocan para sonar, emojis y «Mezcla»."""
 import time
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtWidgets import (QFrame, QHBoxLayout, QInputDialog, QLabel, QLineEdit, QMenu,
+from PySide6.QtWidgets import (QDialog, QFrame, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QLineEdit, QMenu,
                                QPushButton, QScrollArea, QToolButton, QVBoxLayout, QWidget)
 
 from ... import chat as CH
@@ -36,32 +36,117 @@ def _html(t):
     return str(t or "").replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>")
 
 
+class DialogoNuevoChat(QDialog):
+    """Busca a alguien por su usuario mientras se escribe y abre el chat."""
+
+    def __init__(self, ctx, chat, padre=None):
+        super().__init__(padre)
+        from .. import iconos as _i
+        from ..estilos import hoja
+        self.setObjectName("raiz")
+        self.setAttribute(Qt.WA_StyledBackground, True)
+        self.setStyleSheet(hoja(_i.flechas_qss()))
+        self.setWindowTitle("Nuevo mensaje · Caudal")
+        self.setMinimumWidth(440)
+        self.ctx = ctx
+        self.chat = chat
+        self.persona = None
+        self.resultado = None
+        self.yo = ((getattr(ctx, "cuenta", None) or {}).get("usuario") or "").lower()
+        v = QVBoxLayout(self)
+        v.setContentsMargins(24, 20, 24, 18)
+        v.setSpacing(10)
+        t = QLabel("Nuevo mensaje")
+        t.setStyleSheet("font-size:20px;font-weight:900;")
+        v.addWidget(t)
+        self.campo = QLineEdit()
+        self.campo.setPlaceholderText("@usuario de la otra persona")
+        self.campo.textEdited.connect(self._al_escribir)
+        self.campo.returnPressed.connect(self._abrir)
+        v.addWidget(self.campo)
+        self.estado = QLabel("Escribe su usuario de Caudal (el que usa para entrar).")
+        self.estado.setWordWrap(True)
+        self.estado.setObjectName("secundario")
+        v.addWidget(self.estado)
+        fila = QHBoxLayout()
+        fila.addStretch(1)
+        cancelar = QPushButton("Cancelar")
+        cancelar.setObjectName("contorno")
+        cancelar.clicked.connect(self.reject)
+        fila.addWidget(cancelar)
+        self.bt = QPushButton("Escribir")
+        self.bt.setObjectName("principal")
+        self.bt.setEnabled(False)
+        self.bt.clicked.connect(self._abrir)
+        fila.addWidget(self.bt)
+        v.addLayout(fila)
+        self.reloj = QTimer(self)
+        self.reloj.setSingleShot(True)
+        self.reloj.setInterval(450)
+        self.reloj.timeout.connect(self._buscar)
+
+    def _escrito(self):
+        return self.campo.text().strip().lstrip("@").lower()
+
+    def _al_escribir(self, _t):
+        self.persona = None
+        self.bt.setEnabled(False)
+        u = self._escrito()
+        if len(u) < 3:
+            self.estado.setText("Escribe su usuario de Caudal (el que usa para entrar)." if not u
+                                else "Sigue escribiendo…")
+            return
+        if u == self.yo:
+            self.estado.setText("Ese es tu propio usuario. Escribe el de la otra persona.")
+            return
+        self.estado.setText("Buscando…")
+        self.reloj.start()
+
+    def _buscar(self):
+        u = self._escrito()
+
+        def listo(p):
+            if u != self._escrito():
+                return
+            self.persona = p
+            self.bt.setEnabled(p is not None)
+            if p:
+                self.estado.setText(f"<b>{_html(p.get('nombre') or p['usuario'])}</b>  @{_html(p['usuario'])}"
+                                    "  — pulsa «Escribir»")
+            else:
+                self.estado.setText(f"No hay nadie con el usuario «{_html(u)}». Revisa que esté bien escrito.")
+
+        en_segundo_plano(self.chat.buscar, u, ok=listo,
+                         error=lambda _e: self.estado.setText("No se pudo conectar. Revisa tu internet."),
+                         dueno=self, urgente=True)
+
+    def _abrir(self):
+        p = self.persona
+        if not p:
+            return
+        self.bt.setEnabled(False)
+        self.bt.setText("Abriendo…")
+
+        def listo(cid):
+            self.resultado = {"id": cid, "otro": p["id"], "usuario": p["usuario"], "nombre": p.get("nombre") or "",
+                              "visible": p.get("nombre") or p["usuario"]}
+            self.accept()
+
+        en_segundo_plano(self.chat.abrir, p["id"], ok=listo,
+                         error=lambda _e: (self.estado.setText("No se pudo abrir la conversación."),
+                                           self.bt.setEnabled(True), self.bt.setText("Escribir")),
+                         dueno=self, urgente=True)
+
+
 def nuevo_chat(ctx, padre, al_listo):
-    """Pide un usuario y abre (o crea) la conversación con esa persona."""
+    """Pide un usuario (buscando mientras se escribe) y abre el chat."""
     c = chat_de(ctx)
     if c is None:
         ctx.aviso.emit("Los mensajes necesitan internet.")
         return
-    usuario, ok = QInputDialog.getText(padre, "Escribir a…", "Usuario de Caudal de la otra persona:")
-    if not ok or not usuario.strip():
-        return
-
-    def buscar():
-        p = c.buscar(usuario)
-        if p is None:
-            return None
-        cid = c.abrir(p["id"])
-        return {"id": cid, "otro": p["id"], "usuario": p["usuario"], "nombre": p.get("nombre") or "",
-                "visible": p.get("nombre") or p["usuario"]}
-
-    def listo(r):
-        if r is None:
-            ctx.aviso.emit(f"No hay nadie con el usuario «{usuario.strip()}». Pídele el suyo exacto.")
-            return
-        al_listo(r)
-
-    en_segundo_plano(buscar, ok=listo, error=lambda _e: ctx.aviso.emit("No se pudo conectar."),
-                     dueno=padre)
+    d = DialogoNuevoChat(ctx, c, padre)
+    if d.exec() == QDialog.Accepted and d.resultado:
+        al_listo(d.resultado)
 
 
 def enviar_pista_a_chat(ctx, pista):
@@ -75,8 +160,8 @@ def enviar_pista_a_chat(ctx, pista):
     def mandar(destino):
         en_segundo_plano(c.enviar, destino["id"], "", pista,
                          ok=lambda _m: ctx.aviso.emit(f"Enviada a {destino['visible']}"),
-                         error=lambda _e: ctx.aviso.emit("No se pudo enviar. Revisa tu internet."),
-                         dueno=ventana)
+                         error=lambda e: ctx.aviso.emit(_motivo(e)),
+                         dueno=ventana, urgente=True)
 
     def con_chats(chats):
         from PySide6.QtGui import QCursor
@@ -91,17 +176,34 @@ def enviar_pista_a_chat(ctx, pista):
 
     en_segundo_plano(c.mis_chats, ok=con_chats,
                      error=lambda _e: ctx.aviso.emit("No se pudo conectar. Revisa tu internet."),
-                     dueno=ventana)
+                     dueno=ventana, urgente=True)
+
+
+def _motivo(e, que="enviar"):
+    """Un error de la nube contado para personas (sin jerga)."""
+    from ...nube import ErrorNube, SinConexion
+    if isinstance(e, SinConexion):
+        return "Sin conexión. Revisa tu internet y vuelve a intentarlo."
+    if isinstance(e, ErrorNube) and str(e).strip():
+        return str(e)
+    return f"No se pudo {que}. Vuelve a intentarlo."
 
 
 class PaginaMensajes(QWidget):
+    ANCHO_LISTA = 320      # la lista de chats cuando sobra espacio
+    ESTRECHO = 700         # por debajo, se ve la lista o el chat, no los dos
+
     def __init__(self, ctx, padre=None):
         super().__init__(padre)
         self.ctx = ctx
         self.titulo = "Mensajes"
         self.chat = chat_de(ctx)
         self.actual = None
-        self.mensajes = []
+        self.mensajes = []          # los confirmados por el servidor
+        self.pendientes = {}        # clave local -> (burbuja, etiqueta de hora, texto, pista)
+        self._siguiente_local = 0
+        self._enviando = 0
+        self.cargando = None
         self.setObjectName("lienzo")
         self.setAttribute(Qt.WA_StyledBackground, True)
         h = QHBoxLayout(self)
@@ -110,31 +212,42 @@ class PaginaMensajes(QWidget):
 
         # ---- lista de conversaciones
         izq = QVBoxLayout()
+        izq.setContentsMargins(0, 0, 0, 0)
         cab = QHBoxLayout()
         t = QLabel("Mensajes")
         t.setObjectName("titulo_pagina")
         cab.addWidget(t)
         cab.addStretch(1)
-        nuevo = QPushButton("Nuevo")
+        nuevo = QPushButton("  Nuevo")
+        nuevo.setIcon(iconos.icono("mas", 16, C["acento_texto"]))
         nuevo.setObjectName("principal")
         nuevo.setCursor(Qt.PointingHandCursor)
+        nuevo.setToolTip("Escribirle a alguien por su usuario de Caudal")
         nuevo.clicked.connect(lambda: nuevo_chat(self.ctx, self, self._abrir))
         cab.addWidget(nuevo)
         izq.addLayout(cab)
         self.scroll_lista = QScrollArea()
         self.scroll_lista.setWidgetResizable(True)
         self.scroll_lista.setFrameShape(QFrame.NoFrame)
+        self.scroll_lista.setStyleSheet("QScrollArea{background:transparent;border:none;}")
+        self.scroll_lista.viewport().setAutoFillBackground(False)
         self.interior_lista = QWidget()
+        self.interior_lista.setObjectName("interior_lista")
+        self.interior_lista.setStyleSheet("QWidget#interior_lista{background:transparent;}")
         self.lay_lista = QVBoxLayout(self.interior_lista)
         self.lay_lista.setContentsMargins(0, 0, 0, 0)
         self.lay_lista.setSpacing(4)
+        cargando = QLabel("Cargando tus conversaciones…")
+        cargando.setObjectName("ayuda")
+        self.lay_lista.addWidget(cargando)
         self.lay_lista.addStretch(1)
+        self._lista_cargada = False
         self.scroll_lista.setWidget(self.interior_lista)
         izq.addWidget(self.scroll_lista, 1)
-        caja_izq = QWidget()
-        caja_izq.setLayout(izq)
-        caja_izq.setFixedWidth(320)
-        h.addWidget(caja_izq)
+        self.caja_izq = QWidget()
+        self.caja_izq.setLayout(izq)
+        self.caja_izq.setFixedWidth(self.ANCHO_LISTA)
+        h.addWidget(self.caja_izq)
 
         # ---- la conversación
         self.panel = QFrame()
@@ -145,8 +258,19 @@ class PaginaMensajes(QWidget):
         vp.setContentsMargins(16, 12, 16, 12)
         vp.setSpacing(8)
         cab2 = QHBoxLayout()
+        cab2.setSpacing(8)
+        self.bt_volver = QToolButton()
+        self.bt_volver.setIcon(iconos.icono("atras", 18, C["texto"]))
+        self.bt_volver.setToolTip("Volver a tus conversaciones")
+        self.bt_volver.setCursor(Qt.PointingHandCursor)
+        self.bt_volver.setStyleSheet(f"QToolButton{{background:{C['superficie2']};border:none;border-radius:10px;"
+                                     "padding:6px;}")
+        self.bt_volver.clicked.connect(self._volver_a_lista)
+        self.bt_volver.hide()
+        cab2.addWidget(self.bt_volver)
         self.et_con = QLabel("Elige una conversación o empieza una nueva")
         self.et_con.setStyleSheet("font-size:18px;font-weight:800;background:transparent;")
+        self.et_con.setMinimumWidth(60)
         cab2.addWidget(self.et_con, 1)
         self.bt_mezcla = QPushButton("  Mezcla")
         self.bt_mezcla.setIcon(iconos.icono("estrella", 16, C["texto"]))
@@ -159,9 +283,11 @@ class PaginaMensajes(QWidget):
         self.scroll = QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setFrameShape(QFrame.NoFrame)
-        self.scroll.setStyleSheet("background:transparent;")
+        self.scroll.setStyleSheet("QScrollArea{background:transparent;border:none;}")
+        self.scroll.viewport().setAutoFillBackground(False)
         self.interior = QWidget()
-        self.interior.setStyleSheet("background:transparent;")
+        self.interior.setObjectName("interior_chat")
+        self.interior.setStyleSheet("QWidget#interior_chat{background:transparent;}")
         self.lay = QVBoxLayout(self.interior)
         self.lay.setContentsMargins(0, 0, 6, 0)
         self.lay.setSpacing(6)
@@ -173,6 +299,8 @@ class PaginaMensajes(QWidget):
         self.bt_emoji = QToolButton()
         self.bt_emoji.setText("😊")
         self.bt_emoji.setFont(_fuente_emoji(15))
+        self.bt_emoji.setToolTip("Emojis")
+        self.bt_emoji.setCursor(Qt.PointingHandCursor)
         self.bt_emoji.setPopupMode(QToolButton.InstantPopup)
         self.bt_emoji.setStyleSheet(f"QToolButton{{background:{C['superficie2']};border:none;border-radius:10px;"
                                     "padding:6px 8px;}QToolButton::menu-indicator{image:none;}")
@@ -180,23 +308,25 @@ class PaginaMensajes(QWidget):
         fila.addWidget(self.bt_emoji)
         self.bt_suena = QToolButton()
         self.bt_suena.setIcon(iconos.icono("musica", 18, C["acento"]))
-        self.bt_suena.setToolTip("Enviar lo que suena")
+        self.bt_suena.setToolTip("Enviar la canción que está sonando")
         self.bt_suena.setCursor(Qt.PointingHandCursor)
         self.bt_suena.setStyleSheet(f"QToolButton{{background:{C['superficie2']};border:none;border-radius:10px;"
-                                    "padding:7px;}")
+                                    f"padding:7px;}}QToolButton:hover{{background:{C['superficie3']};}}")
         self.bt_suena.clicked.connect(self._enviar_suena)
         fila.addWidget(self.bt_suena)
         self.campo = QLineEdit()
-        self.campo.setPlaceholderText("Mensaje")
+        self.campo.setPlaceholderText("Escribe un mensaje")
         self.campo.setMaxLength(2000)
+        self.campo.setMinimumWidth(80)
         self.campo.setFont(_fuente_emoji(10.5))
         self.campo.returnPressed.connect(self._enviar)
+        self.campo.textChanged.connect(self._al_escribir)
         fila.addWidget(self.campo, 1)
-        enviar = QPushButton("Enviar")
-        enviar.setObjectName("principal")
-        enviar.setCursor(Qt.PointingHandCursor)
-        enviar.clicked.connect(self._enviar)
-        fila.addWidget(enviar)
+        self.bt_enviar = QPushButton("Enviar")
+        self.bt_enviar.setObjectName("principal")
+        self.bt_enviar.setCursor(Qt.PointingHandCursor)
+        self.bt_enviar.clicked.connect(lambda: self._enviar())
+        fila.addWidget(self.bt_enviar)
         vp.addLayout(fila)
         h.addWidget(self.panel, 1)
         self._activar(False)
@@ -212,43 +342,132 @@ class PaginaMensajes(QWidget):
         else:
             self._cargar_lista()
             self.reloj_lista.start()
+        # «Enviar lo que suena» dice qué canción va a mandar
+        r = getattr(ctx, "reproductor", None)
+        if r is not None and hasattr(r, "pista_cambio"):
+            r.pista_cambio.connect(self._al_cambiar_pista)
+        self._al_cambiar_pista(getattr(r, "actual", None))
 
+    # ------------------------------------------------------------ estado
     def _activar(self, si):
         for w in (self.bt_mezcla, self.bt_emoji, self.bt_suena, self.campo):
             w.setEnabled(si)
+        self.bt_enviar.setEnabled(si and bool(self.campo.text().strip()))
+
+    def _al_escribir(self, texto):
+        self.bt_enviar.setEnabled(self.actual is not None and bool(texto.strip()))
+
+    def _al_cambiar_pista(self, p):
+        try:
+            if p and p.get("video_id"):
+                self.bt_suena.setToolTip(f"Enviar «{p.get('titulo') or 'lo que suena'}»")
+            elif p:
+                self.bt_suena.setToolTip("Lo que suena es un archivo de tu disco: solo se pueden enviar "
+                                         "canciones de YouTube Music")
+            else:
+                self.bt_suena.setToolTip("Enviar la canción que está sonando (ahora no suena nada)")
+        except RuntimeError:
+            pass
 
     def _sin_red(self):
-        et = QLabel("Los mensajes necesitan internet. Vuelve a abrir Caudal con conexión.")
+        _borrar_layout(self.lay_lista)
+        et = QLabel("Los mensajes necesitan una cuenta de Caudal con internet. "
+                    "Vuelve a abrir Caudal con conexión.")
         et.setWordWrap(True)
         et.setObjectName("secundario")
-        self.lay_lista.insertWidget(0, et)
+        self.lay_lista.addWidget(et)
+        self.lay_lista.addStretch(1)
+
+    # ------------------------------------------------------------ espacio
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self._acomodar()
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        self._acomodar()
+
+    def _acomodar(self):
+        """Con poco sitio (panel de la derecha abierto, ventana pequeña) la lista
+        se estrecha y, si aun así no cabe, se alterna lista / conversación."""
+        if getattr(self, "_acomodando", False):
+            return
+        self._acomodando = True
+        try:
+            ancho = self.width() - 48
+            estrecho = ancho < self.ESTRECHO
+            if estrecho:
+                # a lo ancho, sin tamaño fijo (un tamaño fijo aquí realimenta el redimensionado)
+                if self.caja_izq.maximumWidth() != 16777215:
+                    self.caja_izq.setMinimumWidth(0)
+                    self.caja_izq.setMaximumWidth(16777215)
+                lista, chat = self.actual is None, self.actual is not None
+            else:
+                fijo = max(230, min(self.ANCHO_LISTA, int(ancho * 0.34)))
+                if self.caja_izq.maximumWidth() != fijo or self.caja_izq.minimumWidth() != fijo:
+                    self.caja_izq.setFixedWidth(fijo)
+                lista = chat = True
+            if self.caja_izq.isVisibleTo(self) != lista:
+                self.caja_izq.setVisible(lista)
+            if self.panel.isVisibleTo(self) != chat:
+                self.panel.setVisible(chat)
+            self.bt_volver.setVisible(estrecho and self.actual is not None)
+        finally:
+            self._acomodando = False
+
+    def _volver_a_lista(self):
+        self.actual = None
+        self.reloj_chat.stop()
+        self._activar(False)
+        self.et_con.setText("Elige una conversación o empieza una nueva")
+        self.campo.setPlaceholderText("Escribe un mensaje")
+        self.cargando = None
+        _borrar_layout(self.lay)
+        self.lay.addStretch(1)
+        self._acomodar()
+        self._cargar_lista()
 
     # ------------------------------------------------------------ lista
     def _cargar_lista(self):
-        if self.chat is None or not self.isVisible() and self.lay_lista.count() > 1:
+        if self.chat is None or (not self.isVisible() and self._lista_cargada):
             return
-        en_segundo_plano(self.chat.mis_chats, ok=self._pintar_lista, error=lambda _e: None, dueno=self)
+        en_segundo_plano(self.chat.mis_chats, ok=self._pintar_lista, error=self._lista_fallo,
+                         dueno=self, urgente=True)
+
+    def _lista_fallo(self, e):
+        if not self._lista_cargada:
+            _borrar_layout(self.lay_lista)
+            et = QLabel(_motivo(e, "cargar tus conversaciones"))
+            et.setWordWrap(True)
+            et.setObjectName("ayuda")
+            self.lay_lista.addWidget(et)
+            self.lay_lista.addStretch(1)
 
     def _pintar_lista(self, chats):
+        self._lista_cargada = True
+        barra = self.scroll_lista.verticalScrollBar().value()
         _borrar_layout(self.lay_lista)
         if not chats:
-            et = QLabel("Escríbele a alguien por su usuario de Caudal, mándale canciones y "
-                        "creen una mezcla con lo que escuchan los dos.")
+            et = QLabel("Aún no tienes conversaciones.\n\nPulsa «Nuevo», escribe el usuario de Caudal "
+                        "de alguien y mándale mensajes y canciones. Luego pueden crear una mezcla "
+                        "con lo que escuchan los dos.")
             et.setWordWrap(True)
             et.setObjectName("ayuda")
             self.lay_lista.addWidget(et)
         for c in chats:
             self.lay_lista.addWidget(self._fila(c))
         self.lay_lista.addStretch(1)
+        QTimer.singleShot(0, lambda: self.scroll_lista.verticalScrollBar().setValue(barra))
 
     def _fila(self, c):
         b = QPushButton()
         b.setCursor(Qt.PointingHandCursor)
         b.setFixedHeight(64)
+        b.setFocusPolicy(Qt.NoFocus)
         activo = self.actual and self.actual["id"] == c["id"]
         b.setStyleSheet(f"QPushButton{{text-align:left;border:none;border-radius:12px;padding:0;"
                         f"background:{C['superficie2'] if activo else 'transparent'};}}"
-                        f"QPushButton:hover{{background:{C['superficie']};}}")
+                        f"QPushButton:hover{{background:{C['superficie3'] if activo else C['superficie']};}}")
         h = QHBoxLayout(b)
         h.setContentsMargins(10, 6, 10, 6)
         ini = QLabel((c["visible"] or "?")[:1].upper())
@@ -266,10 +485,13 @@ class PaginaMensajes(QWidget):
         prev = QLabel(CH.vista_previa(c, self.chat.yo))
         prev.setFont(_fuente_emoji(9))
         prev.setStyleSheet(f"color:{C['texto'] if sin else C['texto2']};background:transparent;")
+        prev.setMinimumWidth(10)
         col.addWidget(prev)
         h.addLayout(col, 1)
         der = QVBoxLayout()
-        der.addWidget(QLabel(_hora(c["fecha"])), 0, Qt.AlignRight)
+        hora = QLabel(_hora(c["fecha"]))
+        hora.setStyleSheet(f"color:{C['texto3']};background:transparent;font-size:11px;")
+        der.addWidget(hora, 0, Qt.AlignRight)
         if sin:
             g = QLabel(str(sin))
             g.setAlignment(Qt.AlignCenter)
@@ -277,6 +499,8 @@ class PaginaMensajes(QWidget):
                             "font-size:11px;font-weight:900;padding:1px 7px;")
             der.addWidget(g, 0, Qt.AlignRight)
         h.addLayout(der)
+        for w in b.findChildren(QLabel):
+            w.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         b.clicked.connect(lambda _=False, c=c: self._abrir(c))
         return b
 
@@ -284,15 +508,50 @@ class PaginaMensajes(QWidget):
     def _abrir(self, c):
         self.actual = c
         self.mensajes = []
-        self.et_con.setText(f"{c['visible']}   @{c.get('usuario') or ''}")
+        self.pendientes = {}
+        usuario = c.get("usuario") or ""
+        self.et_con.setText(f"{_html(c['visible'])}  <span style='color:{C['texto3']};font-size:13px;"
+                            f"font-weight:600'>@{_html(usuario)}</span>" if usuario else _html(c["visible"]))
+        self.campo.setPlaceholderText(f"Escríbele a {c['visible']}")
         self._activar(True)
         _borrar_layout(self.lay)
+        self.cargando = QLabel("Cargando la conversación…")
+        self.cargando.setAlignment(Qt.AlignCenter)
+        self.cargando.setWordWrap(True)
+        self.cargando.setObjectName("ayuda")
+        self.lay.addWidget(self.cargando)
         self.lay.addStretch(1)
+        self._enviando = 0
+        self._acomodar()
+        self.campo.setFocus()
         en_segundo_plano(self.chat.mensajes, c["id"], ok=lambda l, cid=c["id"]: self._llegan(cid, l, True),
-                         error=lambda _e: self.ctx.aviso.emit("No se pudo cargar la conversación."),
-                         dueno=self)
+                         error=lambda e, cid=c["id"]: self._carga_fallo(cid, e),
+                         dueno=self, urgente=True)
         self.reloj_chat.start()
         self._cargar_lista()
+
+    # un solo aviso arriba del chat («Cargando…», el saludo o el error): se
+    # muestra u oculta, nunca se quita del layout
+    def _quitar_cargando(self):
+        if self.cargando is not None:
+            try:
+                self.cargando.hide()
+            except RuntimeError:
+                self.cargando = None
+
+    def _aviso_chat(self, texto):
+        if self.cargando is not None:
+            try:
+                self.cargando.setText(texto)
+                self.cargando.show()
+            except RuntimeError:
+                self.cargando = None
+
+    def _carga_fallo(self, cid, e):
+        if not self.actual or self.actual["id"] != cid:
+            return
+        if not self.mensajes and not self.pendientes:
+            self._aviso_chat(_motivo(e, "cargar la conversación") + "\nPuedes escribir igual.")
 
     def _llegan(self, cid, lista, todo=False):
         if not self.actual or self.actual["id"] != cid:
@@ -302,21 +561,32 @@ class PaginaMensajes(QWidget):
         for m in nuevos:
             self._burbuja(m)
         self.mensajes += nuevos
+        self.mensajes.sort(key=lambda m: m["id"])
+        if self.mensajes or self.pendientes:
+            self._quitar_cargando()
+        elif todo:
+            self._aviso_chat(f"Aquí empieza tu conversación con {c_visible(self.actual)}.\n"
+                             "Escribe algo o mándale lo que estás escuchando 🎵")
         if nuevos or todo:
-            en_segundo_plano(self.chat.marcar_leido, cid, dueno=self)
-            barra = self.scroll.verticalScrollBar()
-            QTimer.singleShot(40, lambda: barra.setValue(barra.maximum()))
+            en_segundo_plano(self.chat.marcar_leido, cid, dueno=self, urgente=True)
+            self._al_final()
+
+    def _al_final(self):
+        barra = self.scroll.verticalScrollBar()
+        QTimer.singleShot(40, lambda: barra.setValue(barra.maximum()))
 
     def _nuevos(self):
-        if not self.actual or not self.isVisible():
+        # mientras un envío va en camino no se pregunta (evita burbujas dobles)
+        if not self.actual or not self.isVisible() or self._enviando:
             return
         desde = self.mensajes[-1]["id"] if self.mensajes else 0
         cid = self.actual["id"]
         en_segundo_plano(self.chat.mensajes, cid, desde, ok=lambda l: self._llegan(cid, l),
-                         error=lambda _e: None, dueno=self)
+                         error=lambda _e: None, dueno=self, urgente=True)
 
-    def _burbuja(self, m):
-        mio = str(m.get("autor")) == str(self.chat.yo)
+    def _burbuja(self, m, pendiente=False):
+        """Pinta un mensaje. Devuelve (burbuja, etiqueta de la hora)."""
+        mio = pendiente or str(m.get("autor")) == str(self.chat.yo)
         caja = QFrame()
         caja.setObjectName("burbuja")
         caja.setStyleSheet(f"QFrame#burbuja{{background:{C['acento'] if mio else C['superficie2']};"
@@ -341,6 +611,7 @@ class PaginaMensajes(QWidget):
             play.setIcon(iconos.icono("reproducir", 18, C["acento_texto"] if not mio else C["acento"]))
             play.setFixedSize(34, 34)
             play.setCursor(Qt.PointingHandCursor)
+            play.setToolTip("Escuchar")
             play.setStyleSheet(f"background:{C['acento'] if not mio else C['acento_texto']};border:none;"
                                "border-radius:17px;")
             play.clicked.connect(lambda _=False, p=p: self.ctx.reproducir_pista(p))
@@ -353,9 +624,13 @@ class PaginaMensajes(QWidget):
             t.setFont(_fuente_emoji(10.5))
             t.setStyleSheet(f"color:{color};background:transparent;")
             v.addWidget(t)
-        hora = QLabel(_hora(m["fecha"]))
+        hora = QLabel("Enviando…" if pendiente else _hora(m["fecha"]))
         hora.setAlignment(Qt.AlignRight)
-        hora.setStyleSheet(f"color:{'#2A5A66' if mio else C['texto3']};font-size:10px;background:transparent;")
+        hora.setWordWrap(True)
+        hora.setStyleSheet(f"color:{color};font-size:10px;background:transparent;")
+        efecto = QGraphicsOpacityEffect(hora)
+        efecto.setOpacity(0.7)
+        hora.setGraphicsEffect(efecto)
         v.addWidget(hora)
         fila_ext = QHBoxLayout()
         if mio:
@@ -364,25 +639,66 @@ class PaginaMensajes(QWidget):
         if not mio:
             fila_ext.addStretch(1)
         self.lay.insertLayout(self.lay.count() - 1, fila_ext)
+        return caja, hora
 
     def _enviar(self, pista=None):
-        if not self.actual:
+        if not self.actual or self.chat is None:
             return
-        texto = self.campo.text().strip()
+        texto = "" if pista else self.campo.text().strip()
         if not texto and pista is None:
             return
-        cid = self.actual["id"]
         if pista is None:
             self.campo.clear()
-        en_segundo_plano(self.chat.enviar, cid, "" if pista else texto, pista,
-                         ok=lambda m: self._llegan(cid, [m]),
-                         error=lambda _e: self.ctx.aviso.emit("No se pudo enviar. Revisa tu internet."),
-                         dueno=self)
+        self.campo.setFocus()
+        self._quitar_cargando()
+        cid = self.actual["id"]
+        # se ve al momento, con «Enviando…», y se confirma (o se ofrece reintentar)
+        self._siguiente_local += 1
+        clave = self._siguiente_local
+        caja, hora = self._burbuja({"texto": texto, "pista": pista}, pendiente=True)
+        self.pendientes[clave] = (caja, hora, texto, pista)
+        self._al_final()
+        self._mandar(cid, clave)
+
+    def _mandar(self, cid, clave):
+        _caja, hora, texto, pista = self.pendientes[clave]
+        hora.setText("Enviando…")
+        hora.setCursor(Qt.ArrowCursor)
+        hora.mousePressEvent = lambda _ev: None
+        self._enviando += 1
+
+        def ok(m):
+            self._enviando = max(0, self._enviando - 1)
+            self.pendientes.pop(clave, None)
+            try:
+                hora.setText(_hora(m["fecha"]))
+            except RuntimeError:
+                return
+            if self.actual and self.actual["id"] == cid and m["id"] not in {x["id"] for x in self.mensajes}:
+                self.mensajes.append(m)
+                self.mensajes.sort(key=lambda x: x["id"])
+            self._cargar_lista()
+
+        def fallo(e):
+            self._enviando = max(0, self._enviando - 1)
+            try:
+                hora.setText(f"⚠ {_motivo(e)}  ·  Haz clic aquí para reintentar")
+                hora.setCursor(Qt.PointingHandCursor)
+                hora.mousePressEvent = lambda _ev: (clave in self.pendientes) and self._mandar(cid, clave)
+            except RuntimeError:
+                pass
+
+        en_segundo_plano(self.chat.enviar, cid, texto, pista, ok=ok, error=fallo, dueno=self, urgente=True)
 
     def _enviar_suena(self):
-        p = self.ctx.reproductor.actual
-        if not p or not p.get("video_id"):
-            self.ctx.aviso.emit("Ahora no suena nada que se pueda enviar.")
+        r = getattr(self.ctx, "reproductor", None)
+        p = getattr(r, "actual", None)
+        if not p:
+            self.ctx.aviso.emit("Ahora no suena nada. Pon una canción y vuelve a pulsar 🎵")
+            return
+        if not p.get("video_id"):
+            self.ctx.aviso.emit("Esa canción es un archivo de tu disco: solo se pueden enviar "
+                                "canciones de YouTube Music.")
             return
         self._enviar(pista=p)
 
@@ -400,4 +716,9 @@ class PaginaMensajes(QWidget):
             self.ctx.navegar({"pagina": "mix", "id": mix["id"], "el": mix})
 
         en_segundo_plano(self.chat.mezcla, c["id"], ok=listo,
-                         error=lambda _e: self.ctx.aviso.emit("No se pudo crear la mezcla."), dueno=self)
+                         error=lambda e: self.ctx.aviso.emit(_motivo(e, "crear la mezcla")),
+                         dueno=self, urgente=True)
+
+
+def c_visible(c):
+    return _html((c or {}).get("visible") or "esa persona")
