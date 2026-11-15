@@ -153,8 +153,22 @@ class _SubirMusicaPaginaState extends State<SubirMusicaPagina> {
           }
         },
       );
+      final directo = await social.publicaDirecto();
       if (!mounted) return;
-      s.avisar('¡Listo! «${_titulo.text.trim()}» ya suena en la comunidad.');
+      await showDialog<void>(
+        context: context,
+        useRootNavigator: true,
+        builder: (ctx) => AlertDialog(
+          backgroundColor: C.superficie2,
+          icon: Icon(directo ? Icons.check_circle_rounded : Icons.hourglass_top_rounded,
+              size: 40, color: directo ? C.exito : const Color(0xFFF5C451)),
+          title: Text(directo ? '¡Canción subida!' : 'Quedó en revisión'),
+          content: Text(Social.mensajeTrasSubir(directo)),
+          actions: [FilledButton(onPressed: () => Navigator.pop(ctx), child: const Text('Entendido'))],
+        ),
+      );
+      if (!mounted) return;
+      s.avisar(directo ? 'Tu canción ya está en la comunidad.' : 'Tu canción está en revisión.');
       Navigator.of(context).pop(true);
     } catch (e) {
       if (mounted) {

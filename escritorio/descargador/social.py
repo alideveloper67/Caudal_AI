@@ -134,7 +134,23 @@ def subida_limpia(s):
             "duracion": _entero(s.get("duracion")), "ruta": _texto(s.get("ruta")),
             "portada": _texto(s.get("portada")), "escuchas": _entero(s.get("escuchas")),
             "estado": _texto(s.get("estado")) or "publicada", "creado": _texto(s.get("creado")),
-            "es_artista": bool(s.get("es_artista"))}
+            "es_artista": bool(s.get("es_artista")), "nota": _texto(s.get("nota")),
+            "nombre": _texto(s.get("nombre")), "tamano": _entero(s.get("tamano")),
+            "reportes": _entero(s.get("reportes")),
+            "motivos": [str(m) for m in (s.get("motivos") or []) if m]}
+
+
+def texto_estado(s):
+    """(texto, tono) del estado de una canción propia; tono: 'aviso', 'error' o '' (publicada)."""
+    e = (s or {}).get("estado")
+    if e == "pendiente":
+        return "En revisión", "aviso"
+    if e == "revision":
+        return "En revisión por reportes", "aviso"
+    if e == "retirada":
+        nota = (s.get("nota") or "").strip()
+        return ("Rechazada: " + nota if nota else "Rechazada"), "error"
+    return "", ""
 
 
 def perfil_limpio(d):
@@ -143,6 +159,7 @@ def perfil_limpio(d):
     p = {
         "id": _texto(d.get("id")), "usuario": _texto(d.get("usuario")),
         "nombre": _texto(d.get("nombre")), "foto_url": d.get("foto_url") or None,
+        "banner_url": d.get("banner_url") or None,
         "bio": _texto(d.get("bio"), 300), "frase": _texto(d.get("frase"), 80),
         "cancion_fav": cancion_fav_limpia(d.get("cancion_fav")),
         "artista_fav": _texto(d.get("artista_fav"), 80),
@@ -310,6 +327,31 @@ def comprimir_jpeg(img, tope=TOPE_IMAGEN):
         if len(ultimo) < tope:
             return ultimo
     raise ErrorNube("La imagen sigue pesando demasiado. Elige otra más pequeña.")
+
+
+def recortar_proporcion(img, ancho, alto):
+    """Recorte centrado con la proporción ancho:alto, reducido a ese tamaño si es más grande."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QColor, QImage, QPainter
+    w, h = img.width(), img.height()
+    if w * alto > h * ancho:                      # demasiado ancha
+        nw, nh = int(h * ancho / alto), h
+    else:
+        nw, nh = w, int(w * alto / ancho)
+    corte = img.copy((w - nw) // 2, (h - nh) // 2, nw, nh)
+    if nw > ancho:
+        corte = corte.scaled(ancho, alto, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+    plano = QImage(corte.width(), corte.height(), QImage.Format_RGB32)
+    plano.fill(QColor("#FFFFFF"))
+    p = QPainter(plano)
+    p.drawImage(0, 0, corte)
+    p.end()
+    return plano
+
+
+def preparar_banner(origen):
+    """Imagen de fondo del perfil: 1280×480 como máximo, en JPEG de menos de 2 MB."""
+    return comprimir_jpeg(recortar_proporcion(_cargar_imagen(origen), 1280, 480))
 
 
 def preparar_foto(origen):
@@ -506,11 +548,30 @@ class Social:
                                   cabeceras={"Prefer": "return=representation"})
         return (filas or [{}])[0]
 
-    def subir_foto(self, datos_jpeg):
-        ruta = f"{self.yo}/avatar.jpg"
-        self.sesion.subir_archivo(BUCKET_FOTOS, ruta, datos_jpeg, "image/jpeg", reemplazar=True)
+    def _subir_imagen_perfil(self, nombre, datos_jpeg, que):
+        ruta = f"{self.yo}/{nombre}"
+        try:
+            self.sesion.subir_archivo(BUCKET_FOTOS, ruta, datos_jpeg, "image/jpeg", reemplazar=True)
+        except SinConexion:
+            raise
+        except ErrorNube as e:
+            raise ErrorNube(f"No se pudo guardar {que}. {e} Si sigue pasando, cierra sesión, "
+                            "vuelve a entrar y prueba con otra imagen.") from e
         marcar_foto(ruta)
         return ruta
+
+    def subir_foto(self, datos_jpeg):
+        return self._subir_imagen_perfil("avatar.jpg", datos_jpeg, "tu foto")
+
+    def subir_banner(self, datos_jpeg):
+        return self._subir_imagen_perfil("banner.jpg", datos_jpeg, "tu imagen de fondo")
+
+    def quitar_banner(self):
+        self.sesion.pedir("PATCH", f"perfiles?id=eq.{self.yo}", json={"banner_url": None})
+        try:
+            self.sesion.borrar_archivos(BUCKET_FOTOS, [f"{self.yo}/banner.jpg"])
+        except ErrorNube:
+            pass
 
     def quitar_foto(self):
         self.sesion.pedir("PATCH", f"perfiles?id=eq.{self.yo}", json={"foto_url": None})
@@ -580,6 +641,34 @@ class Social:
         filas = self.sesion.rpc("explorar_subidas", p_busqueda=busqueda or "", p_limite=limite,
                                 p_desde=desde) or []
         return [subida_limpia(f) for f in filas if isinstance(f, dict)]
+
+    # ---- moderación y publicación
+    def publica_directo(self):
+        """¿Lo que subo se publica sin revisión? Ante la duda, no (se dirá «en revisión»)."""
+        try:
+            return self.sesion.rpc("publica_directo") is True
+        except ErrorNube:
+            return False
+
+    def soy_moderador(self):
+        try:
+            return self.sesion.rpc("soy_moderador") is True
+        except ErrorNube:
+            return False
+
+    def revision_contar(self):
+        try:
+            return _entero(self.sesion.rpc("revision_contar"))
+        except ErrorNube:
+            return 0
+
+    def revision_pendientes(self, limite=60):
+        filas = self.sesion.rpc("revision_pendientes", p_limite=limite) or []
+        return [subida_limpia(f) for f in filas if isinstance(f, dict)]
+
+    def revision_resolver(self, subida, aprobar, nota=""):
+        self.sesion.rpc("revision_resolver", p_id=subida, p_aprobar=bool(aprobar),
+                        p_nota=(nota or "").strip()[:300])
 
     def contar_escucha(self, subida):
         try:

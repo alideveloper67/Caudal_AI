@@ -228,6 +228,22 @@ class PanelLateral(QWidget):
             self.grupo.addButton(b)
             self.botones[clave] = b
             vn.addWidget(b)
+        # «Revisión de música»: solo la ve la cuenta de moderación (se consulta en segundo plano)
+        self.bt_revision = QPushButton("   Revisión de música")
+        self.bt_revision.setObjectName("nav")
+        self.bt_revision.setCheckable(True)
+        self.bt_revision.setIcon(iconos.icono_estados("musica", 20, C["texto2"], C["texto"]))
+        self.bt_revision.setCursor(Qt.PointingHandCursor)
+        self.bt_revision.setFocusPolicy(Qt.NoFocus)
+        self.bt_revision.clicked.connect(lambda _=False: self.ir.emit({"pagina": "revision"}))
+        self.bt_revision.setVisible(False)
+        self.grupo.addButton(self.bt_revision)
+        self.botones["revision"] = self.bt_revision
+        vn.addWidget(self.bt_revision)
+        self._reloj_revision = QTimer(self)
+        self._reloj_revision.setInterval(90000)
+        self._reloj_revision.timeout.connect(self._ver_si_modera)
+        QTimer.singleShot(2500, self._ver_si_modera)
         v.addWidget(nav)
 
         bib = QFrame()
@@ -326,6 +342,23 @@ class PanelLateral(QWidget):
         menu.addAction(iconos.icono("descargar", 16, C["texto2"]),
                        "Traer una lista de Spotify, Apple Music o YouTube…", self.traer_lista.emit)
         menu.exec(boton.mapToGlobal(boton.rect().bottomLeft()))
+
+    def _ver_si_modera(self):
+        """Muestra «Revisión de música» (con cuántas esperan) solo a quien modera."""
+        try:
+            from .paginas.revision import es_moderador
+        except Exception:  # noqa: BLE001
+            return
+
+        def al_saber(modera, pendientes):
+            self.bt_revision.setVisible(bool(modera))
+            if modera:
+                self.bt_revision.setText("   Revisión de música" + (f"  ({pendientes})" if pendientes else ""))
+                if not self._reloj_revision.isActive():
+                    self._reloj_revision.start()
+            else:
+                self._reloj_revision.stop()
+        es_moderador(self.ctx, al_saber)
 
     def marcar(self, destino):
         self.destino_actual = destino

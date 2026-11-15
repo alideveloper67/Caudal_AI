@@ -1,3 +1,5 @@
+import 'dart:ui' show ImageFilter;
+
 import 'package:flutter/material.dart';
 
 import '../../nucleo/chat.dart';
@@ -299,8 +301,10 @@ class _PerfilPaginaState extends State<PerfilPagina> {
                         subida: x,
                         mostrarAutor: false,
                         sonando: suenaSubida(s, x),
-                        alReproducir: () => reproducirSubida(context, _social, p.subidas.where((e) => e.publicada).toList(),
-                            p.subidas.where((e) => e.publicada).toList().indexWhere((e) => e.id == x.id)),
+                        alReproducir: () {
+                          final cola = propio ? p.subidas : p.subidas.where((e) => e.publicada).toList();
+                          reproducirSubida(context, _social, cola, cola.indexWhere((e) => e.id == x.id));
+                        },
                         alReportar: propio ? null : () => reportarSubidaDialogo(context, _social, x),
                         alBorrar: propio
                             ? () async {
@@ -363,77 +367,102 @@ class _Cabecera extends StatelessWidget {
   Widget build(BuildContext context) {
     final p = perfil;
     final arriba = MediaQuery.paddingOf(context).top;
+    final alto = 170 + arriba;
     final desde = p.creado == null ? '' : 'En Caudal desde ${_mes(p.creado!)}';
-    return AnimatedContainer(
-      duration: Mov.color,
-      padding: EdgeInsets.fromLTRB(Esp.xl, arriba + 56, Esp.xl, Esp.xl),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          begin: Alignment.topCenter,
-          end: Alignment.bottomCenter,
-          colors: [Color.lerp(color, C.fondo, 0.35)!, Color.lerp(color, C.fondo, 0.8)!, C.fondo],
-          stops: const [0, 0.65, 1],
-        ),
-      ),
-      child: Column(children: [
-        Hero(
-          tag: 'avatar_${p.id}',
-          child: Container(
-            padding: const EdgeInsets.all(4),
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(color: color.withValues(alpha: 0.9), width: 2.5),
-              boxShadow: [BoxShadow(color: color.withValues(alpha: 0.35), blurRadius: 28, spreadRadius: 2)],
+    return Column(children: [
+      // imagen de fondo a todo el ancho; el avatar se solapa con su borde
+      Stack(clipBehavior: Clip.none, alignment: Alignment.bottomCenter, children: [
+        FondoBanner(color: color, bannerUrl: p.bannerUrl, marca: marca, alto: alto),
+        Positioned(
+          bottom: -52,
+          child: Hero(
+            tag: 'avatar_${p.id}',
+            child: Container(
+              padding: const EdgeInsets.all(4),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: C.fondo,
+                border: Border.all(color: color.withValues(alpha: 0.95), width: 2.5),
+                boxShadow: [BoxShadow(color: color.withValues(alpha: 0.4), blurRadius: 26, spreadRadius: 1)],
+              ),
+              child: AvatarPerfil(nombre: p.visible, fotoUrl: p.fotoUrl, color: color, radio: 54, marca: marca),
             ),
-            child: AvatarPerfil(nombre: p.visible, fotoUrl: p.fotoUrl, color: color, radio: 56, marca: marca),
           ),
         ),
-        const SizedBox(height: 14),
-        Text(p.visible, textAlign: TextAlign.center, style: estiloTituloPagina.copyWith(fontSize: 26)),
-        const SizedBox(height: 2),
-        Text('@${p.usuario}', style: estiloSecundario),
-        if (p.titulos.isNotEmpty || p.fundador || p.esArtista) ...[
-          const SizedBox(height: 8),
-          DistincionesPerfil(titulos: p.titulos, fundador: p.fundador, numero: p.numero, artista: p.esArtista),
-        ],
-        if (p.frase.isNotEmpty) ...[
-          const SizedBox(height: 12),
-          Text('“${p.frase}”',
-              textAlign: TextAlign.center,
-              style: TextStyle(fontSize: 15, fontStyle: FontStyle.italic, color: Color.lerp(color, Colors.white, 0.7), height: 1.3)),
-        ],
-        if (p.bio.isNotEmpty) ...[
-          const SizedBox(height: 12),
-          Text(p.bio, textAlign: TextAlign.center, style: const TextStyle(fontSize: 14.5, color: C.texto, height: 1.4)),
-        ],
-        if (p.generos.isNotEmpty) ...[
-          const SizedBox(height: 12),
-          Wrap(alignment: WrapAlignment.center, spacing: 6, runSpacing: 6, children: [
-            for (final g in p.generos)
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 4),
-                decoration: BoxDecoration(
-                  color: color.withValues(alpha: 0.18),
-                  borderRadius: BorderRadius.circular(999),
-                  border: Border.all(color: color.withValues(alpha: 0.35)),
-                ),
-                child: Text(g, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
-              ),
-          ]),
-        ],
-        if (!p.privado) ...[
-          const SizedBox(height: 16),
-          Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-            _Dato(valor: '${p.likes}', etiqueta: p.likes == 1 ? 'me gusta' : 'me gusta'),
-            _Separador(),
-            _Dato(valor: '${p.numSubidas}', etiqueta: p.numSubidas == 1 ? 'canción' : 'canciones'),
-          ]),
-        ],
-        if (desde.isNotEmpty) ...[const SizedBox(height: 8), Text(desde, style: estiloDetalle)],
-        const SizedBox(height: 18),
-        acciones,
       ]),
-    );
+      // panel de cristal con los datos
+      Padding(
+        padding: const EdgeInsets.fromLTRB(Esp.lado, 62, Esp.lado, 0),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(26),
+          child: BackdropFilter(
+            filter: ImageFilter.blur(sigmaX: 14, sigmaY: 14),
+            child: Container(
+              width: double.infinity,
+              padding: const EdgeInsets.fromLTRB(Esp.xl, Esp.xl, Esp.xl, Esp.l),
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(26),
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [color.withValues(alpha: 0.2), C.superficie.withValues(alpha: 0.85)],
+                ),
+                border: Border.all(color: color.withValues(alpha: 0.28)),
+              ),
+              child: Column(children: [
+                Text(p.visible, textAlign: TextAlign.center, style: estiloTituloPagina.copyWith(fontSize: 26)),
+                const SizedBox(height: 2),
+                Text('@${p.usuario}', style: estiloSecundario),
+                if (p.titulos.isNotEmpty || p.fundador || p.esArtista) ...[
+                  const SizedBox(height: 10),
+                  DistincionesPerfil(titulos: p.titulos, fundador: p.fundador, numero: p.numero, artista: p.esArtista),
+                ],
+                if (p.frase.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  Text('“${p.frase}”',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(fontSize: 15, fontStyle: FontStyle.italic, color: Color.lerp(color, Colors.white, 0.7), height: 1.3)),
+                ],
+                if (p.bio.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  Text(p.bio, textAlign: TextAlign.center, style: const TextStyle(fontSize: 14.5, color: C.texto, height: 1.4)),
+                ],
+                if (p.generos.isNotEmpty) ...[
+                  const SizedBox(height: 12),
+                  Wrap(alignment: WrapAlignment.center, spacing: 6, runSpacing: 6, children: [
+                    for (final g in p.generos)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: color.withValues(alpha: 0.18),
+                          borderRadius: BorderRadius.circular(999),
+                          border: Border.all(color: color.withValues(alpha: 0.35)),
+                        ),
+                        child: Text(g, style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w600)),
+                      ),
+                  ]),
+                ],
+                if (!p.privado) ...[
+                  const SizedBox(height: 16),
+                  Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+                    _Dato(valor: '${p.likes}', etiqueta: 'me gusta'),
+                    _Separador(),
+                    _Dato(valor: '${p.numSubidas}', etiqueta: p.numSubidas == 1 ? 'canción' : 'canciones'),
+                    if (p.insignias.isNotEmpty) ...[
+                      _Separador(),
+                      _Dato(valor: '${p.insignias.length}', etiqueta: p.insignias.length == 1 ? 'insignia' : 'insignias'),
+                    ],
+                  ]),
+                ],
+                if (desde.isNotEmpty) ...[const SizedBox(height: 8), Text(desde, style: estiloDetalle)],
+                const SizedBox(height: 16),
+                acciones,
+              ]),
+            ),
+          ),
+        ),
+      ),
+    ]);
   }
 
   static String _mes(DateTime t) {

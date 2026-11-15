@@ -36,7 +36,8 @@ class PaginaSubirMusica(Pagina):
         t.setObjectName("titulo_pagina")
         col.addWidget(t)
         col.addWidget(PC.etiqueta(
-            "Comparte tus canciones con la comunidad de Caudal. Cada canción lleva su carátula. "
+            "Comparte tus canciones con la comunidad de Caudal. Cada canción lleva su carátula y, si hace falta, el "
+            "equipo la revisa antes de publicarla. "
             "Puedes subir hasta 30 en total y 10 por día; el audio pesa 15 MB como máximo.",
             f"color:{C['texto2']};"))
         if self.social is None:
@@ -200,7 +201,8 @@ class PaginaSubirMusica(Pagina):
         senal = self.progreso
 
         def trabajo():
-            return social.subir_cancion(avance=lambda f, t: senal.emit(f, t), **datos)
+            nuevo = social.subir_cancion(avance=lambda f, t: senal.emit(f, t), **datos)
+            return nuevo, social.publica_directo()
         en_segundo_plano(trabajo, ok=self._subida_lista, error=self._subida_fallo, dueno=self, urgente=True)
 
     def _avance(self, fraccion, texto):
@@ -213,12 +215,21 @@ class PaginaSubirMusica(Pagina):
             w.setEnabled(True)
         self._revisar()
 
-    def _subida_lista(self, _id):
+    def _subida_lista(self, resultado):
+        _id, directo = resultado
         self._terminar()
         self.barra.hide()
-        self._decir("¡Tu canción ya está en la comunidad!")
-        self.estado.setStyleSheet(f"background:transparent;color:{C['exito']};font-size:13px;font-weight:700;")
-        PC.aviso(self.ctx, "Canción subida")
+        if directo:
+            texto = "Listo: tu canción ya está en la comunidad."
+            aviso = "Canción publicada"
+        else:
+            texto = ("Tu canción quedó en revisión. El equipo de Caudal la revisará y te avisaremos aquí "
+                     "si se aprueba.")
+            aviso = "Canción enviada a revisión"
+        self._decir(texto)
+        self.estado.setStyleSheet(f"background:transparent;color:{C['exito'] if directo else C['aviso']};"
+                                  "font-size:13px;font-weight:700;")
+        PC.aviso(self.ctx, aviso)
         self.ruta_audio = self.ruta_portada = None
         for c in (self.titulo_c, self.artista, self.album):
             c.clear()
@@ -260,5 +271,6 @@ class PaginaSubirMusica(Pagina):
             self.caja_mias.addWidget(t)
         if any(s["estado"] != "publicada" for s in subidas):
             self.caja_mias.addWidget(PC.etiqueta(
-                "«En revisión» quiere decir que varias personas la reportaron: se oculta de la comunidad "
-                "mientras la revisamos.", f"color:{C['texto3']};font-size:11.5px;"))
+                "«En revisión»: el equipo de Caudal todavía no la aprobó (o la reportaron varias personas), "
+                "así que aún no la ve la comunidad. Si la rechazan, aquí verás el motivo.",
+                f"color:{C['texto3']};font-size:11.5px;"))

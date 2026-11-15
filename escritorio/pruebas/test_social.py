@@ -560,24 +560,38 @@ def test_mensajes_pestanas_y_solo_amigos(app):
     assert pag2.actual["id"] == "c-nuevo" and ctx.chat_pendiente is None
 
 
-def test_nuevo_chat_pide_solicitud_si_no_son_amigos(app):
-    ses = SesionFalsa({"enviar_solicitud": "enviada"})
+def test_nuevo_mensaje_solo_con_amigos(app):
+    ses = SesionFalsa({"mis_amigos": [{"id": "u2", "usuario": "bea", "nombre": "Bea Luna", "foto_url": None},
+                                      {"id": "u3", "usuario": "cami", "nombre": "Cami", "foto_url": None}],
+                       "abrir_chat": "c9"})
     ctx = CtxFalso(ses)
     from descargador import chat as CH
-    from descargador.ui.paginas.mensajes import DialogoNuevoChat
-    d = DialogoNuevoChat(ctx, CH.Chat(ses))
-    d.persona = {"id": "u5", "usuario": "nuevo", "nombre": "Nuevo", "relacion": "ninguna"}
-    d._mostrar_persona()
-    assert d.bt.text() == "Enviar solicitud" and d.bt.isEnabled()
-    d._accion()
-    esperar(app, lambda: d.persona["relacion"] == "enviada", "solicitud enviada")
-    assert d.bt.text() == "Solicitud enviada" and not d.bt.isEnabled()
-    d.persona["relacion"] = "amigo"
-    d._mostrar_persona()
-    assert d.bt.text() == "Escribir" and d.bt.isEnabled()
-    d.persona["relacion"] = "recibida"
-    d._mostrar_persona()
-    assert d.bt.text() == "Aceptar solicitud"
+    from descargador.ui.paginas import mensajes as M
+    d = M.DialogoNuevoChat(ctx, CH.Chat(ses))
+    d.show()
+    esperar(app, lambda: len(d.amigos) == 2, "lista de amigos")
+    nombres = [b for b in d.findChildren(QPushButton) if b.height() == 58]
+    assert len(nombres) == 2
+    # no hay campo para escribir un usuario cualquiera: el único campo busca entre los amigos
+    from PySide6.QtWidgets import QLineEdit
+    campos = d.findChildren(QLineEdit)
+    assert len(campos) == 1 and "amigos" in campos[0].placeholderText()
+    d.campo.setText("cam")
+    assert sum(1 for i in range(d.lista.count()) if d.lista.itemAt(i).widget()) == 1
+    d.campo.setText("zzz")
+    assert "Ninguno de tus amigos" in d.estado.text()
+    d.campo.setText("")
+    d._abrir(d.amigos[0])
+    esperar(app, lambda: d.resultado is not None, "abre el chat")
+    assert d.resultado["id"] == "c9" and d.resultado["usuario"] == "bea"
+    # «Agregar un amigo» lleva a Amigos
+    d2 = M.DialogoNuevoChat(ctx, CH.Chat(ses))
+    d2._agregar()
+    assert d2.ir_a_amigos is True
+    # sin amigos: invita a agregar uno
+    vacio = SesionFalsa({"mis_amigos": []})
+    d3 = M.DialogoNuevoChat(CtxFalso(vacio), CH.Chat(vacio))
+    esperar(app, lambda: "Aún no tienes amigos" in d3.estado.text(), "estado vacío")
 
 
 def test_comunidad_lista_busca_reproduce_y_reporta(app, monkeypatch, tmp_path):
@@ -633,9 +647,9 @@ def test_comunidad_lista_busca_reproduce_y_reporta(app, monkeypatch, tmp_path):
     esperar(app, lambda: "Sin resultados" in textos(pag), "sin resultados")
 
 
-def test_subir_musica_exige_caratula_y_derechos(app, tmp_path):
+def _subir_y_esperar(app, tmp_path, directo):
     ses = SesionFalsa({"ver_perfil": lambda p: dict(PERFIL, es_mio=True, subidas=[]),
-                       "registrar_subida": "nuevo"})
+                       "registrar_subida": "nuevo", "publica_directo": directo})
     ctx = CtxFalso(ses)
     from descargador.ui.paginas.subir_musica import PaginaSubirMusica
     pag = PaginaSubirMusica(ctx)
@@ -658,10 +672,227 @@ def test_subir_musica_exige_caratula_y_derechos(app, tmp_path):
     pag.chk.setChecked(True)
     pag._subir()
     assert not pag.bt_subir.isEnabled()
-    esperar(app, lambda: "ya está en la comunidad" in pag.estado.text(), "sube")
-    assert [s[1].rsplit(".", 1)[1] for s in ses.subidos] == ["mp3", "jpg"]
+    esperar(app, lambda: "Listo" in pag.estado.text() or "revisión" in pag.estado.text(), "sube")
+    assert [x[1].rsplit(".", 1)[1] for x in ses.subidos] == ["mp3", "jpg"]
     assert pag.titulo_c.text() == "" and not pag.chk.isChecked()
     pag.grab()
+    return pag
+
+
+def test_subir_musica_con_revision(app, tmp_path):
+    pag = _subir_y_esperar(app, tmp_path, False)
+    t = pag.estado.text()
+    assert "quedó en revisión" in t and "avisaremos" in t and "ya está en la comunidad" not in t
+
+
+def test_subir_musica_publica_directo_para_fundadores_y_moderadores(app, tmp_path):
+    pag = _subir_y_esperar(app, tmp_path, True)
+    assert pag.estado.text() == "Listo: tu canción ya está en la comunidad."
+    # si no se puede saber, se asume revisión (nunca se promete lo que no es)
+    assert S.Social(SesionFalsa({"publica_directo": None})).publica_directo() is False
+
+
+def test_estados_de_mis_canciones():
+    assert S.texto_estado({"estado": "pendiente"}) == ("En revisión", "aviso")
+    assert S.texto_estado({"estado": "revision"})[0] == "En revisión por reportes"
+    assert S.texto_estado({"estado": "retirada", "nota": "No es tuya"}) == ("Rechazada: No es tuya", "error")
+    assert S.texto_estado({"estado": "retirada", "nota": ""}) == ("Rechazada", "error")
+    assert S.texto_estado({"estado": "publicada"}) == ("", "")
+    from descargador.ui.paginas import perfil_comun as PC
+    from PySide6.QtWidgets import QApplication
+    QApplication.instance() or QApplication([])
+    t = PC.TarjetaSubida(S.subida_limpia({"id": "x", "titulo": "T", "estado": "retirada", "nota": "Mala calidad"}),
+                         propia=True, mostrar_autor=False)
+    assert "Rechazada: Mala calidad" in textos(t)
+
+
+def _pendientes():
+    return [{"id": "p1", "user_id": "u2", "usuario": "bea", "nombre": "Bea", "titulo": "Tema nuevo",
+             "artista": "Bea", "album": "", "duracion": 150, "ruta": "u2/a.mp3", "portada": "u2/a.jpg",
+             "tamano": 3_000_000, "estado": "pendiente", "reportes": 0, "motivos": [],
+             "creado": "2026-06-01T10:00:00Z"},
+            {"id": "p2", "user_id": "u3", "usuario": "cami", "nombre": "Cami", "titulo": "Reportada",
+             "artista": "X", "album": "Y", "duracion": 200, "ruta": "u3/b.mp3", "portada": "u3/b.jpg",
+             "tamano": 4_000_000, "estado": "revision", "reportes": 3,
+             "motivos": ["No es suya", "Spam"], "creado": "2026-06-02T10:00:00Z"}]
+
+
+def test_revision_lista_escucha_aprueba_y_rechaza(app, monkeypatch, tmp_path):
+    cola = _pendientes()
+    ses = SesionFalsa({"soy_moderador": True, "revision_pendientes": lambda p: list(cola),
+                       "revision_resolver": lambda p: None, "revision_contar": 2})
+    ctx = CtxFalso(ses)
+    monkeypatch.setattr(S, "descargar_subida", lambda s, avance=None: str(tmp_path / "x.mp3"))
+    from descargador.ui.paginas import revision as R
+    pag = R.PaginaRevision(ctx)
+    pag.resize(1000, 800)
+    pag.show()
+    esperar(app, lambda: len(pag.tarjetas) == 2, "pendientes")
+    t = textos(pag)
+    assert "Tema nuevo" in t and "@bea" in [b.text().split(" ")[0] for b in pag.findChildren(QPushButton)]
+    assert "Reportada por 3 personas" in t and "No es suya" in t and "2 canciones pendientes" in t
+    pag.grab()
+    # escuchar antes de decidir
+    pag._aprobar  # noqa: B018
+    pag.tarjetas["p1"].escuchar.emit(cola[0])
+    esperar(app, lambda: ctx.reproducidas, "suena")
+    assert ctx.reproducidas[0]["subida_id"] == "p1"
+    # aprobar
+    pag._aprobar(cola[0])
+    esperar(app, lambda: "p1" not in pag.tarjetas, "se quita al aprobar")
+    r = [c for c in ses.llamadas if c[0] == "revision_resolver"][0][1]
+    assert r == {"p_id": "p1", "p_aprobar": True, "p_nota": ""}
+    assert "1 canción pendiente" in pag.contador.text()
+    # rechazar sin motivo no deja; con motivo rápido sí
+    monkeypatch.setattr(R.DialogoRechazo, "exec", lambda self: (self.campo.setText("Duplicada"), R.QDialog.Accepted)[1])
+    pag._rechazar(cola[1])
+    esperar(app, lambda: not pag.tarjetas, "se quita al rechazar")
+    r2 = [c for c in ses.llamadas if c[0] == "revision_resolver"][1][1]
+    assert r2 == {"p_id": "p2", "p_aprobar": False, "p_nota": "Duplicada"}
+    assert "No hay nada por revisar" in textos(pag)
+    d = R.DialogoRechazo(cola[1])
+    d._ok()
+    assert "motivo" in d.aviso.text().lower()
+    assert [b.text() for b in d.findChildren(QPushButton) if b.objectName() == "chip"] == R.MOTIVOS_RAPIDOS
+
+
+def test_revision_no_es_para_cualquiera(app):
+    ses = SesionFalsa({"soy_moderador": False})
+    from descargador.ui.paginas import revision as R
+    pag = R.PaginaRevision(CtxFalso(ses))
+    esperar(app, lambda: "solo para moderación" in textos(pag), "mensaje")
+    assert not any(c[0] == "revision_pendientes" for c in ses.llamadas)
+    res = []
+    R.es_moderador(CtxFalso(SesionFalsa({"soy_moderador": True, "revision_contar": 4})), lambda *a: res.append(a))
+    esperar(app, lambda: res, "pregunta")
+    assert res == [(True, 4)]
+    res2 = []
+    R.es_moderador(CtxFalso(ses), lambda *a: res2.append(a))
+    esperar(app, lambda: res2, "pregunta no moderador")
+    assert res2 == [(False, 0)]
+
+
+def test_subida_de_foto_cuerpo_cabeceras_y_errores(monkeypatch):
+    """La foto va a /storage/v1/object/avatares/<id>/avatar.jpg con el permiso de la persona."""
+    import time as _t
+    capturas = []
+
+    class R:
+        status_code = 200
+        text = ""
+
+        def json(self):
+            return {}
+
+    def falso(metodo, url, headers=None, timeout=None, data=None, json=None, **kw):
+        capturas.append((metodo, url, dict(headers), timeout, data.read(10 ** 7) if hasattr(data, "read") else data))
+        return R()
+    monkeypatch.setattr(nube.requests, "request", falso)
+    ses = nube.Sesion("yo-id", "acceso-123", "ref", _t.time() + 3600)
+    progreso = []
+    S.Social(ses).subir_foto(b"\xff\xd8datosjpeg")
+    metodo, url, cab, tiempo, cuerpo = capturas[0]
+    assert metodo == "POST" and url == nube.URL + "/storage/v1/object/avatares/yo-id/avatar.jpg"
+    assert cab["Authorization"] == "Bearer acceso-123" and cab["apikey"] == nube.CLAVE_PUBLICA
+    assert cab["Content-Type"] == "image/jpeg" and cab["x-upsert"] == "true"
+    assert cuerpo == b"\xff\xd8datosjpeg" and tiempo >= 60
+    S.Social(ses).subir_banner(b"banner")
+    assert capturas[1][1].endswith("/avatares/yo-id/banner.jpg") and capturas[1][2]["x-upsert"] == "true"
+    # la música no reemplaza: x-upsert false
+    ses.subir_archivo("musica", "yo-id/a.mp3", b"abc", "audio/mpeg", avance=lambda a, t: progreso.append((a, t)))
+    assert capturas[2][2]["x-upsert"] == "false" and progreso[-1] == (3, 3)
+
+    # errores del servidor, dichos para personas y con qué hacer
+    class Mala:
+        status_code = 403
+        text = "x"
+
+        def json(self):
+            return {"statusCode": "403", "error": "Unauthorized", "message": "new row violates row-level security policy"}
+    monkeypatch.setattr(nube.requests, "request", lambda *a, **k: Mala())
+    with pytest.raises(nube.ErrorNube) as e:
+        S.Social(ses).subir_foto(b"x")
+    msg = str(e.value)
+    assert "No se pudo guardar tu foto" in msg and "vuelve a entrar" in msg and "row-level" not in msg
+    Grande = type("G", (), {"status_code": 413, "text": "x", "json": lambda self: {"message": "Payload too large"}})
+    monkeypatch.setattr(nube.requests, "request", lambda *a, **k: Grande())
+    with pytest.raises(nube.ErrorNube, match="pesa demasiado"):
+        S.Social(ses).subir_foto(b"x")
+
+    def corta(*a, **k):
+        raise nube.requests.ConnectionError("getaddrinfo failed")
+    monkeypatch.setattr(nube.requests, "request", corta)
+    with pytest.raises(nube.SinConexion):
+        S.Social(ses).subir_foto(b"x")
+
+
+def test_banner_se_recorta_a_1280x480(app, tmp_path):
+    for nombre, (w, h) in {"ancho.png": (3000, 1000), "alto.png": (900, 2000), "chico.png": (400, 300)}.items():
+        _imagen_prueba(tmp_path / nombre, w, h)
+        datos = S.preparar_banner(tmp_path / nombre)
+        img = QImage()
+        img.loadFromData(datos)
+        assert datos[:2] == b"\xff\xd8" and len(datos) < S.TOPE_IMAGEN
+        assert abs(img.width() / img.height() - 1280 / 480) < 0.02
+        assert img.width() <= 1280
+    c = QImage()
+    _imagen_prueba(tmp_path / "g.png", 4000, 2400)
+    c.loadFromData(S.preparar_banner(tmp_path / "g.png"))
+    assert (c.width(), c.height()) == (1280, 480)
+    assert S.perfil_limpio({"banner_url": "u/banner.jpg"})["banner_url"] == "u/banner.jpg"
+    assert S.perfil_limpio({})["banner_url"] is None
+
+
+def test_perfil_con_banner_y_editor_de_fondo(app, tmp_path):
+    perfil = dict(PERFIL, banner_url="u2/banner.jpg")
+    ctx = CtxFalso(SesionFalsa({"ver_perfil": lambda p: perfil}))
+    from descargador.ui.paginas import perfil_comun as PC
+    from descargador.ui.paginas.perfil import PaginaPerfil
+    pag = PaginaPerfil(ctx, "bea")
+    pag.resize(1100, 1100)
+    pag.show()
+    esperar(app, lambda: pag.p is not None, "carga")
+    assert pag.fondo.url.endswith("/avatares/u2/banner.jpg?v=" + pag.fondo.url.rsplit("=", 1)[1])
+    # con imagen se pinta la imagen; sin ella, el degradado con el color del perfil
+    img = QImage(200, 100, QImage.Format_RGB32)
+    img.fill(QColor("#00FF00"))
+    pag.fondo.set_imagen(img)
+    g = pag.fondo.grab().toImage()
+    assert g.pixelColor(g.width() // 2, 40).green() > 120
+    pag.fondo.quitar()
+    g2 = pag.fondo.grab().toImage()
+    assert g2.pixelColor(g2.width() // 2, 40).green() < 120
+    assert "me gusta" in textos(pag) and "canciones subidas" in textos(pag) and "insignias" in textos(pag)
+    esperar(app, lambda: True, "entrada")
+    pag.grab()
+    # el editor elige y quita la imagen de fondo
+    from descargador.ui.paginas.perfil_editar import DialogoEditarPerfil
+    ses = SesionFalsa({"perfiles?id=eq.yo-id": lambda kw: [dict(kw["json"])]})
+    d = DialogoEditarPerfil(CtxFalso(ses), S.Social(ses), S.perfil_limpio(perfil))
+    _imagen_prueba(tmp_path / "fondo.png", 1600, 700)
+    d.banner_ruta = str(tmp_path / "fondo.png")
+    d.fondo.set_imagen(S.recortar_proporcion(S._cargar_imagen(d.banner_ruta), 640, 240))
+    d._guardar()
+    esperar(app, lambda: d.result() == QDialog.Accepted or d.estado.text(), "guarda")
+    assert d.result() == QDialog.Accepted
+    assert ses.subidos[0][:3] == ("avatares", "yo-id/banner.jpg", "image/jpeg")
+    patch = [c for c in ses.llamadas if c[0] == "PATCH"][0][2]["json"]
+    assert patch["banner_url"] == "yo-id/banner.jpg"
+    d2 = DialogoEditarPerfil(CtxFalso(ses), S.Social(ses), S.perfil_limpio(perfil))
+    d2._quitar_fondo()
+    d2._guardar()
+    esperar(app, lambda: d2.result() == QDialog.Accepted or d2.estado.text(), "quita")
+    assert ses.borrados[-1] == ("avatares", ["yo-id/banner.jpg"])
+    _ = PC
+
+
+def test_directorio_usa_el_banner_de_fondo(app):
+    from descargador.ui.paginas.directorio import TarjetaPerfil
+    p = S.tarjeta_limpia({"id": "a", "usuario": "a", "nombre": "A", "banner_url": "a/banner.jpg"})
+    t = TarjetaPerfil(p, CtxFalso(SesionFalsa()), S.Social(SesionFalsa()))
+    from descargador.ui.paginas.perfil_comun import FondoPerfil
+    fondos = t.findChildren(FondoPerfil)
+    assert fondos and "/avatares/a/banner.jpg" in fondos[0].url
 
 
 def test_cambiar_el_tema_no_deja_colores_viejos_en_las_hojas(app):

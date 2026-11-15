@@ -46,6 +46,12 @@ class Armazon extends StatefulWidget {
 
 class _ArmazonState extends State<Armazon> {
   int _pestana = 0;
+
+  // la equis del mini reproductor: lo oculta hasta que se toque una cancion
+  bool _miniOculto = false;
+  bool _vioParado = false;
+  String _claveOculta = '';
+
   final _navegadores = List.generate(4, (_) => GlobalKey<NavigatorState>());
   StreamSubscription<String>? _avisos;
   static const _canal = MethodChannel('caudal/compartido');
@@ -179,6 +185,31 @@ class _ArmazonState extends State<Armazon> {
     super.dispose();
   }
 
+  /// Detiene la musica y esconde el mini reproductor. Vuelve solo al empezar
+  /// cualquier cancion (otra, o la misma con el boton de play).
+  void _quitarMini() {
+    final r = Caudal.leer(context).reproductor;
+    Haptico.toque();
+    _claveOculta = '${r.actual?['clave'] ?? ''}';
+    _vioParado = false;
+    setState(() => _miniOculto = true);
+    r.detener();
+  }
+
+  /// ¿Sigue oculto? Se muestra de nuevo en cuanto algo empieza a sonar.
+  bool _sigueOculto(Reproductor r) {
+    if (!_miniOculto) return false;
+    if (r.estado == EstadoRepro.parado) {
+      _vioParado = true;
+      return true;
+    }
+    if (_vioParado || '${r.actual?['clave'] ?? ''}' != _claveOculta) {
+      _miniOculto = false;
+      return false;
+    }
+    return true;
+  }
+
   void _ir(int i) {
     if (i == _pestana) {
       if (i == 1) BuscarPagina.enfocar();     // tocar Buscar otra vez enfoca el campo
@@ -225,7 +256,24 @@ class _ArmazonState extends State<Armazon> {
             ],
           ),
           // capa propia: lo que cambia en el mini reproductor no repinta la pagina de debajo
-          const Positioned(left: 8, right: 8, bottom: 6, child: RepaintBoundary(child: MiniReproductor())),
+          ListenableBuilder(
+            listenable: Caudal.of(context).reproductor,
+            builder: (context, _) {
+              final r = Caudal.of(context).reproductor;
+              if (r.actual == null || _sigueOculto(r)) return const SizedBox.shrink();
+              return Stack(children: [
+                Positioned(left: 8, right: 8, bottom: 6,
+                    child: RepaintBoundary(child: MiniReproductor(alQuitar: _quitarMini))),
+                // la equis: en la esquina de arriba a la derecha, a caballo del borde para no
+                // tapar los botones; 32x32 de zona de toque y un icono de 17 px
+                Positioned(
+                  right: 8 + 6,
+                  bottom: 6 + 60 - 16,
+                  child: _EquisMini(alPulsar: _quitarMini),
+                ),
+              ]);
+            },
+          ),
         ]);
         if (ancho) {
           return Scaffold(
@@ -381,9 +429,45 @@ class FranjaVersion extends StatelessWidget {
   }
 }
 
+/// La equis pequeña que quita el mini reproductor.
+class _EquisMini extends StatelessWidget {
+  const _EquisMini({required this.alPulsar});
+  final VoidCallback alPulsar;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+        button: true,
+        label: 'Quitar la canción y cerrar el reproductor',
+        excludeSemantics: true,
+        child: GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onTap: alPulsar,
+          child: SizedBox(
+            width: 32,
+            height: 32,
+            child: Center(
+              child: Container(
+                width: 22,
+                height: 22,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: C.fondo,
+                  border: Border.all(color: C.borde),
+                ),
+                child: const Center(child: Icon(Icons.close_rounded, size: 17, color: C.texto2)),
+              ),
+            ),
+          ),
+        ),
+      );
+}
+
 /// Lo que suena, siempre a mano encima de la barra.
 class MiniReproductor extends StatefulWidget {
-  const MiniReproductor({super.key});
+  const MiniReproductor({super.key, this.alQuitar});
+
+  /// Si se da, deslizar el mini hacia abajo lo quita (y la equis hace lo mismo).
+  final VoidCallback? alQuitar;
 
   @override
   State<MiniReproductor> createState() => _MiniReproductorState();
@@ -440,6 +524,7 @@ class _MiniReproductorState extends State<MiniReproductor> {
           onTap: () => s.abrirReproductor(context),
           onVerticalDragEnd: (d) {
             if ((d.primaryVelocity ?? 0) < -200) s.abrirReproductor(context);
+            if ((d.primaryVelocity ?? 0) > 300) widget.alQuitar?.call();
           },
           onHorizontalDragEnd: (d) {
             // deslizar de lado salta de cancion, como en Spotify

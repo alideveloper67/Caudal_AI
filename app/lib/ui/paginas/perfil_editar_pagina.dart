@@ -40,6 +40,9 @@ class _PerfilEditarPaginaState extends State<PerfilEditarPagina> {
   bool _cargando = true;
   bool _guardando = false;
   Uint8List? _fotoNueva; // ya recortada y comprimida
+  Uint8List? _bannerNuevo; // imagen de fondo ya recortada (1280×480)
+  bool _bannerQuitado = false;
+  bool _procesandoBanner = false;
   bool _procesandoFoto = false;
 
   @override
@@ -111,6 +114,32 @@ class _PerfilEditarPaginaState extends State<PerfilEditarPagina> {
     }
   }
 
+  Future<void> _elegirBanner() async {
+    if (_procesandoBanner) return;
+    try {
+      final r = await FilePicker.pickFiles(type: FileType.image, withData: true);
+      final bytes = r?.files.firstOrNull?.bytes;
+      if (bytes == null) return;
+      setState(() => _procesandoBanner = true);
+      final jpeg = await ImagenSocial.banner(bytes);
+      if (mounted) {
+        setState(() {
+          _bannerNuevo = jpeg;
+          _bannerQuitado = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) _aviso(e is ErrorNube ? e.mensaje : 'No se pudo usar esa imagen. Prueba con otra.');
+    } finally {
+      if (mounted) setState(() => _procesandoBanner = false);
+    }
+  }
+
+  void _quitarBanner() => setState(() {
+        _bannerNuevo = null;
+        _bannerQuitado = true;
+      });
+
   Future<void> _elegirCancion() async {
     final c = await showModalBottomSheet<CancionFav>(
       context: context,
@@ -148,8 +177,14 @@ class _PerfilEditarPaginaState extends State<PerfilEditarPagina> {
     try {
       var foto = p.fotoUrl;
       if (_fotoNueva != null) foto = await social.subirFoto(_fotoNueva!);
+      var banner = p.bannerUrl;
+      if (_bannerNuevo != null) {
+        banner = await social.subirBanner(_bannerNuevo!);
+      } else if (_bannerQuitado) {
+        banner = '';
+      }
       p = p.copiar(
-        nombre: _nombre.text, frase: _frase.text, bio: _bio.text, artistaFav: _artista.text, fotoUrl: foto,
+        nombre: _nombre.text, frase: _frase.text, bio: _bio.text, artistaFav: _artista.text, fotoUrl: foto, bannerUrl: banner,
       );
       final quedo = await social.guardarPerfil(p);
       if (!mounted) return;
@@ -171,7 +206,7 @@ class _PerfilEditarPaginaState extends State<PerfilEditarPagina> {
     if (_guardando) return false;
     final p = _p;
     if (p == null) return true;
-    final cambios = _fotoNueva != null || _nombre.text != p.nombre || _frase.text != p.frase || _bio.text != p.bio ||
+    final cambios = _fotoNueva != null || _bannerNuevo != null || _bannerQuitado || _nombre.text != p.nombre || _frase.text != p.frase || _bio.text != p.bio ||
         _artista.text != p.artistaFav;
     if (!cambios) return true;
     return confirmar(context, '¿Salir sin guardar?', 'Los cambios que hiciste en tu perfil se perderán.', si: 'Salir');
@@ -216,7 +251,7 @@ class _PerfilEditarPaginaState extends State<PerfilEditarPagina> {
     return ListView(
       padding: const EdgeInsets.fromLTRB(Esp.xl, Esp.m, Esp.xl, 120),
       children: [
-        Center(child: _foto(p, color)),
+        _vistaPrevia(p, color),
         const SizedBox(height: Esp.xl),
         _campo('Nombre', _nombre, max: 40, icono: Icons.badge_outlined),
         _campo('Frase de estado', _frase, max: 80, icono: Icons.format_quote_rounded,
@@ -287,6 +322,57 @@ class _PerfilEditarPaginaState extends State<PerfilEditarPagina> {
 
   Color colorDe(PerfilEditable p) => colorDelPerfil(p.colorPerfil);
 
+  /// Vista previa en vivo: imagen de fondo + foto, como se verá el perfil.
+  Widget _vistaPrevia(PerfilEditable p, Color color) {
+    final tieneBanner = _bannerNuevo != null || (p.bannerUrl.isNotEmpty && !_bannerQuitado);
+    return Column(children: [
+      Stack(clipBehavior: Clip.none, alignment: Alignment.bottomCenter, children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(20),
+          child: SizedBox(
+            height: 150,
+            width: double.infinity,
+            child: _bannerNuevo != null
+                ? Stack(fit: StackFit.expand, children: [
+                    Image.memory(_bannerNuevo!, fit: BoxFit.cover),
+                    DecoratedBox(
+                        decoration: BoxDecoration(
+                            gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter,
+                                colors: [Colors.black26, Colors.black.withValues(alpha: 0.55)]))),
+                  ])
+                : FondoBanner(color: color, bannerUrl: _bannerQuitado ? '' : p.bannerUrl, alto: 150, radio: 20),
+          ),
+        ),
+        Positioned(
+          right: 10,
+          top: 10,
+          child: Row(children: [
+            if (tieneBanner)
+              IconButton.filled(
+                tooltip: 'Quitar imagen de fondo',
+                style: IconButton.styleFrom(backgroundColor: Colors.black54, foregroundColor: Colors.white),
+                icon: const Icon(Icons.delete_outline_rounded, size: 20),
+                onPressed: _quitarBanner,
+              ),
+            const SizedBox(width: 6),
+            IconButton.filled(
+              tooltip: tieneBanner ? 'Cambiar imagen de fondo' : 'Elegir imagen de fondo',
+              style: IconButton.styleFrom(backgroundColor: C.acento, foregroundColor: C.acentoTexto),
+              icon: _procesandoBanner
+                  ? SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: C.acentoTexto))
+                  : const Icon(Icons.wallpaper_rounded, size: 20),
+              onPressed: _elegirBanner,
+            ),
+          ]),
+        ),
+        Positioned(bottom: -50, child: _foto(p, color)),
+      ]),
+      const SizedBox(height: 56),
+      Text(_bannerNuevo != null ? 'Imagen lista. Se subirá al guardar.' : tieneBanner ? 'Toca el icono para cambiar tu imagen de fondo' : 'Añade una imagen de fondo a tu perfil',
+          style: estiloDetalle),
+    ]);
+  }
+
   Widget _foto(PerfilEditable p, Color color) => Column(children: [
         GestureDetector(
           onTap: _elegirFoto,
@@ -307,8 +393,6 @@ class _PerfilEditarPaginaState extends State<PerfilEditarPagina> {
             ),
           ]),
         ),
-        const SizedBox(height: 8),
-        Text(_fotoNueva != null ? 'Foto lista. Se subirá al guardar.' : 'Toca para cambiar tu foto', style: estiloDetalle),
       ]);
 
   Widget _cancion(PerfilEditable p, Color color) {

@@ -6,7 +6,7 @@ insignias, top del mes, afinidad, me gusta, amistad y su música subida.
 """
 
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QDialog, QHBoxLayout, QLabel, QMenu, QPushButton, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QDialog, QFrame, QHBoxLayout, QLabel, QMenu, QPushButton, QVBoxLayout, QWidget
 
 from ... import social as S
 from ...hilos import en_segundo_plano
@@ -60,37 +60,56 @@ class PaginaPerfil(Pagina):
         self.p = p
         self.titulo = "Mi perfil" if p["es_mio"] else S.nombre_visible(p)
         color = PC.color_de(p)
-        self.set_color(PC.tinte(color, 0.55))
+        self.set_color(PC.tinte(color, 0.30))
         col = PC.columna_central(self.cuerpo, 920)
         col.addWidget(self._hero(p, color))
         if p["privado"]:
             col.addWidget(self._aviso_privado(p))
             self.cuerpo.addStretch(1)
             return
+        tarjetas = []
+
+        def poner(w):
+            col.addWidget(w)
+            tarjetas.append(w)
+        est = self._estadisticas(p, color)
+        poner(est)
         if p["afinidad"] is not None:
-            col.addWidget(self._afinidad(p, color))
+            poner(self._afinidad(p, color))
         if p["bio"] or p["artista_fav"] or p["generos"]:
-            col.addWidget(self._sobre(p, color))
+            poner(self._sobre(p, color))
         elif p["es_mio"]:
-            col.addWidget(self._invitar_a_completar())
+            poner(self._invitar_a_completar())
         if p["cancion_fav"]:
-            col.addWidget(self._favorita(p, color))
+            poner(self._favorita(p, color))
         if p["insignias"]:
-            col.addWidget(self._insignias(p))
+            poner(self._insignias(p))
         if p["top_artistas"] or p["top_canciones"]:
-            col.addWidget(self._top(p, color))
-        col.addWidget(self._subidas(p))
+            poner(self._top(p, color))
+        poner(self._subidas(p))
         self.cuerpo.addStretch(1)
+        PC.entrada(tarjetas)
 
     def _hero(self, p, color):
-        caja = QWidget()
-        h = QHBoxLayout(caja)
-        h.setContentsMargins(0, 30, 0, 6)
-        h.setSpacing(24)
-        h.addWidget(PC.Avatar(140, S.nombre_visible(p), color, p["foto_url"], anillo=color), 0, Qt.AlignBottom)
-        v = QVBoxLayout()
-        v.setSpacing(6)
-        v.addStretch(1)
+        """Imagen de fondo a todo el ancho, un panel de cristal con el nombre encima y la foto
+        grande solapada con el borde del fondo."""
+        alto_fondo = 270
+        cont = QWidget()
+        cont.setMinimumHeight(alto_fondo + 92)
+        v = QVBoxLayout(cont)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.setSpacing(0)
+        self.fondo = PC.FondoPerfil(alto_fondo, 20, False, 0.82, color, p.get("banner_url"))
+        fl = QVBoxLayout(self.fondo)
+        fl.setContentsMargins(186, 0, 18, 16)
+        fl.addStretch(1)
+        cristal = QFrame()
+        cristal.setObjectName("cristal")
+        cristal.setStyleSheet("QFrame#cristal{background:rgba(8, 10, 14, 0.58);"
+                              "border:1px solid rgba(255, 255, 255, 0.12);border-radius:16px;}")
+        cv = QVBoxLayout(cristal)
+        cv.setContentsMargins(18, 12, 18, 12)
+        cv.setSpacing(4)
         notas = PC.notas_de(p)
         if notas:
             fila = QHBoxLayout()
@@ -98,20 +117,56 @@ class PaginaPerfil(Pagina):
             for n in notas:
                 fila.addWidget(n)
             fila.addStretch(1)
-            v.addLayout(fila)
+            cv.addLayout(fila)
         nombre = QLabel(S.nombre_visible(p))
-        nombre.setStyleSheet("background:transparent;font-size:34px;font-weight:900;")
+        nombre.setStyleSheet(f"background:transparent;color:{C['texto']};font-size:32px;font-weight:900;")
         nombre.setWordWrap(True)
-        v.addWidget(nombre)
+        cv.addWidget(nombre)
         datos = [f"@{p['usuario']}"]
         if p["creado"] and S.mes_anio(p["creado"]):
             datos.append("en Caudal desde " + S.mes_anio(p["creado"]))
-        v.addWidget(PC.etiqueta("  ·  ".join(datos), f"color:{C['texto2']};font-size:13px;font-weight:600;"))
+        cv.addWidget(PC.etiqueta("  ·  ".join(datos), f"color:{C['texto2']};font-size:13px;font-weight:600;"))
         if p["frase"]:
-            v.addWidget(PC.etiqueta(f"“{p['frase']}”", f"color:{C['texto']};font-size:14px;font-style:italic;"))
-        v.addSpacing(6)
-        v.addLayout(self._acciones(p))
-        h.addLayout(v, 1)
+            cv.addWidget(PC.etiqueta(f"“{p['frase']}”", f"color:{C['texto']};font-size:14px;font-style:italic;"))
+        fl.addWidget(cristal)
+        v.addWidget(self.fondo)
+        fila_acc = QHBoxLayout()
+        fila_acc.setContentsMargins(186, 12, 0, 12)
+        fila_acc.addLayout(self._acciones(p))
+        v.addLayout(fila_acc)
+        v.addStretch(1)
+        av = PC.Avatar(148, S.nombre_visible(p), color, p["foto_url"], anillo=C["panel"], padre=cont)
+        av.move(26, alto_fondo - 78)
+        av.raise_()
+        return cont
+
+    def _estadisticas(self, p, color):
+        fila = QHBoxLayout()
+        fila.setSpacing(12)
+        datos = [(str(p["likes"]), "me gusta", "corazon_lleno"),
+                 (str(p["num_subidas"]), "canciones subidas", "musica"),
+                 (str(len(p["insignias"])), "insignias", "estrella")]
+        if p["afinidad"] is not None:
+            datos.append((f"{int(p['afinidad'])} %", "de afinidad contigo", "usuario"))
+        tarjetas = []
+        for valor, rotulo, icono in datos:
+            f, v = PC.tarjeta()
+            v.setContentsMargins(16, 12, 16, 12)
+            v.setSpacing(0)
+            h = QHBoxLayout()
+            ic = QLabel()
+            ic.setPixmap(iconos.pixmap(icono, 18, color))
+            ic.setStyleSheet("background:transparent;")
+            h.addWidget(ic)
+            h.addWidget(PC.etiqueta(valor, "font-size:22px;font-weight:900;", False))
+            h.addStretch(1)
+            v.addLayout(h)
+            v.addWidget(PC.etiqueta(rotulo, f"color:{C['texto3']};font-size:11.5px;", False))
+            fila.addWidget(f, 1)
+            tarjetas.append(f)
+        caja = QWidget()
+        caja.setLayout(fila)
+        caja._tarjetas = tarjetas
         return caja
 
     # ------------------------------------------------------------ acciones
@@ -289,12 +344,22 @@ class PaginaPerfil(Pagina):
 
     def _favorita(self, p, color):
         c = p["cancion_fav"]
-        f, v = PC.tarjeta(PC.mezclar(C["borde"], color, 0.5))
+        f, v = PC.tarjeta(PC.mezclar(C["borde"], color, 0.6))
+        f.setStyleSheet(f"QFrame#tarjeta_social{{background:qlineargradient(x1:0,y1:0,x2:1,y2:1,"
+                        f"stop:0 {PC.tinte(color, 0.32)},stop:0.6 {C['panel']});border:1px solid "
+                        f"{PC.mezclar(C['borde'], color, 0.6)};border-radius:16px;}}")
         v.addWidget(PC.etiqueta("CANCIÓN FAVORITA", f"color:{C['texto3']};font-size:11px;font-weight:800;"
                                                     "letter-spacing:1px;"))
         h = QHBoxLayout()
         h.setSpacing(18)
-        por = Portada(132, radio=14)
+        por = Portada(148, radio=16)
+        from PySide6.QtGui import QColor
+        from PySide6.QtWidgets import QGraphicsDropShadowEffect
+        brillo = QGraphicsDropShadowEffect(por)
+        brillo.setBlurRadius(46)
+        brillo.setOffset(0, 8)
+        brillo.setColor(QColor(color))
+        por.setGraphicsEffect(brillo)
         por.set_url(c["miniatura"] or (f"https://i.ytimg.com/vi/{c['video_id']}/hqdefault.jpg"
                                        if c["video_id"] else ""))
         h.addWidget(por)

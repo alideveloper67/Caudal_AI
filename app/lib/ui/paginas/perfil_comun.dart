@@ -86,6 +86,67 @@ class AvatarPerfil extends StatelessWidget {
   }
 }
 
+// ============================================================ imagen de fondo
+
+/// Imagen de fondo del perfil (o degradado con el color del perfil si no hay)
+/// con un velo oscuro por encima para que se lea lo que va encima.
+class FondoBanner extends StatelessWidget {
+  const FondoBanner({super.key, required this.color, this.bannerUrl = '', this.marca, this.alto = 190,
+      this.radio = 0, this.velo = 0.55});
+  final Color color;
+  final String bannerUrl;
+  final Object? marca;
+  final double alto;
+  final double radio;
+
+  /// Qué tan oscuro es el velo de abajo (0 a 1).
+  final double velo;
+
+  @override
+  Widget build(BuildContext context) {
+    final url = Social.urlBanner(bannerUrl, marca: marca);
+    final degradado = Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color.lerp(color, C.fondo, 0.2)!, Color.lerp(color, C.fondo, 0.75)!],
+        ),
+      ),
+    );
+    final dpr = MediaQuery.devicePixelRatioOf(context);
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(radio),
+      child: SizedBox(
+        height: alto,
+        width: double.infinity,
+        child: Stack(fit: StackFit.expand, children: [
+          if (url.isEmpty)
+            degradado
+          else
+            CachedNetworkImage(
+              imageUrl: url,
+              fit: BoxFit.cover,
+              memCacheWidth: (MediaQuery.sizeOf(context).width * dpr).round().clamp(200, 1280),
+              fadeInDuration: const Duration(milliseconds: 220),
+              placeholder: (_, _) => degradado,
+              errorWidget: (_, _, _) => degradado,
+            ),
+          DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [Colors.black.withValues(alpha: 0.25), Colors.black.withValues(alpha: velo)],
+              ),
+            ),
+          ),
+        ]),
+      ),
+    );
+  }
+}
+
 // ============================================================ insignias
 
 /// La nota «ARTISTA»: dorada, con estrella.
@@ -351,6 +412,13 @@ class BotonAmistad extends StatelessWidget {
 
 // ============================================================ canciones de la comunidad
 
+/// Color suave de cada estado: en revisión ámbar, rechazada rojiza.
+Color colorDeEstado(String estado) => switch (estado) {
+      'pendiente' || 'revision' => const Color(0xFFF5C451),
+      'retirada' => const Color(0xFFFF7A7A),
+      _ => C.texto2,
+    };
+
 /// Fila de una canción subida: carátula, título, artista, quién la subió,
 /// la nota ARTISTA y el menú (reportar o borrar).
 class FilaSubida extends StatelessWidget {
@@ -373,15 +441,10 @@ class FilaSubida extends StatelessWidget {
   final VoidCallback? alAbrirPerfil;
   final bool mostrarAutor;
 
-  static String _estado(String e) => switch (e) {
-        'revision' => 'En revisión',
-        'retirada' => 'Retirada',
-        _ => '',
-      };
-
   @override
   Widget build(BuildContext context) {
-    final estado = _estado(subida.estado);
+    final estado = subida.textoEstado;
+    final colorEstado = colorDeEstado(subida.estado);
     final detalle = [
       if (subida.linea.isNotEmpty) subida.linea,
       if (subida.escuchas > 0) '${subida.escuchas} ${subida.escuchas == 1 ? 'escucha' : 'escuchas'}',
@@ -425,10 +488,16 @@ class FilaSubida extends StatelessWidget {
                   if (subida.esArtista) ...[const SizedBox(width: 6), const InsigniaArtista(compacta: true)],
                   if (estado.isNotEmpty) ...[
                     const SizedBox(width: 6),
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                      decoration: BoxDecoration(color: C.superficie3, borderRadius: BorderRadius.circular(999)),
-                      child: Text(estado, style: const TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: C.texto2)),
+                    Flexible(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                        decoration: BoxDecoration(
+                            color: colorEstado.withValues(alpha: 0.16), borderRadius: BorderRadius.circular(999)),
+                        child: Text(estado,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w700, color: colorEstado)),
+                      ),
                     ),
                   ],
                 ]),

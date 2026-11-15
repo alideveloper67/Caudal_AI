@@ -87,6 +87,110 @@ def columna_central(padre_layout, ancho=900):
     return v
 
 
+# ------------------------------------------------------------------ fondo del perfil (banner)
+
+class FondoPerfil(QWidget):
+    """Imagen de fondo de un perfil a todo el ancho, con un degradado oscuro encima.
+    Sin imagen, un degradado con el color del perfil. Sigue el tema: los colores salen de C."""
+
+    def __init__(self, alto=240, radio=18, solo_arriba=False, oscuridad=0.78, color=None, banner_url=None,
+                 padre=None):
+        super().__init__(padre)
+        self.radio = radio
+        self.solo_arriba = solo_arriba
+        self.oscuridad = oscuridad
+        self.color = color or C["acento"]
+        self.img = None
+        self.url = ""
+        self.setFixedHeight(alto)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self.set_banner(banner_url)
+
+    def set_banner(self, banner_url):
+        url = S.url_foto(banner_url) if banner_url else ""
+        if url == self.url and (self.img is not None or not url):
+            return
+        self.url, self.img = url, None
+        if url:
+            yo, objetivo = self, url
+
+            def listo(img):
+                try:
+                    if yo.url == objetivo and img is not None and not img.isNull():
+                        yo.img = img
+                        yo.update()
+                except RuntimeError:
+                    pass
+            imagenes.imagen(url, listo)
+        self.update()
+
+    def set_imagen(self, img):
+        """Una imagen local (vista previa al elegirla)."""
+        self.url, self.img = "local", img
+        self.update()
+
+    def quitar(self):
+        self.url, self.img = "", None
+        self.update()
+
+    def set_color(self, color):
+        self.color = color or C["acento"]
+        self.update()
+
+    def paintEvent(self, _e):
+        from PySide6.QtGui import QLinearGradient
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        p.setRenderHint(QPainter.SmoothPixmapTransform, True)
+        w, h = self.width(), self.height()
+        ruta = QPainterPath()
+        r = self.radio
+        ruta.addRoundedRect(QRectF(0, 0, w, h), r, r)
+        if self.solo_arriba:                       # las esquinas de abajo, rectas
+            ruta.addRect(QRectF(0, h - r, w, r))
+            ruta = ruta.simplified()
+        p.setClipPath(ruta)
+        if self.img is not None and not self.img.isNull():
+            esc = self.img.scaled(w, h, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+            p.drawImage(0, 0, esc, (esc.width() - w) // 2, (esc.height() - h) // 2, w, h)
+        else:
+            g = QLinearGradient(0, 0, w, h)
+            g.setColorAt(0, QColor(tinte(self.color, 0.85)))
+            g.setColorAt(1, QColor(tinte(self.color, 0.28)))
+            p.fillRect(0, 0, w, h, g)
+        sombra = QLinearGradient(0, 0, 0, h)
+        arriba = QColor(C["panel"])
+        arriba.setAlphaF(0.0)
+        abajo = QColor(C["panel"])
+        abajo.setAlphaF(self.oscuridad)
+        sombra.setColorAt(0.25, arriba)
+        sombra.setColorAt(1, abajo)
+        p.fillRect(0, 0, w, h, sombra)
+
+
+def entrada(widgets, paso=70, ms=260):
+    """Los widgets aparecen uno tras otro con un fundido suave (tarjetas que «entran»)."""
+    from PySide6.QtCore import QEasingCurve, QPropertyAnimation, QTimer
+    from PySide6.QtWidgets import QGraphicsOpacityEffect
+    for i, w in enumerate(widgets):
+        ef = QGraphicsOpacityEffect(w)
+        ef.setOpacity(0.0)
+        w.setGraphicsEffect(ef)
+
+        def arrancar(w=w, ef=ef):
+            try:
+                anim = QPropertyAnimation(ef, b"opacity", w)
+                anim.setDuration(ms)
+                anim.setStartValue(0.0)
+                anim.setEndValue(1.0)
+                anim.setEasingCurve(QEasingCurve.OutCubic)
+                anim.finished.connect(lambda: w.setGraphicsEffect(None))
+                anim.start(QPropertyAnimation.DeleteWhenStopped)
+            except RuntimeError:
+                pass
+        QTimer.singleShot(i * paso, arrancar)
+
+
 # ------------------------------------------------------------------ avatar
 
 class Avatar(QWidget):
@@ -421,10 +525,9 @@ class TarjetaSubida(QFrame):
         n = int(s.get("escuchas") or 0)
         datos.append(f"{n} escucha" + ("" if n == 1 else "s"))
         extra.addWidget(etiqueta(" · ".join(datos), f"color:{C['texto3']};font-size:11.5px;", False))
-        estado = ESTADOS.get(s.get("estado"))
-        if estado:
-            extra.addWidget(etiqueta(estado[0], f"color:{C[estado[1]]};font-size:11.5px;font-weight:800;",
-                                     False))
+        texto_e, tono = S.texto_estado(s)
+        if texto_e:
+            extra.addWidget(etiqueta(texto_e, f"color:{C[tono]};font-size:11.5px;font-weight:800;", False))
         extra.addStretch(1)
         col.addLayout(extra)
         h.addLayout(col, 1)

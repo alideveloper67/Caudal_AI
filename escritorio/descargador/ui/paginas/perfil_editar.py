@@ -136,6 +136,8 @@ class DialogoEditarPerfil(QDialog):
         self.p = perfil
         self.foto_ruta = None          # foto elegida en este diálogo (aún sin subir)
         self.quitar_foto = False
+        self.banner_ruta = None        # imagen de fondo elegida en este diálogo (aún sin subir)
+        self.quitar_banner = False
         self.color = perfil.get("color_perfil")
         self.cancion = perfil.get("cancion_fav")
         self.generos = list(perfil.get("generos") or [])
@@ -172,6 +174,21 @@ class DialogoEditarPerfil(QDialog):
         fila.addStretch(1)
         c.addLayout(fila)
         c.addWidget(PC.etiqueta("La foto se recorta en cuadrado y se reduce sola para que pese poco.",
+                                f"color:{C['texto3']};font-size:11.5px;"))
+
+        # ---- imagen de fondo
+        c.addWidget(self._seccion("Imagen de fondo"))
+        self.fondo = PC.FondoPerfil(120, 14, False, 0.55, PC.color_de(perfil), perfil.get("banner_url"))
+        c.addWidget(self.fondo)
+        fila_b = QHBoxLayout()
+        fila_b.setSpacing(8)
+        fila_b.addWidget(PC.boton("Elegir imagen de fondo…", "contorno", "carpeta", al_pulsar=self._elegir_banner))
+        self.bt_quitar_banner = PC.boton("Quitar imagen", "contorno", "papelera", al_pulsar=self._quitar_fondo)
+        self.bt_quitar_banner.setVisible(bool(perfil.get("banner_url")))
+        fila_b.addWidget(self.bt_quitar_banner)
+        fila_b.addStretch(1)
+        c.addLayout(fila_b)
+        c.addWidget(PC.etiqueta("Se recorta a 1280×480 y se comprime sola. Sin imagen, se usa el color de tu perfil.",
                                 f"color:{C['texto3']};font-size:11.5px;"))
 
         # ---- datos
@@ -362,6 +379,28 @@ class DialogoEditarPerfil(QDialog):
         self.av.update()
         self.bt_quitar.setVisible(False)
 
+    # ------------------------------------------------------------ imagen de fondo
+    def _elegir_banner(self):
+        ruta, _f = QFileDialog.getOpenFileName(self, "Elige tu imagen de fondo", "", S.FILTRO_IMAGEN)
+        if not ruta:
+            return
+        try:
+            img = S.recortar_proporcion(S._cargar_imagen(ruta), 640, 240)
+        except S.ErrorNube as e:
+            self.estado.setText(str(e))
+            return
+        self.banner_ruta = ruta
+        self.quitar_banner = False
+        self.estado.setText("")
+        self.fondo.set_imagen(img)
+        self.bt_quitar_banner.setVisible(True)
+
+    def _quitar_fondo(self):
+        self.banner_ruta = None
+        self.quitar_banner = True
+        self.fondo.quitar()
+        self.bt_quitar_banner.setVisible(False)
+
     # ------------------------------------------------------------ canción favorita
     def _pintar_cancion(self):
         PC.limpiar(self.caja_cancion)
@@ -406,6 +445,7 @@ class DialogoEditarPerfil(QDialog):
 
     def _poner_color(self, col):
         self.color = col
+        self.fondo.set_color(col)
         self._repintar_colores()
         self._actualizar_vista()
 
@@ -452,6 +492,7 @@ class DialogoEditarPerfil(QDialog):
                   "perfil_publico": bool(self.chk_publico.isChecked() and not self.menor),
                   "mostrar_top": self.chk_top.isChecked()}
         foto, quitar = self.foto_ruta, self.quitar_foto
+        banner, quitar_b = self.banner_ruta, self.quitar_banner
         quiere_publico = campos["perfil_publico"]
         social = self.social
         self.bt_guardar.setEnabled(False)
@@ -463,6 +504,10 @@ class DialogoEditarPerfil(QDialog):
                 campos["foto_url"] = social.subir_foto(S.preparar_foto(foto))
             elif quitar:
                 social.quitar_foto()
+            if banner:
+                campos["banner_url"] = social.subir_banner(S.preparar_banner(banner))
+            elif quitar_b:
+                social.quitar_banner()
             return social.guardar_perfil(campos)
 
         def listo(res):

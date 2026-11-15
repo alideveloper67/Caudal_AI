@@ -40,7 +40,8 @@ def _html(t):
 
 
 class DialogoNuevoChat(QDialog):
-    """Busca a alguien por su usuario mientras se escribe y abre el chat."""
+    """Elige a quién escribir: solo la lista de tus amigos (con buscador y foto). Para
+    escribirle a alguien nuevo primero hay que agregarlo como amigo."""
 
     def __init__(self, ctx, chat, padre=None):
         super().__init__(padre)
@@ -50,138 +51,129 @@ class DialogoNuevoChat(QDialog):
         self.setAttribute(Qt.WA_StyledBackground, True)
         self.setStyleSheet(hoja(_i.flechas_qss()))
         self.setWindowTitle("Nuevo mensaje · Caudal")
-        self.setMinimumWidth(440)
+        self.setMinimumSize(440, 480)
         self.ctx = ctx
         self.chat = chat
-        self.persona = None
         self.resultado = None
-        self.yo = ((getattr(ctx, "cuenta", None) or {}).get("usuario") or "").lower()
+        self.ir_a_amigos = False
+        self.amigos = []
         v = QVBoxLayout(self)
         v.setContentsMargins(24, 20, 24, 18)
         v.setSpacing(10)
         t = QLabel("Nuevo mensaje")
         t.setStyleSheet("font-size:20px;font-weight:900;")
         v.addWidget(t)
-        nota = QLabel("Solo puedes escribir a tus amigos. Si todavía no lo es, le enviarás una solicitud.")
+        nota = QLabel("Elige a quién escribirle. Solo puedes escribir a tus amigos.")
         nota.setWordWrap(True)
         nota.setObjectName("ayuda")
         v.addWidget(nota)
         self.campo = QLineEdit()
-        self.campo.setPlaceholderText("@usuario de la otra persona")
-        self.campo.textEdited.connect(self._al_escribir)
-        self.campo.returnPressed.connect(self._abrir)
+        self.campo.setPlaceholderText("Buscar entre mis amigos")
+        self.campo.textChanged.connect(self._filtrar)
         v.addWidget(self.campo)
-        self.estado = QLabel("Escribe su usuario de Caudal (el que usa para entrar).")
+        self.estado = QLabel("Cargando tus amigos…")
         self.estado.setWordWrap(True)
         self.estado.setObjectName("secundario")
         v.addWidget(self.estado)
+        self.area = QScrollArea()
+        self.area.setWidgetResizable(True)
+        self.area.setFrameShape(QFrame.NoFrame)
+        self.area.setStyleSheet("QScrollArea{background:transparent;border:none;}")
+        self.area.viewport().setAutoFillBackground(False)
+        self.interior = QWidget()
+        self.interior.setObjectName("interior_nuevo")
+        self.interior.setStyleSheet("QWidget#interior_nuevo{background:transparent;}")
+        self.lista = QVBoxLayout(self.interior)
+        self.lista.setContentsMargins(0, 0, 6, 0)
+        self.lista.setSpacing(4)
+        self.lista.addStretch(1)
+        self.area.setWidget(self.interior)
+        v.addWidget(self.area, 1)
         fila = QHBoxLayout()
+        agregar = QPushButton("  Agregar un amigo")
+        agregar.setIcon(iconos.icono("mas", 16, C["texto"]))
+        agregar.setObjectName("contorno")
+        agregar.setCursor(Qt.PointingHandCursor)
+        agregar.setToolTip("Buscar a alguien por su usuario y enviarle una solicitud")
+        agregar.clicked.connect(self._agregar)
+        fila.addWidget(agregar)
         fila.addStretch(1)
         cancelar = QPushButton("Cancelar")
         cancelar.setObjectName("contorno")
         cancelar.clicked.connect(self.reject)
         fila.addWidget(cancelar)
-        self.bt = QPushButton("Escribir")
-        self.bt.setObjectName("principal")
-        self.bt.setEnabled(False)
-        self.bt.clicked.connect(self._accion)
-        fila.addWidget(self.bt)
         v.addLayout(fila)
-        self.reloj = QTimer(self)
-        self.reloj.setSingleShot(True)
-        self.reloj.setInterval(450)
-        self.reloj.timeout.connect(self._buscar)
-
-    def _escrito(self):
-        return self.campo.text().strip().lstrip("@").lower()
-
-    def _al_escribir(self, _t):
-        self.persona = None
-        self.bt.setEnabled(False)
-        u = self._escrito()
-        if len(u) < 3:
-            self.estado.setText("Escribe su usuario de Caudal (el que usa para entrar)." if not u
-                                else "Sigue escribiendo…")
-            return
-        if u == self.yo:
-            self.estado.setText("Ese es tu propio usuario. Escribe el de la otra persona.")
-            return
-        self.estado.setText("Buscando…")
-        self.reloj.start()
-
-    def _buscar(self):
-        u = self._escrito()
-
-        def listo(p):
-            if u != self._escrito():
-                return
-            self.persona = p
-            self.bt.setEnabled(p is not None)
-            if p:
-                p.setdefault("relacion", "ninguna")
-                self._mostrar_persona()
-            else:
-                self.estado.setText(f"No hay nadie con el usuario «{_html(u)}». Revisa que esté bien escrito.")
-
-        en_segundo_plano(self.chat.buscar, u, ok=listo,
-                         error=lambda _e: self.estado.setText("No se pudo conectar. Revisa tu internet."),
+        social = S.Social(chat.sesion)
+        en_segundo_plano(social.mis_amigos, ok=self._llegan,
+                         error=lambda e: self.estado.setText(S.explicar(e, "cargar tus amigos")),
                          dueno=self, urgente=True)
 
-    def _mostrar_persona(self):
-        p = self.persona
-        rel = p.get("relacion") or "ninguna"
-        nombre = f"<b>{_html(p.get('nombre') or p['usuario'])}</b>  @{_html(p['usuario'])}"
-        texto, enabled, que = {
-            "amigo": ("Escribir", True, "es tu amigo: pulsa «Escribir»"),
-            "ninguna": ("Enviar solicitud", True, "aún no es tu amigo: envíale una solicitud"),
-            "recibida": ("Aceptar solicitud", True, "quiere ser tu amigo: acepta su solicitud"),
-            "enviada": ("Solicitud enviada", False, "ya le enviaste una solicitud; espera a que la acepte"),
-        }.get(rel, ("Escribir", False, "no se puede escribir a esta persona"))
-        self.estado.setText(f"{nombre}  — {que}")
-        self.bt.setText(texto)
-        self.bt.setEnabled(enabled)
+    # ------------------------------------------------------------ lista
+    def _llegan(self, amigos):
+        self.amigos = amigos
+        self._filtrar()
 
-    def _accion(self):
-        p = self.persona
-        if not p:
-            return
-        if (p.get("relacion") or "ninguna") == "amigo":
-            self._abrir()
-            return
-        self.bt.setEnabled(False)
-        self.bt.setText("Enviando…")
-        social = S.Social(self.chat.sesion)
+    def _filtrar(self, *_):
+        _borrar_layout(self.lista)
+        q = self.campo.text().strip().lstrip("@").lower()
+        vistos = [p for p in self.amigos
+                  if not q or q in (p.get("usuario") or "").lower() or q in (p.get("nombre") or "").lower()]
+        if not self.amigos:
+            self.estado.setText("Aún no tienes amigos con quien hablar. Pulsa «Agregar un amigo», busca su "
+                                "usuario y envíale una solicitud: cuando la acepte podrán escribirse.")
+        elif not vistos:
+            self.estado.setText(f"Ninguno de tus amigos coincide con «{self.campo.text().strip()}».")
+        else:
+            self.estado.setText("")
+        self.estado.setVisible(bool(self.estado.text()))
+        for p in vistos:
+            self.lista.addWidget(self._fila(p))
+        self.lista.addStretch(1)
 
-        def listo(r):
-            p["relacion"] = S.relacion_tras_envio(r)
-            self._mostrar_persona()
-            self.estado.setText(S.mensaje_tras_envio(r, p.get("nombre") or p["usuario"]))
+    def _fila(self, p):
+        b = QPushButton()
+        b.setCursor(Qt.PointingHandCursor)
+        b.setFixedHeight(58)
+        b.setFocusPolicy(Qt.NoFocus)
+        b.setStyleSheet(f"QPushButton{{text-align:left;border:none;border-radius:12px;background:transparent;}}"
+                        f"QPushButton:hover{{background:{C['superficie2']};}}")
+        h = QHBoxLayout(b)
+        h.setContentsMargins(10, 6, 10, 6)
+        h.addWidget(Avatar(42, S.nombre_visible(p), C["acento"], p.get("foto_url")))
+        col = QVBoxLayout()
+        col.setSpacing(0)
+        n = QLabel(S.nombre_visible(p))
+        n.setStyleSheet("font-weight:700;background:transparent;")
+        u = QLabel("@" + (p.get("usuario") or ""))
+        u.setStyleSheet(f"color:{C['texto3']};font-size:11.5px;background:transparent;")
+        col.addWidget(n)
+        col.addWidget(u)
+        h.addLayout(col, 1)
+        for w in b.findChildren(QLabel):
+            w.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        b.clicked.connect(lambda _=False, p=p: self._abrir(p))
+        return b
 
-        def fallo(e):
-            self._mostrar_persona()
-            self.estado.setText(S.explicar(e, "enviar la solicitud"))
-        en_segundo_plano(social.enviar_solicitud, p["id"], ok=listo, error=fallo, dueno=self, urgente=True)
+    def _agregar(self):
+        self.ir_a_amigos = True
+        self.reject()
 
-    def _abrir(self):
-        p = self.persona
-        if not p:
-            return
-        self.bt.setEnabled(False)
-        self.bt.setText("Abriendo…")
+    def _abrir(self, p):
+        self.estado.setText("Abriendo la conversación…")
+        self.estado.show()
 
         def listo(cid):
             self.resultado = {"id": cid, "otro": p["id"], "usuario": p["usuario"], "nombre": p.get("nombre") or "",
-                              "visible": p.get("nombre") or p["usuario"]}
+                              "visible": S.nombre_visible(p), "es_amigo": True}
             self.accept()
 
         en_segundo_plano(self.chat.abrir, p["id"], ok=listo,
-                         error=lambda e: (self.estado.setText(S.explicar(e, "abrir la conversación")),
-                                          self.bt.setEnabled(True), self.bt.setText("Escribir")),
+                         error=lambda e: self.estado.setText(S.explicar(e, "abrir la conversación")),
                          dueno=self, urgente=True)
 
 
 def nuevo_chat(ctx, padre, al_listo):
-    """Pide un usuario (buscando mientras se escribe) y abre el chat."""
+    """Elige entre tus amigos y abre el chat. «Agregar un amigo» lleva a la pantalla de Amigos."""
     c = chat_de(ctx)
     if c is None:
         ctx.aviso.emit("Los mensajes necesitan internet.")
@@ -189,6 +181,8 @@ def nuevo_chat(ctx, padre, al_listo):
     d = DialogoNuevoChat(ctx, c, padre)
     if d.exec() == QDialog.Accepted and d.resultado:
         al_listo(d.resultado)
+    elif d.ir_a_amigos:
+        ctx.navegar({"pagina": "amigos", "pestana": "amigos"})
 
 
 def enviar_pista_a_chat(ctx, pista):

@@ -5,6 +5,7 @@ import 'package:caudal/nucleo/nube.dart';
 import 'package:caudal/nucleo/social.dart';
 import 'package:caudal/ui/paginas/directorio_pagina.dart';
 import 'package:caudal/ui/paginas/perfil_comun.dart';
+import 'package:caudal/ui/paginas/revision_pagina.dart';
 import 'package:caudal/ui/tema.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -250,6 +251,91 @@ void main() {
     testWidgets('avatar sin foto muestra la inicial', (t) async {
       await t.pumpWidget(_app(const AvatarPerfil(nombre: 'Luz')));
       expect(find.text('L'), findsOneWidget);
+    });
+  });
+
+  group('ronda de emergencia', () {
+    test('estados de la canción propia y mensajes tras subir', () {
+      expect(Subida.desde({'id': 'a', 'estado': 'pendiente'}).textoEstado, 'En revisión');
+      expect(Subida.desde({'id': 'a', 'estado': 'revision'}).textoEstado, 'En revisión por reportes');
+      expect(Subida.desde({'id': 'a', 'estado': 'retirada', 'nota': 'No es tuya'}).textoEstado, 'Rechazada: No es tuya');
+      expect(Subida.desde({'id': 'a', 'estado': 'retirada'}).textoEstado, 'Rechazada');
+      expect(Subida.desde({'id': 'a', 'estado': 'publicada'}).textoEstado, '');
+      expect(Social.mensajeTrasSubir(true), 'Listo: tu canción ya está en la comunidad.');
+      expect(Social.mensajeTrasSubir(false), contains('quedó en revisión'));
+      expect(Social.mensajeTrasSubir(false), isNot(contains('ya está')));
+    });
+
+    test('revision_pendientes y banner_url', () {
+      final r = SubidaRevision.desde({'id': 's1', 'user_id': 'u', 'usuario': 'ana', 'nombre': 'Ana', 'titulo': 'T',
+        'ruta': 'u/a.mp3', 'portada': 'u/c.jpg', 'tamano': 2097152, 'estado': 'revision', 'reportes': 2,
+        'motivos': ['spam', 'ofensivo'], 'duracion': 65});
+      expect(r.quien, 'Ana');
+      expect(r.reportes, 2);
+      expect(r.motivos, ['spam', 'ofensivo']);
+      expect(SubidaRevision.desde({'id': 'x'}).motivos, isEmpty);
+      expect(Perfil.desde({'id': 'u', 'usuario': 'a', 'banner_url': 'u/banner.jpg'})!.bannerUrl, 'u/banner.jpg');
+      expect(PerfilTarjeta.desde({'id': 'u', 'usuario': 'a', 'banner_url': 'u/banner.jpg'}).bannerUrl, 'u/banner.jpg');
+      expect(PerfilTarjeta.desde({'id': 'u', 'usuario': 'a'}).bannerUrl, '');
+      final e = PerfilEditable.desde({'banner_url': 'u/banner.jpg'});
+      expect(e.paraGuardar()['banner_url'], 'u/banner.jpg');
+      expect(e.copiar(bannerUrl: '').paraGuardar()['banner_url'], isNull);
+      expect(Social.urlBanner('u/banner.jpg', marca: 3), endsWith('/avatares/u/banner.jpg?v=3'));
+    });
+
+    test('la imagen de fondo sale de 1280×480 y la foto no se sube con otra ruta', () {
+      final im = img.Image(width: 900, height: 900);
+      img.fill(im, color: img.ColorRgb8(10, 120, 200));
+      final b = img.decodeJpg(recortarBanner(Uint8List.fromList(img.encodePng(im)), 1280, 480))!;
+      expect((b.width, b.height), (1280, 480));
+      expect(() => recortarBanner(Uint8List.fromList([9, 9]), 1280, 480), throwsA(isA<ErrorNube>()));
+    });
+
+    test('la subida al almacén lleva la ruta y las cabeceras que pide el servidor', () {
+      expect(Sesion.urlSubida('avatares', 'u1/avatar.jpg'), '${Nube.url}/storage/v1/object/avatares/u1/avatar.jpg');
+      final c = Sesion.cabecerasSubida('TOKEN', 'image/jpeg', true);
+      expect(c['Authorization'], 'Bearer TOKEN');
+      expect(c['apikey'], Nube.clavePublica);
+      expect(c['Content-Type'], 'image/jpeg');
+      expect(c['x-upsert'], 'true');
+      expect(Sesion.cabecerasSubida('T', 'audio/mpeg', false)['x-upsert'], 'false');
+      expect(Nube.traducirSocial('new row violates row-level security policy'), 'No tienes permiso para hacer eso.');
+      expect(Nube.traducirSocial('no tienes permiso para revisar'), contains('no puede revisar'));
+    });
+
+    testWidgets('la tarjeta de revisión muestra datos, reportes y botones', (t) async {
+      var aprobada = false, rechazada = false;
+      await t.pumpWidget(_app(TarjetaRevision(
+        revision: SubidaRevision.desde({'id': 's1', 'usuario': 'ana', 'nombre': 'Ana', 'titulo': 'Mi tema',
+          'artista': 'Ana', 'album': 'Disco', 'duracion': 65, 'estado': 'pendiente', 'reportes': 1,
+          'motivos': ['Spam']}),
+        alAprobar: () => aprobada = true,
+        alRechazar: () => rechazada = true,
+        alReproducir: () {},
+      )));
+      expect(find.text('Mi tema'), findsOneWidget);
+      expect(find.text('Ana · Disco · 1:05'), findsOneWidget);
+      expect(find.textContaining('Subida por Ana'), findsOneWidget);
+      expect(find.text('1 reporte'), findsOneWidget);
+      expect(find.text('• Spam'), findsOneWidget);
+      await t.tap(find.text('Aprobar'));
+      await t.tap(find.text('Rechazar'));
+      expect(aprobada && rechazada, true);
+    });
+
+    testWidgets('canciones propias en revisión o rechazadas muestran su estado', (t) async {
+      await t.pumpWidget(_app(Column(children: [
+        FilaSubida(subida: Subida.desde({'id': '1', 'titulo': 'Una', 'estado': 'pendiente'}), alReproducir: () {}),
+        FilaSubida(subida: Subida.desde({'id': '2', 'titulo': 'Dos', 'estado': 'retirada', 'nota': 'Mala calidad'}), alReproducir: () {}),
+      ])));
+      expect(find.text('En revisión'), findsOneWidget);
+      expect(find.text('Rechazada: Mala calidad'), findsOneWidget);
+    });
+
+    testWidgets('el fondo del perfil sin imagen usa el degradado del color', (t) async {
+      await t.pumpWidget(_app(const FondoBanner(color: Color(0xFFFF5C8A), alto: 120)));
+      expect(find.byType(FondoBanner), findsOneWidget);
+      expect(t.takeException(), isNull);
     });
   });
 }

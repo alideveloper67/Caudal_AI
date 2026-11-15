@@ -5,6 +5,7 @@ import 'package:caudal/nucleo/coleccion.dart';
 import 'package:caudal/nucleo/cuentas.dart';
 import 'package:caudal/nucleo/descargas.dart';
 import 'package:caudal/nucleo/mezcla_dj.dart';
+import 'package:caudal/nucleo/ritmo.dart';
 import 'package:caudal/nucleo/streams.dart';
 import 'package:caudal/reproduccion/reproductor.dart';
 import 'package:caudal/ui/paginas/mezclador_ajustes.dart';
@@ -34,13 +35,22 @@ class _ReproductorFalso extends ChangeNotifier implements Reproductor {
   (PasoMezcla, Json)? probado;
 
   @override
-  Future<void> reproducirSet(List<PasoMezcla> pasos, {String titulo = 'Tu mezcla', Duration desde = Duration.zero}) async {
+  bool get puedeEstirarTiempo => true;
+  @override
+  bool get puedeFiltrar => true;
+  @override
+  bool get puedeEco => false;
+
+  @override
+  Future<void> reproducirSet(List<PasoMezcla> pasos, {String titulo = 'Tu mezcla', Duration desde = Duration.zero,
+      Map<String, AnalisisRitmo> ritmo = const {}}) async {
     setReproducido = pasos;
     tituloSet = titulo;
   }
 
   @override
-  Future<void> probarPaso(PasoMezcla paso, Json siguiente) async => probado = (paso, siguiente);
+  Future<void> probarPaso(PasoMezcla paso, Json siguiente, {Map<String, AnalisisRitmo> ritmo = const {}}) async =>
+      probado = (paso, siguiente);
 
   @override
   Future<void> dispose() async => super.dispose();
@@ -152,17 +162,22 @@ void main() {
 
     testWidgets('abrir un cambio deja ajustarlo; el cambio de graves se refleja en el resumen', (t) async {
       await _montar(t, MezcladorPagina(inicial: [pista(1), pista(2)]));
-      expect(find.textContaining('con graves'), findsOneWidget);
+      expect(find.textContaining('Cambio de graves de 8 s'), findsOneWidget);
       await t.tap(find.textContaining('Entra la siguiente a 8 s del final'));
       await t.pumpAndSettle();
       expect(find.text('La siguiente entra cuando falten'), findsOneWidget);
       expect(find.text('El cambio dura'), findsOneWidget);
-      expect(find.text('Probar este cambio'), findsOneWidget);
-      await t.tap(find.text('Cambio de graves'));
+      expect(find.text('Probar este cambio', skipOffstage: false), findsOneWidget);
+      await t.tap(find.text('Fundido'));
       await t.pumpAndSettle();
-      expect(find.textContaining('con graves'), findsNothing);
+      expect(find.textContaining('Cambio de graves de'), findsNothing);
+      expect(find.textContaining('Fundido de 8 s'), findsOneWidget);
+      // el eco no esta en el motor del telefono: no se puede elegir y se explica
+      expect(find.text('El eco no está disponible en el motor de este teléfono.', skipOffstage: false), findsOneWidget);
       // mover el deslizador de "cuando entra" cambia el resumen
       final desliz = find.byType(Slider).first;
+      await t.ensureVisible(desliz);
+      await t.pumpAndSettle();
       await t.drag(desliz, const Offset(120, 0));
       await t.pumpAndSettle();
       expect(find.textContaining('Entra la siguiente a 8 s del final'), findsNothing);
@@ -182,6 +197,8 @@ void main() {
     testWidgets('«Probar este cambio» pide probar ese paso con la cancion siguiente', (t) async {
       await _montar(t, MezcladorPagina(inicial: [pista(1), pista(2), pista(3)]));
       await t.tap(find.textContaining('Entra la siguiente a 8 s del final').first);
+      await t.pumpAndSettle();
+      await t.ensureVisible(find.text('Probar este cambio'));
       await t.pumpAndSettle();
       await t.tap(find.text('Probar este cambio'));
       await t.pump();

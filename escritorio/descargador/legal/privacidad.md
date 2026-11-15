@@ -31,7 +31,8 @@ El responsable de tus datos es el titular de Caudal. Puedes contactarnos en la p
 - Tus amistades: las solicitudes que envías y recibes, las personas a las que bloqueas y los me gusta que das y recibes.
 - La música que subes (el audio, su carátula, el título, el artista y el álbum) y cuántas veces se escucha.
 - Si haces **público** tu perfil, otras personas mayores de 18 años de Caudal podrán ver tu usuario, tu nombre, tu foto, tu descripción, tu canción y artista favoritos, tus me gusta, tu música subida y, si lo permites, tus artistas más escuchados del mes y tus insignias. Puedes hacerlo privado cuando quieras. Las personas menores de 18 años no pueden tener el perfil público ni aparecen en el directorio.
-- La foto de perfil, las carátulas y las canciones que subes se guardan en el almacén de archivos de Supabase y se pueden abrir con su enlace directo.
+- La foto de perfil, la imagen de fondo del perfil, las carátulas y las canciones que subes se guardan en el almacén de archivos de Supabase y se pueden abrir con su enlace directo.
+- Las canciones que subes las escucha y revisa el equipo de Caudal (moderación) antes de publicarlas; puede ver quién la subió y los reportes que reciba.
 
 **Los que se generan al usar Caudal**
 - Tu biblioteca: canciones que te gustan, tus listas, lo que guardas y tus ajustes.

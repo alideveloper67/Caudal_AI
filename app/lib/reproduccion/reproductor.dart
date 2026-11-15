@@ -10,6 +10,7 @@ import '../nucleo/catalogo.dart';
 import '../nucleo/coleccion.dart';
 import '../nucleo/mezcla_dj.dart';
 import '../nucleo/recomendador.dart';
+import '../nucleo/ritmo.dart';
 import '../nucleo/red.dart';
 import '../nucleo/streams.dart';
 import '../nucleo/transiciones.dart';
@@ -220,6 +221,23 @@ class Reproductor extends ChangeNotifier {
   final Map<Json, PasoMezcla> _pasosSet = HashMap<Json, PasoMezcla>.identity();
   bool _cargandoSet = false;
 
+  /// El ritmo de cada cancion del set (por clave), si se analizo.
+  Map<String, AnalisisRitmo> _ritmoSet = {};
+
+  /// El ecualizador de 3 bandas que lleva cada motor (de la cancion que suena en el).
+  final Map<_Motor, String> _eq3 = {};
+
+  /// ¿Se puede acercar el tempo de una cancion al de otra sin cambiarle el tono?
+  /// Hace falta el filtro de estiramiento de tiempo del motor: en Android esta
+  /// (scaletempo); en iPhone no, y alli se mezcla sin igualar el tempo.
+  bool get puedeEstirarTiempo => !_ios && !kIsWeb;
+
+  /// ¿Se pueden hacer los barridos de filtro y el cambio de graves?
+  bool get puedeFiltrar => !Jugador.esWeb && !_sinFiltros;
+
+  /// El eco necesita un filtro que el motor del telefono no trae.
+  bool get puedeEco => false;
+
   /// Una prueba de un paso: al terminar el cambio se pausa sola.
   bool _probando = false;
   String _resolviendoSiguiente = '';
@@ -420,8 +438,9 @@ class Reproductor extends ChangeNotifier {
   /// entre cada dos, el cambio que pide su paso (cuando entra la siguiente,
   /// cuanto dura y si cambian los graves). Empieza en [desde] de la primera.
   Future<void> reproducirSet(List<PasoMezcla> pasos, {String titulo = 'Tu mezcla',
-      Duration desde = Duration.zero}) async {
+      Duration desde = Duration.zero, Map<String, AnalisisRitmo> ritmo = const {}}) async {
     if (pasos.isEmpty) return;
+    _ritmoSet = ritmo;
     final copias = [for (final p in pasos) <String, dynamic>{...p.pista}];
     _cargandoSet = true;
     try {
@@ -440,7 +459,8 @@ class Reproductor extends ChangeNotifier {
 
   /// Prueba un solo paso: empieza unos segundos antes del cambio de [paso] y
   /// deja oir como entra [siguiente]. Al acabar el cambio se pausa sola.
-  Future<void> probarPaso(PasoMezcla paso, Json siguiente) async {
+  Future<void> probarPaso(PasoMezcla paso, Json siguiente,
+      {Map<String, AnalisisRitmo> ritmo = const {}}) async {
     if (paso.duracionPista <= 0) {
       return _aviso('No se sabe cuánto dura esa canción, así que no se puede probar el cambio.');
     }
@@ -456,7 +476,7 @@ class Reproductor extends ChangeNotifier {
     await reproducirSet([
       paso,
       PasoMezcla(pista: siguiente),
-    ], titulo: 'Prueba del cambio', desde: Duration(seconds: desde.round()));
+    ], titulo: 'Prueba del cambio', desde: Duration(seconds: desde.round()), ritmo: ritmo);
     _probando = true;
   }
 
@@ -866,6 +886,13 @@ class Reproductor extends ChangeNotifier {
       await entrante.abrir(f, inicio: objetivo, pausado: true, volumen: 0, velocidad: velocidad);
     } else {
       await _apagar(_otro);
+      _eq3.remove(_otro);
+      // el ecualizador de la cancion (si va en una mezcla); si el motor traia otro, se limpia
+      final eq = filtroEq3(_pasosSet[actual]?.eq ?? const [0, 0, 0]);
+      if (eq != (_eq3[_activo] ?? '')) {
+        _eq3[_activo] = eq;
+        await _ponerAf(_activo, '');
+      }
       await _activo.abrir(f, inicio: inicio, pausado: pausado, volumen: _salida, velocidad: velocidad);
     }
     notifyListeners();
@@ -1023,8 +1050,11 @@ class Reproductor extends ChangeNotifier {
       final paso = _pasosSet[actual];
       if (paso != null) {
         // la mesa del Mezclador: el cambio que pidio el usuario para este paso
-        if (_mirarSiguiente() != null && finDeMusica(_tramosDj, dur) - seg <= paso.entraEfectivo) {
-          _empezarFundido(largo: paso.fundidoEfectivo, graves: paso.graves);
+        if (_mirarSiguiente() != null) {
+          final ritmo = _ritmoSet['${actual?['clave']}'];
+          // el cambio empieza en un inicio de compas (si se sabe el tempo); 0,3 s antes por lo que tarda en arrancar el otro motor
+          final cuando = momentoDeEntrada(paso, finDeMusica(_tramosDj, dur), ritmo) - 0.3;
+          if (seg >= cuando) _empezarFundido(largo: paso.fundidoEfectivo, paso: paso, ritmoSale: ritmo);
         }
       } else if (_mezclaDj) {
         // «Mezcla DJ»: entra la siguiente `largo` segundos antes del final, con cambio de graves
@@ -1189,11 +1219,12 @@ class Reproductor extends ChangeNotifier {
   /// Pone en un motor el sonido de siempre mas, si se pide, un recorte de graves.
   Future<void> _ponerAf(_Motor m, String graves) async {
     try {
-      await m.player.setProperty('af', sumarFiltro(cadenaFiltros(), graves));
+      await m.player.setProperty('af', sumarFiltro(sumarFiltro(cadenaFiltros(), _eq3[m] ?? ''), graves));
     } catch (_) {}
   }
 
-  Future<void> _empezarFundido({double? largo, bool graves = false}) async {
+  Future<void> _empezarFundido({double? largo, bool graves = false, PasoMezcla? paso,
+      AnalisisRitmo? ritmoSale}) async {
     final sig = _mirarSiguiente();
     if (sig == null) return;
     Fuente? f;
@@ -1226,16 +1257,38 @@ class Reproductor extends ChangeNotifier {
     final tramos = dj ? _tramosGuardados(objetivoPista) : <Tramo>[];
     final durSig = ((objetivoPista['duracion'] as num?) ?? 0).toDouble();
     // DJ: la siguiente entra donde empieza su musica, sin la intro muda
-    final inicio = dj ? inicioDeMusica(tramos, durSig) : 0.0;
-    final conGraves = graves && !_sinFiltros;
+    final pasoSig = _pasosSet[objetivoPista];
+    final ritmoEntra = _ritmoSet['${objetivoPista['clave']}'];
+    final inicio = pasoSig != null && paso != null
+        ? inicioDeEntrante(pasoSig, dj ? inicioDeMusica(tramos, durSig) : 0.0, ritmoEntra)
+        : (dj ? inicioDeMusica(tramos, durSig) : 0.0);
+    // el tipo de cambio: en la Mezcla DJ automatica es fundido o cambio de graves
+    final tipo = paso?.tipo ?? (graves ? TipoTransicion.graves : TipoTransicion.fundido);
+    final usaAf = (tipo == TipoTransicion.graves || tipo == TipoTransicion.filtro) && puedeFiltrar;
+    // tempo: la que entra se acerca al tempo de la que sale (hasta 8 %) sin cambiar de tono
+    var razon = 1.0;
+    if (paso != null && paso.igualarTempo && puedeEstirarTiempo && ritmoSale != null && ritmoEntra != null &&
+        ritmoSale.valido && ritmoEntra.valido) {
+      razon = razonDeTempo(ritmoSale.bpm, ritmoEntra.bpm);
+    }
+    final eqEntra = filtroEq3(pasoSig?.eq ?? const [0, 0, 0]);
     _fundido = {'saliente': saliente, 'entrante': entrante, 'inicio': DateTime.now(),
-      'dur': largo ?? ajustes.entero('crossfade').toDouble(), 'dj': dj, 'saltos': 0,
-      'graves': conGraves, 'nivS': 0, 'nivE': dbGravesCortados};
+      'dur': largo ?? ajustes.entero('crossfade').toDouble(), 'dj': dj,
+      'saltos': pasoSig?.entrada != null ? 8 : 0,
+      'tipo': tipo, 'curva': paso?.curva ?? CurvaFader.suave, 'usaAf': usaAf, 'razon': razon,
+      'nivS': 0, 'nivE': dbGravesCortados};
     _silencioEntrada.reiniciar();
     _silencioFinal.reiniciar();
-    // cambio de graves: la que entra empieza sin graves
-    if (conGraves) await _ponerAf(entrante, filtroGraves(dbGravesCortados));
-    await entrante.abrir(f, volumen: 0, velocidad: velocidad,
+    // la que entra empieza ya recortada (sin graves o sin agudos) y con su ecualizador
+    _eq3[entrante] = eqEntra;
+    if (usaAf) {
+      await _ponerAf(entrante, tipo == TipoTransicion.graves
+          ? filtroGraves(dbGravesCortados)
+          : filtroBarrido(dbGravesCortados, agudos: true));
+    } else if (eqEntra.isNotEmpty || (_eq3[saliente] ?? '').isNotEmpty) {
+      await _ponerAf(entrante, '');
+    }
+    await entrante.abrir(f, volumen: 0, velocidad: velocidad * razon,
         inicio: Duration(milliseconds: (inicio * 1000).round()));
     fuente = f;
     actual = objetivoPista;
@@ -1256,7 +1309,7 @@ class Reproductor extends ChangeNotifier {
       return;
     }
     final t = DateTime.now().difference(f['inicio'] as DateTime).inMilliseconds / 1000.0;
-    final avance = min(1.0, t / max(0.5, f['dur'] as double));
+    final avance = min(1.0, t / max(0.2, f['dur'] as double));
     final entrante = f['entrante'] as _Motor;
     if (f['dj'] == true && medirNivel && _filtroNivel && (f['saltos'] as int) < 8) {
       // la siguiente empieza callada (sin tramo en SponsorBlock): se adelanta
@@ -1273,28 +1326,40 @@ class Reproductor extends ChangeNotifier {
       }
     }
     final saliente = f['saliente'] as _Motor;
-    entrante.player.setVolume(_salida * sin(avance * pi / 2));
-    saliente.player.setVolume(_salida * cos(avance * pi / 2));
-    if (f['graves'] == true && !_sinFiltros) {
-      // el cambio de graves: cada motor, en saltos de 6 dB (no a cada fotograma)
-      final nS = dbGraves(avance, entrante: false);
-      final nE = dbGraves(avance, entrante: true);
+    final curva = f['curva'] as CurvaFader;
+    entrante.player.setVolume(_salida * ganancia(curva, avance, entrante: true));
+    saliente.player.setVolume(_salida * ganancia(curva, avance, entrante: false));
+    if (f['usaAf'] == true && !_sinFiltros) {
+      // graves o barrido de filtro: cada motor, en saltos de 6 dB (no a cada fotograma)
+      final graves = f['tipo'] == TipoTransicion.graves;
+      final nS = graves ? dbGraves(avance, entrante: false) : dbFiltro(avance, entrante: false);
+      final nE = graves ? dbGraves(avance, entrante: true) : dbFiltro(avance, entrante: true);
       if (nS != f['nivS']) {
         f['nivS'] = nS;
-        _ponerAf(saliente, filtroGraves(nS));
+        _ponerAf(saliente, graves ? filtroGraves(nS) : filtroBarrido(nS, agudos: false));
       }
       if (nE != f['nivE']) {
         f['nivE'] = nE;
-        _ponerAf(entrante, filtroGraves(nE));
+        _ponerAf(entrante, graves ? filtroGraves(nE) : filtroBarrido(nE, agudos: true));
       }
     }
     if (avance >= 1) {
-      _apagar(saliente).whenComplete(() {
-        if (f['graves'] == true) _ponerAf(saliente, '');
-      });
+      _eq3.remove(saliente);
+      _apagar(saliente).whenComplete(() => _ponerAf(saliente, ''));
       _fundido = null;
       _pasosFundido?.cancel();
       _activo.player.setVolume(_salida);
+      final razon = f['razon'] as double;
+      if (razon != 1) {
+        // el tempo vuelve poco a poco al suyo (en 5 pasos), sin salto
+        var k = 0;
+        Timer.periodic(const Duration(milliseconds: 500), (tm) {
+          k++;
+          final r = razon + (1 - razon) * min(1.0, k / 5);
+          if (_fundido == null) _activo.player.setRate(velocidad * r);
+          if (k >= 5) tm.cancel();
+        });
+      }
       if (_probando) {
         // era una prueba: unos segundos de la que entra y se pausa
         _probando = false;
@@ -1308,12 +1373,12 @@ class Reproductor extends ChangeNotifier {
   void _cortarFundido() {
     final f = _fundido;
     if (f == null) return;
-    _apagar(f['saliente'] as _Motor).whenComplete(() {
-      if (f['graves'] == true) _ponerAf(f['saliente'] as _Motor, '');
-    });
+    _eq3.remove(f['saliente'] as _Motor);
+    _apagar(f['saliente'] as _Motor).whenComplete(() => _ponerAf(f['saliente'] as _Motor, ''));
     _fundido = null;
     _pasosFundido?.cancel();
-    if (f['graves'] == true) _ponerAf(f['entrante'] as _Motor, '');
+    if (f['usaAf'] == true) _ponerAf(f['entrante'] as _Motor, '');
+    if ((f['razon'] as double) != 1) _activo.player.setRate(velocidad);
     _activo.player.setVolume(_salida);
   }
 

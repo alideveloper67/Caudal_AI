@@ -40,6 +40,7 @@ Las descargas son para escuchar sin conexión en tus propios dispositivos. Respe
 ## 6. Música que subes
 
 - Puedes subir canciones **tuyas o que tengas permiso de compartir**. Cada canción necesita su carátula. Al subirla declaras que eres su autor o que tienes los derechos o el permiso necesarios.
+- **Toda canción se revisa antes de publicarse.** Al subirla queda «en revisión»; el equipo de Caudal la escucha y decide si se publica o se rechaza (si se rechaza, verás el motivo). Hasta entonces nadie más la ve.
 - Al subirla le das a Caudal permiso para guardarla y reproducirla a la comunidad dentro de la app. Sigue siendo tuya: puedes borrarla cuando quieras desde tu perfil y dejará de estar disponible.
 - No subas música de otros sin permiso, contenido ilegal, que incite al odio o a la violencia, ni nada que vulnere derechos de terceros. Cualquier persona puede **reportar** una canción; si varias personas la reportan se oculta hasta revisarla, y podemos retirarla y suspender a quien suba contenido que incumpla estas normas de forma repetida.
 - Si eres titular de derechos y crees que una canción infringe los tuyos, escríbenos en la página de soporte de Caudal (https://github.com/alideveloper67/Caudal_AI/issues) indicando cuál es y la retiraremos.

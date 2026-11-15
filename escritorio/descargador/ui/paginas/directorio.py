@@ -39,15 +39,11 @@ class TarjetaPerfil(QFrame):
         v = QVBoxLayout(self)
         v.setContentsMargins(0, 0, 0, 14)
         v.setSpacing(0)
-        banda = QFrame()
-        banda.setFixedHeight(62)
-        banda.setStyleSheet(f"background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 {PC.tinte(color, 0.75)},"
-                            f"stop:1 {PC.tinte(color, 0.3)});border-top-left-radius:15px;"
-                            "border-top-right-radius:15px;border:none;")
+        banda = PC.FondoPerfil(84, 15, True, 0.5, color, p.get("banner_url"))
         v.addWidget(banda)
         # la foto «sube» sobre la banda
         self.avatar = PC.Avatar(72, S.nombre_visible(p), color, p["foto_url"], anillo=C["panel"], padre=self)
-        self.avatar.move(16, 26)
+        self.avatar.move(16, 46)
         cuerpo = QVBoxLayout()
         cuerpo.setContentsMargins(16, 0, 16, 0)
         cuerpo.setSpacing(3)

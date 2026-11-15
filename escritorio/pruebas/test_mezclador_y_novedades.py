@@ -25,6 +25,11 @@ def app():
     return QApplication.instance() or QApplication([])
 
 
+def _basico(p):
+    """Los tres datos de los pasos de la primera versión del Mezclador."""
+    return {k: p[k] for k in ("entra", "dur", "graves")}
+
+
 def _pista(n, dur=200, archivo="", artista="Artista"):
     p = {"tipo": "pista", "clave": f"yt:vid{n:08d}", "video_id": f"vid{n:08d}",
          "titulo": f"Canción {n}", "artista": artista, "duracion": dur, "miniatura": ""}
@@ -47,7 +52,8 @@ def test_segundos_de_la_mezcla_siempre_entre_4_y_16():
 def test_paso_valido_el_fundido_no_pasa_de_la_entrada():
     from descargador import mezcla_dj as md
     p = md.normalizar_paso({"entra": 6, "dur": 14, "graves": 0}, 200)
-    assert p == {"entra": 6, "dur": 6, "graves": False}
+    assert _basico(p) == {"entra": 6, "dur": 6, "graves": False}
+    assert p["tipo"] == "fundido" and p["curva"] == "suave" and p["tempo"] is False
     # una canción corta no puede empezar a entrar a 30 s del final
     assert md.normalizar_paso({"entra": 30, "dur": 8}, 30)["entra"] == 15
     # basura
@@ -82,8 +88,8 @@ def test_plan_pasos_y_duracion_del_set():
     pistas = [_pista(1, 200), _pista(2, 180), _pista(3, 240)]
     pasos = md.pasos_para(pistas, [{"entra": 10, "dur": 10, "graves": False}], 6, True)
     assert len(pasos) == 2
-    assert pasos[0] == {"entra": 10, "dur": 10, "graves": False}
-    assert pasos[1] == {"entra": 6, "dur": 6, "graves": True}
+    assert _basico(pasos[0]) == {"entra": 10, "dur": 10, "graves": False}
+    assert _basico(pasos[1]) == {"entra": 6, "dur": 6, "graves": True}
     plan = md.plan_de_set(pistas, pasos)
     assert set(plan) == {"yt:vid00000001", "yt:vid00000002"}      # la última no tiene paso
     assert md.duracion_del_set(pistas, pasos) == pytest.approx(620 - 16)
@@ -101,7 +107,7 @@ def test_sets_guardados(app):
     with pytest.raises(ValueError):
         md.guardar_set(col, "Una sola", pistas[:1], [])
     s = md.guardar_set(col, "Fiesta", pistas, [{"entra": 9, "dur": 7, "graves": True}])
-    assert s["pasos"] == [{"entra": 9, "dur": 7, "graves": True}]
+    assert [_basico(x) for x in s["pasos"]] == [{"entra": 9, "dur": 7, "graves": True}]
     assert "archivo" not in s["pistas"][1]                  # nada de rutas de este equipo
     md.guardar_set(col, "fiesta", pistas, [])                # mismo nombre: reemplaza
     assert [x["nombre"] for x in md.leer_sets(col)] == ["fiesta"]
@@ -506,8 +512,8 @@ def test_pagina_mezclador_armar_ordenar_probar_reproducir_y_guardar(app, datos_a
     paso0 = pagina.v_set.itemAt(1).widget()
     paso0.s_dur.setValue(5)
     paso0.s_entra.setValue(12)
-    paso0.graves.setChecked(False)
-    assert pagina.pasos[0] == {"entra": 12, "dur": 5, "graves": False}
+    paso0.c_tipo.setCurrentIndex(paso0.c_tipo.findData("fundido"))
+    assert _basico(pagina.pasos[0]) == {"entra": 12, "dur": 5, "graves": False}
     # el fundido nunca dura más que la entrada
     paso0.s_entra.setValue(3)
     assert pagina.pasos[0]["dur"] == 3
@@ -516,7 +522,7 @@ def test_pagina_mezclador_armar_ordenar_probar_reproducir_y_guardar(app, datos_a
     # ordenar: subir la segunda; la unión entre las dos que se cruzan se conserva
     pagina._mover(1, -1)
     assert [p["clave"] for p in pagina.pistas][:2] == [pistas[1]["clave"], pistas[0]["clave"]]
-    assert pagina.pasos[0] == {"entra": 12, "dur": 5, "graves": False}       # la unión que se conserva
+    assert _basico(pagina.pasos[0]) == {"entra": 12, "dur": 5, "graves": False}   # la unión que se conserva
     assert pagina.pasos[1] == md.normalizar_paso(md.paso_por_defecto(8, True), 180)   # la nueva
     pagina._quitar(0)
     assert len(pagina.pistas) == 3 and len(pagina.pasos) == 2

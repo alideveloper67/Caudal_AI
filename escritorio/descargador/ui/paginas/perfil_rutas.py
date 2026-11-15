@@ -12,11 +12,12 @@ Destinos (los que se pasan a ctx.navegar):
     {"pagina": "amigos", "pestana": "solicitudes" | "amigos" | "bloqueados"}
     {"pagina": "subir_musica"}
     {"pagina": "comunidad"}
+    {"pagina": "revision"}                      # solo moderación: mostrar la entrada si revision.es_moderador
 Para abrir un chat con un amigo desde cualquier sitio: `ctx.chat_pendiente = {"id", "usuario",
 "nombre", "visible"}` y navegar a {"pagina": "mensajes"} (Mensajes lo recoge al abrirse).
 """
 
-PAGINAS_SOCIALES = ("perfil", "directorio", "amigos", "subir_musica", "comunidad")
+PAGINAS_SOCIALES = ("perfil", "directorio", "amigos", "subir_musica", "comunidad", "revision")
 
 
 def fabricar(ctx, destino):
@@ -36,4 +37,7 @@ def fabricar(ctx, destino):
     if pag == "comunidad":
         from .comunidad import PaginaComunidad
         return PaginaComunidad(ctx)
+    if pag == "revision":
+        from .revision import PaginaRevision
+        return PaginaRevision(ctx)
     return None

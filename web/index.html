@@ -160,9 +160,9 @@
       <h2>Descárgala gratis.</h2>
       <p class="sub" id="sugerencia">Una sola cuenta para el teléfono y la computadora. Sin anuncios.</p>
       <div class="plataformas">
-        <a class="plataforma" data-so="android" href="https://github.com/alideveloper67/Caudal_AI/releases?q=movil&expanded=true">
+        <a class="plataforma" data-so="android" href="https://github.com/alideveloper67/Caudal_AI/releases/download/movil-v2.2.1/Caudal-2.2.1-arm64-v8a.apk">
           <span class="so">Android</span>
-          <span class="detalle">Android 7 o superior · archivo «arm64-v8a»</span>
+          <span class="detalle">Versión 2.2.1 · Android 7 o superior · se descarga directo</span>
           <span class="ir">Descargar →</span>
         </a>
         <a class="plataforma" data-so="windows" href="https://github.com/alideveloper67/Caudal_AI/releases/download/escritorio-v2.3.0/CaudalInstalador.exe">
@@ -181,6 +181,8 @@
           <span class="ir">Ver la versión →</span>
         </a>
       </div>
+      <p class="sub" style="margin-top:18px;font-size:14px">¿Tu teléfono es muy antiguo (32 bits)?
+        <a id="apk-antiguo" href="https://github.com/alideveloper67/Caudal_AI/releases/download/movil-v2.2.1/Caudal-2.2.1-armeabi-v7a.apk">Descarga esta otra versión</a>.</p>
     </div>
   </section>
 
@@ -241,6 +243,40 @@
   if (quieto) { i = 1; cantar(); return; }
   cantar();
   setInterval(cantar, 2600);
+})();
+
+// Mantiene las descargas en la última versión publicada (si no hay conexión con GitHub, quedan los enlaces fijos).
+(function () {
+  fetch('https://api.github.com/repos/alideveloper67/Caudal_AI/releases?per_page=30',
+        { headers: { Accept: 'application/vnd.github+json' } })
+    .then(r => r.ok ? r.json() : Promise.reject())
+    .then(lista => {
+      const ultima = pref => lista.find(r => !r.draft && !r.prerelease && r.tag_name.startsWith(pref));
+      const movil = ultima('movil-v');
+      if (movil) {
+        const version = movil.tag_name.replace('movil-v', '');
+        const arm = movil.assets.find(a => /arm64-v8a\.apk$/.test(a.name));
+        const viejo = movil.assets.find(a => /armeabi-v7a\.apk$/.test(a.name));
+        const tarjeta = document.querySelector('.plataforma[data-so="android"]');
+        if (arm && tarjeta) {
+          tarjeta.href = arm.browser_download_url;
+          tarjeta.querySelector('.detalle').textContent = `Versión ${version} · Android 7 o superior · se descarga directo`;
+        }
+        const otro = document.getElementById('apk-antiguo');
+        if (viejo && otro) otro.href = viejo.browser_download_url;
+      }
+      const pc = ultima('escritorio-v');
+      if (pc) {
+        const exe = pc.assets.find(a => /\.exe$/.test(a.name));
+        const tarjeta = document.querySelector('.plataforma[data-so="windows"]');
+        if (exe && tarjeta) {
+          tarjeta.href = exe.browser_download_url;
+          tarjeta.querySelector('.detalle').textContent =
+            `Versión ${pc.tag_name.replace('escritorio-v', '')} · Windows 10 y 11 · «CaudalInstalador.exe»`;
+        }
+      }
+    })
+    .catch(() => {});
 })();
 
 // Recomienda la descarga de tu sistema.

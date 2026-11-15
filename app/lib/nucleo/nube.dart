@@ -94,6 +94,8 @@ class Nube {
       'ya subiste 10 canciones': 'Hoy ya subiste 10 canciones, que es el máximo por día. Sigue mañana.',
       'ruta no valida': 'No se pudo registrar el archivo. Vuelve a intentarlo.',
       'sin sesion': 'Tu sesión terminó. Vuelve a iniciar sesión.',
+      'no tienes permiso para revisar': 'Esta cuenta no puede revisar música.',
+      'ya no esta pendiente': 'Esa canción ya fue revisada por otra persona.',
       'no se puede': 'No se puede hacer eso con esta persona.',
     };
     for (final e in casos.entries) {
@@ -252,16 +254,22 @@ class Sesion {
   Future<dynamic> rpc(String nombre, [Map<String, dynamic> parametros = const {}]) =>
       pedir('POST', 'rpc/$nombre', cuerpo: parametros);
 
+  /// Dirección de subida de un archivo del almacén.
+  static String urlSubida(String bucket, String ruta) => '${Nube.url}/storage/v1/object/$bucket/$ruta';
+
+  /// Cabeceras de una subida al almacén (se dejan visibles para probarlas).
+  static Map<String, String> cabecerasSubida(String token, String tipo, bool reemplazar) => {
+        'apikey': Nube.clavePublica,
+        'Authorization': 'Bearer $token',
+        'Content-Type': tipo,
+        'x-upsert': reemplazar ? 'true' : 'false',
+      };
+
   /// Sube un archivo al almacén ([bucket]/[ruta]). [alAvanzar] recibe 0..1.
   Future<void> subir(String bucket, String ruta, List<int> bytes, String tipo,
       {bool reemplazar = false, void Function(double)? alAvanzar}) async {
-    final req = http.StreamedRequest('POST', Uri.parse('${Nube.url}/storage/v1/object/$bucket/$ruta'));
-    req.headers.addAll({
-      'apikey': Nube.clavePublica,
-      'Authorization': 'Bearer ${await token()}',
-      'Content-Type': tipo,
-      'x-upsert': reemplazar ? 'true' : 'false',
-    });
+    final req = http.StreamedRequest('POST', Uri.parse(urlSubida(bucket, ruta)));
+    req.headers.addAll(cabecerasSubida(await token(), tipo, reemplazar));
     req.contentLength = bytes.length;
     try {
       final envio = req.send();

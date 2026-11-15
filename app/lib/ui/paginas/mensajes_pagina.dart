@@ -197,67 +197,39 @@ class _DialogoNuevoChat extends StatefulWidget {
   State<_DialogoNuevoChat> createState() => _DialogoNuevoChatState();
 }
 
+/// «Nuevo mensaje»: solo se puede elegir entre los amigos (con buscador
+/// local). Para escribirle a alguien nuevo, primero hay que agregarlo.
 class _DialogoNuevoChatState extends State<_DialogoNuevoChat> {
-  static const _ayuda = 'Escribe su usuario de Caudal (el que usa para entrar).';
   final _campo = TextEditingController();
-  Timer? _espera;
-  Persona? _persona;
-  String _estado = _ayuda;
-  bool _buscando = false;
-  bool _abriendo = false;
-  String? _aviso;
+  List<Contacto>? _amigos;
+  String? _fallo;
+  String? _abriendo;
+
+  @override
+  void initState() {
+    super.initState();
+    _cargar();
+  }
 
   @override
   void dispose() {
-    _espera?.cancel();
     _campo.dispose();
     super.dispose();
   }
 
-  String get _escrito => _campo.text.trim().replaceFirst('@', '').toLowerCase();
-
-  void _alEscribir(String _) {
-    _espera?.cancel();
-    final u = _escrito;
-    setState(() {
-      _persona = null;
-      _aviso = null;
-      _buscando = u.length >= 3;
-      _estado = u.isEmpty ? _ayuda : u.length < 3 ? 'Sigue escribiendo…' : 'Buscando…';
-    });
-    if (u.length < 3) return;
-    if (u == widget.yo.toLowerCase()) {
-      setState(() {
-        _buscando = false;
-        _estado = 'Ese es tu propio usuario. Escribe el de la otra persona.';
-      });
-      return;
+  Future<void> _cargar() async {
+    setState(() => _fallo = null);
+    try {
+      final l = await Social(widget.chat.sesion).amigos();
+      if (mounted) setState(() => _amigos = l);
+    } catch (e) {
+      if (mounted) setState(() => _fallo = _error(e));
     }
-    _espera = Timer(const Duration(milliseconds: 450), () async {
-      try {
-        final p = await widget.chat.buscar(u);
-        if (!mounted || _escrito != u) return;
-        setState(() {
-          _buscando = false;
-          _persona = p;
-          _estado = p == null ? 'No hay nadie con el usuario «$u». Revisa que esté bien escrito.' : '';
-        });
-      } catch (e) {
-        if (mounted) {
-          setState(() {
-            _buscando = false;
-            _estado = _error(e);
-          });
-        }
-      }
-    });
   }
 
-  Future<void> _abrir() async {
-    final p = _persona;
-    if (p == null || _abriendo) return;
-    if (!p.esAmigo) return _solicitud(p);
-    setState(() => _abriendo = true);
+  Future<void> _abrir(Contacto p) async {
+    if (_abriendo != null) return;
+    setState(() => _abriendo = p.id);
     try {
       final id = await widget.chat.abrir(p.id);
       if (!mounted) return;
@@ -266,111 +238,93 @@ class _DialogoNuevoChatState extends State<_DialogoNuevoChat> {
     } catch (e) {
       if (mounted) {
         setState(() {
-          _abriendo = false;
-          _estado = _error(e);
+          _abriendo = null;
+          _fallo = _error(e);
         });
       }
     }
   }
 
-  /// A quien no es amigo no se le escribe: se le envía una solicitud.
-  Future<void> _solicitud(Persona p) async {
-    if (p.relacion == Relacion.enviada || p.relacion == Relacion.bloqueado || p.relacion == Relacion.yo) return;
-    setState(() => _abriendo = true);
-    try {
-      final r = await Social(widget.chat.sesion).enviarSolicitud(p.id);
-      if (!mounted) return;
-      final nueva = Social.relacionTras(r);
-      setState(() {
-        _abriendo = false;
-        _persona = Persona(p.id, p.usuario, p.nombre, fotoUrl: p.fotoUrl, relacion: nueva);
-        _aviso = Social.resultadoSolicitud(r, p.nombre.isNotEmpty ? p.nombre : p.usuario);
-      });
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _abriendo = false;
-          _aviso = _error(e);
-        });
-      }
-    }
-  }
-
-  String _textoBoton(Persona? p) {
-    if (_abriendo) return p != null && p.esAmigo ? 'Abriendo…' : 'Enviando…';
-    if (p == null) return 'Escribir';
-    return switch (p.relacion) {
-      Relacion.amigo => 'Escribir',
-      Relacion.enviada => 'Solicitud enviada',
-      Relacion.recibida => 'Aceptar solicitud',
-      _ => 'Enviar solicitud',
-    };
+  void _agregar() {
+    final nav = Navigator.of(context);
+    nav.pop();
+    nav.push(MaterialPageRoute<void>(builder: (_) => const AmigosPagina(pestana: 1)));
   }
 
   @override
   Widget build(BuildContext context) {
-    final p = _persona;
-    final visible = p == null ? '' : (p.nombre.isNotEmpty ? p.nombre : p.usuario);
-    final puede = p != null && !_abriendo &&
-        (p.esAmigo || p.relacion == Relacion.ninguna || p.relacion == Relacion.recibida);
+    final q = _campo.text.trim().toLowerCase();
+    final todos = _amigos;
+    final lista = todos == null
+        ? const <Contacto>[]
+        : [for (final c in todos) if (q.isEmpty || c.visible.toLowerCase().contains(q) || c.usuario.contains(q)) c];
     return AlertDialog(
       backgroundColor: C.superficie2,
       title: const Text('Nuevo mensaje'),
       content: SizedBox(
         width: 380,
-        child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-          TextField(
-            controller: _campo,
-            autofocus: true,
-            autocorrect: false,
-            enableSuggestions: false,
-            textInputAction: TextInputAction.go,
-            decoration: InputDecoration(
-              prefixText: '@',
-              hintText: 'usuario',
-              filled: true,
-              fillColor: C.superficie3,
-              border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-              suffixIcon: _buscando
-                  ? const Padding(padding: EdgeInsets.all(14),
-                      child: SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)))
-                  : null,
-            ),
-            onChanged: _alEscribir,
-            onSubmitted: (_) => _abrir(),
-          ),
-          const SizedBox(height: 12),
-          if (p != null) ...[
-            Material(
-              color: C.superficie3,
-              borderRadius: BorderRadius.circular(12),
-              child: ListTile(
-                leading: AvatarPerfil(nombre: visible, fotoUrl: p.fotoUrl, radio: 22),
-                title: Text(visible, style: const TextStyle(fontWeight: FontWeight.w700)),
-                subtitle: Text('@${p.usuario}', style: estiloSecundario),
+        height: 380,
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          if (todos != null && todos.length > 5)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 8),
+              child: TextField(
+                controller: _campo,
+                onChanged: (_) => setState(() {}),
+                decoration: InputDecoration(
+                  hintText: 'Buscar entre tus amigos',
+                  prefixIcon: const Icon(Icons.search_rounded),
+                  isDense: true,
+                  filled: true,
+                  fillColor: C.superficie3,
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(999), borderSide: BorderSide.none),
+                ),
               ),
             ),
-            const SizedBox(height: 10),
-            Text(
-              _aviso ??
-                  switch (p.relacion) {
-                    Relacion.amigo => 'Ya son amigos: pueden escribirse.',
-                    Relacion.enviada => 'Ya le enviaste una solicitud. Podrán escribirse cuando la acepte.',
-                    Relacion.recibida => 'Te envió una solicitud. Acéptala para poder escribirse.',
-                    Relacion.bloqueado => 'No puedes escribirle a esta persona.',
-                    _ => 'Para escribirle, primero deben ser amigos. Envíale una solicitud.',
-                  },
-              style: estiloSecundario,
-            ),
-          ] else
-            Text(_estado, style: estiloSecundario),
+          Expanded(
+            child: _fallo != null && todos == null
+                ? Center(child: Column(mainAxisSize: MainAxisSize.min, children: [
+                    Text(_fallo!, textAlign: TextAlign.center, style: estiloSecundario),
+                    const SizedBox(height: 10),
+                    OutlinedButton(onPressed: _cargar, child: const Text('Reintentar')),
+                  ]))
+                : todos == null
+                    ? const Center(child: CircularProgressIndicator())
+                    : todos.isEmpty
+                        ? const Center(
+                            child: Text('Todavía no tienes amigos en Caudal. Agrega a alguien y, cuando acepte, '
+                                'podrán escribirse.',
+                                textAlign: TextAlign.center, style: estiloSecundario))
+                        : lista.isEmpty
+                            ? const Center(child: Text('Ningún amigo coincide.', style: estiloSecundario))
+                            : ListView.builder(
+                                itemCount: lista.length,
+                                itemBuilder: (_, i) {
+                                  final c = lista[i];
+                                  return ListTile(
+                                    contentPadding: EdgeInsets.zero,
+                                    leading: AvatarPerfil(nombre: c.visible, fotoUrl: c.fotoUrl, radio: 22),
+                                    title: Text(c.visible, maxLines: 1, overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(fontWeight: FontWeight.w700)),
+                                    subtitle: Text('@${c.usuario}', style: estiloSecundario),
+                                    trailing: _abriendo == c.id
+                                        ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                                        : const Icon(Icons.chevron_right_rounded, color: C.texto3),
+                                    onTap: () => _abrir(c),
+                                  );
+                                },
+                              ),
+          ),
+          if (_fallo != null && todos != null)
+            Padding(padding: const EdgeInsets.only(top: 6), child: Text(_fallo!, style: const TextStyle(color: C.error, fontSize: 12.5))),
         ]),
       ),
       actions: [
         TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cerrar')),
-        FilledButton(
-          onPressed: puede ? _abrir : null,
-          child: Text(_textoBoton(p)),
+        FilledButton.icon(
+          onPressed: _agregar,
+          icon: const Icon(Icons.person_add_alt_1_rounded, size: 18),
+          label: const Text('Agregar un amigo'),
         ),
       ],
     );

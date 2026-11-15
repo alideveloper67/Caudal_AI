@@ -10,6 +10,7 @@ import 'package:caudal/nucleo/streams.dart';
 import 'package:caudal/nucleo/version.dart';
 import 'package:caudal/reproduccion/reproductor.dart';
 import 'package:caudal/ui/armazon.dart';
+import 'package:caudal/ui/reproductor/animaciones.dart';
 import 'package:caudal/ui/servicios.dart';
 import 'package:caudal/ui/tema.dart';
 import 'package:flutter/material.dart';
@@ -28,6 +29,21 @@ class _ReproductorFalso extends ChangeNotifier implements Reproductor {
   final ValueNotifier<Duration> duracion = ValueNotifier(const Duration(minutes: 3));
   @override
   Stream<String> get avisos => const Stream.empty();
+
+  int detenciones = 0;
+
+  @override
+  Future<void> detener() async {
+    detenciones++;
+    estado = EstadoRepro.parado;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> alternar() async {
+    estado = estado == EstadoRepro.sonando ? EstadoRepro.pausa : EstadoRepro.sonando;
+    notifyListeners();
+  }
 
   @override
   Future<void> dispose() async => super.dispose();
@@ -82,7 +98,8 @@ Future<Servicios> _montar(WidgetTester t, Size tamano,
       builder: (ctx, hijo) => MediaQuery(
           data: MediaQuery.of(ctx).copyWith(textScaler: TextScaler.linear(texto)), child: hijo!),
       home: Armazon(
-        versionActual: version,
+        // por defecto una version anterior a las novedades: que no tape la prueba con su pantalla
+        versionActual: version ?? '2.0.0',
         paginas: [
           for (final n in ['Inicio', 'Buscar', 'Biblioteca', 'Descargar'])
             Scaffold(body: ListView(children: [for (var i = 0; i < 40; i++) ListTile(title: Text('$n $i'))])),
@@ -122,7 +139,7 @@ void main() {
             expect(v.overlaps(mini), isFalse, reason: 'tapa el mini reproductor');
             expect(mini.bottom, lessThanOrEqualTo(v.top + 0.5));
           } else {
-            expect(find.byType(MiniReproductor), findsOneWidget); // existe pero esta vacio
+            expect(find.byType(MiniReproductor), findsNothing); // sin musica no hay mini
           }
           expect(t.takeException(), isNull);
         });
@@ -174,6 +191,97 @@ void main() {
       await t.pump(const Duration(milliseconds: 400));
       expect(find.text('Buscar 0'), findsOneWidget);
       expect(find.text(etiqueta), findsOneWidget);
+    });
+  });
+
+  group('la equis del mini reproductor', () {
+    for (final tam in const [Size(320, 568), Size(360, 640), Size(411, 891), Size(768, 1024)]) {
+      testWidgets('encaja en la esquina y no tapa los botones en ${tam.width.toInt()}x${tam.height.toInt()}', (t) async {
+        await _montar(t, tam);
+        final icono = find.byIcon(Icons.close_rounded);
+        expect(icono, findsOneWidget);
+        final mini = t.getRect(find.byType(MiniReproductor));
+        final zona = t.getRect(find.ancestor(of: icono, matching: find.byType(SizedBox)).first);
+        // zona de toque de 32x32 y el icono de 17 px
+        expect(zona.width, 32);
+        expect(zona.height, 32);
+        expect(t.getSize(icono).width, 17);
+        // arriba a la derecha del mini
+        expect(zona.center.dy, closeTo(mini.top, 1));
+        expect(mini.right - zona.right, inInclusiveRange(2, 24));
+        // no se come el boton de play: su centro queda fuera de la zona
+        final play = t.getRect(find.ancestor(of: find.byType(IconoPlayPausa), matching: find.byType(IconButton)));
+        expect(zona.contains(play.center), isFalse);
+        final cruce = zona.intersect(play);
+        expect(cruce.height, lessThanOrEqualTo(12), reason: 'la equis pisa demasiado el play');
+        // ni el corazon
+        final corazon = t.getRect(find.byType(CorazonAnimado));
+        expect(zona.overlaps(corazon.deflate(2)), isFalse);
+        expect(t.takeException(), isNull);
+      });
+    }
+
+    testWidgets('tocarla detiene la musica y oculta el mini; vuelve al tocar una cancion', (t) async {
+      final s = await _montar(t, const Size(360, 640));
+      final r = s.reproductor as _ReproductorFalso;
+      await t.tap(find.byIcon(Icons.close_rounded));
+      await t.pump(const Duration(milliseconds: 400));
+      expect(r.detenciones, 1);
+      expect(find.byType(MiniReproductor), findsNothing);
+      expect(find.byIcon(Icons.close_rounded), findsNothing);
+      // sigue oculto mientras no suene nada
+      await t.pump(const Duration(seconds: 1));
+      expect(find.byType(MiniReproductor), findsNothing);
+      // se toca otra cancion: reaparece
+      r.actual = {..._cancion, 'clave': 'yt:otra', 'titulo': 'Otra canción'};
+      r.estado = EstadoRepro.cargando;
+      r.notifyListeners();
+      await t.pump(const Duration(milliseconds: 400));
+      expect(find.byType(MiniReproductor), findsOneWidget);
+      expect(find.text('Otra canción'), findsOneWidget);
+    });
+
+    testWidgets('tocar la misma cancion otra vez tambien lo trae de vuelta', (t) async {
+      final s = await _montar(t, const Size(360, 640));
+      final r = s.reproductor as _ReproductorFalso;
+      await t.tap(find.byIcon(Icons.close_rounded));
+      await t.pump(const Duration(milliseconds: 400));
+      expect(find.byType(MiniReproductor), findsNothing);
+      r.estado = EstadoRepro.cargando; // la misma pista
+      r.notifyListeners();
+      await t.pump(const Duration(milliseconds: 400));
+      expect(find.byType(MiniReproductor), findsOneWidget);
+    });
+
+    testWidgets('el boton de play sigue siendo el de play (no lo quita)', (t) async {
+      final s = await _montar(t, const Size(360, 640));
+      final r = s.reproductor as _ReproductorFalso;
+      await t.tap(find.byType(IconoPlayPausa));
+      await t.pump(const Duration(milliseconds: 400));
+      expect(r.estado, EstadoRepro.pausa);
+      expect(r.detenciones, 0);
+      expect(find.byType(MiniReproductor), findsOneWidget);
+    });
+
+    testWidgets('deslizar el mini hacia abajo lo quita', (t) async {
+      final s = await _montar(t, const Size(360, 640));
+      final r = s.reproductor as _ReproductorFalso;
+      await t.fling(find.byType(MiniReproductor), const Offset(0, 160), 1500);
+      await t.pump(const Duration(milliseconds: 500));
+      expect(r.detenciones, 1);
+      expect(find.byType(MiniReproductor), findsNothing);
+    });
+
+    testWidgets('sin musica no hay equis', (t) async {
+      await _montar(t, const Size(360, 640), sonando: false);
+      expect(find.byIcon(Icons.close_rounded), findsNothing);
+    });
+
+    testWidgets('lo lee el lector de pantalla', (t) async {
+      final semantica = t.ensureSemantics();
+      await _montar(t, const Size(360, 640));
+      expect(find.bySemanticsLabel('Quitar la canción y cerrar el reproductor'), findsOneWidget);
+      semantica.dispose();
     });
   });
 

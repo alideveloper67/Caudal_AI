@@ -212,7 +212,7 @@ class _DirectorioPaginaState extends State<DirectorioPagina> {
             sliver: SliverGrid.builder(
               gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
                 maxCrossAxisExtent: 240,
-                mainAxisExtent: 336,
+                mainAxisExtent: 372,
                 crossAxisSpacing: 12,
                 mainAxisSpacing: 12,
               ),
@@ -271,22 +271,32 @@ class TarjetaPerfil extends StatelessWidget {
         child: Ink(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(22),
-            gradient: LinearGradient(
-              begin: Alignment.topCenter,
-              end: Alignment.bottomCenter,
-              colors: [Color.lerp(color, C.superficie, 0.72)!, C.superficie],
-              stops: const [0, 0.55],
-            ),
+            color: C.superficie,
             border: Border.all(color: color.withValues(alpha: 0.28)),
           ),
           child: InkWell(
             borderRadius: BorderRadius.circular(22),
             onTap: alAbrir,
-            child: Padding(
-              padding: const EdgeInsets.all(Esp.m),
+            child: Stack(children: [
+              // banner del perfil arriba; sin imagen, degradado con su color
+              Positioned(
+                left: 0,
+                right: 0,
+                top: 0,
+                child: FondoBanner(color: color, bannerUrl: p.bannerUrl, alto: 84, radio: 22, velo: 0.35),
+              ),
+              Padding(
+              padding: const EdgeInsets.fromLTRB(Esp.m, 44, Esp.m, Esp.m),
               child: Column(children: [
-                Hero(tag: 'avatar_${p.id}', child: AvatarPerfil(nombre: p.visible, fotoUrl: p.fotoUrl, color: color, radio: 34)),
-                const SizedBox(height: 8),
+                Hero(
+                  tag: 'avatar_${p.id}',
+                  child: Container(
+                    padding: const EdgeInsets.all(3),
+                    decoration: BoxDecoration(shape: BoxShape.circle, color: C.superficie),
+                    child: AvatarPerfil(nombre: p.visible, fotoUrl: p.fotoUrl, color: color, radio: 32),
+                  ),
+                ),
+                const SizedBox(height: 6),
                 Text(p.visible, maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center,
                     style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w800)),
                 Text('@${p.usuario}', maxLines: 1, overflow: TextOverflow.ellipsis, style: estiloDetalle),
@@ -335,6 +345,7 @@ class TarjetaPerfil extends StatelessWidget {
                   ),
               ]),
             ),
+            ]),
           ),
         ),
       ),

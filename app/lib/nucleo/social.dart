@@ -161,7 +161,11 @@ class PerfilTarjeta {
     this.esArtista = false,
     this.fundador = false,
     this.titulos = const [],
+    this.bannerUrl = '',
   });
+
+  /// Imagen de fondo (ruta `<id>/banner.jpg`), vacía si no tiene.
+  final String bannerUrl;
 
   /// Una de las 100 primeras personas de Caudal («Usuario fundador ★»).
   final bool fundador;
@@ -198,18 +202,21 @@ class PerfilTarjeta {
         esArtista: _b(d['es_artista']),
         fundador: _b(d['fundador']),
         titulos: TituloEspecial.lista(d['titulos'], fundadorCaudal: _b(d['fundador_caudal'])),
+        bannerUrl: _s(d['banner_url']),
       );
 
   PerfilTarjeta conLike(bool di, int total) => PerfilTarjeta(
         id: id, usuario: usuario, nombre: nombre, fotoUrl: fotoUrl, bio: bio, cancionFav: cancionFav,
         colorPerfil: colorPerfil, relacion: relacion, likes: total, diLike: di, numSubidas: numSubidas,
         esArtista: total >= Social.likesParaArtista || esArtista, fundador: fundador, titulos: titulos,
+        bannerUrl: bannerUrl,
       );
 
   PerfilTarjeta conRelacion(String r) => PerfilTarjeta(
         id: id, usuario: usuario, nombre: nombre, fotoUrl: fotoUrl, bio: bio, cancionFav: cancionFav,
         colorPerfil: colorPerfil, relacion: r, likes: likes, diLike: diLike, numSubidas: numSubidas,
         esArtista: esArtista, fundador: fundador, titulos: titulos,
+        bannerUrl: bannerUrl,
       );
 }
 
@@ -244,7 +251,11 @@ class Perfil {
     this.fundador = false,
     this.numero,
     this.titulos = const [],
+    this.bannerUrl = '',
   });
+
+  /// Imagen de fondo del perfil (ruta `<id>/banner.jpg`), vacía si no tiene.
+  final String bannerUrl;
 
   /// Una de las 100 primeras personas; [numero] es su orden de llegada.
   final bool fundador;
@@ -319,6 +330,7 @@ class Perfil {
       fundador: _b(d['fundador']),
       numero: d['numero'] is num ? (d['numero'] as num).toInt() : null,
       titulos: TituloEspecial.lista(d['titulos'], fundadorCaudal: _b(d['fundador_caudal'])),
+      bannerUrl: _s(d['banner_url']),
     );
   }
 
@@ -333,6 +345,7 @@ class Perfil {
         afinidad: afinidad, likes: likes ?? this.likes, diLike: diLike ?? this.diLike,
         esArtista: (likes ?? this.likes) >= Social.likesParaArtista || esArtista, numSubidas: numSubidas,
         subidas: subidas, fundador: fundador, numero: numero, titulos: titulos,
+        bannerUrl: bannerUrl,
       );
 }
 
@@ -352,7 +365,11 @@ class Subida {
     this.estado = 'publicada',
     this.creado,
     this.esArtista = false,
+    this.nota = '',
   });
+
+  /// Motivo del rechazo (solo cuando está `retirada`).
+  final String nota;
 
   final String id;
   final String userId;
@@ -365,7 +382,7 @@ class Subida {
   final String portada;
   final int escuchas;
 
-  /// `publicada`, `revision` o `retirada` (solo lo ve su dueño).
+  /// `pendiente`, `publicada`, `revision` o `retirada` (lo no publicado solo lo ve su dueño).
   final String estado;
   final DateTime? creado;
   final bool esArtista;
@@ -392,7 +409,16 @@ class Subida {
         estado: _s(d['estado'], 'publicada'),
         creado: _f(d['creado']),
         esArtista: _b(d['es_artista']),
+        nota: _s(d['nota']),
       );
+
+  /// Texto del estado para mostrarlo a su dueño (vacío si está publicada).
+  String get textoEstado => switch (estado) {
+        'pendiente' => 'En revisión',
+        'revision' => 'En revisión por reportes',
+        'retirada' => nota.trim().isEmpty ? 'Rechazada' : 'Rechazada: ${nota.trim()}',
+        _ => '',
+      };
 
   /// Cómo se representa una canción de la comunidad en el reproductor.
   ///
@@ -416,6 +442,32 @@ class Subida {
         'url_directa': urlAudio,
         'subido_por': usuario,
       };
+}
+
+/// Una canción esperando revisión (`revision_pendientes`).
+class SubidaRevision {
+  const SubidaRevision({
+    required this.subida,
+    this.nombre = '',
+    this.tamano = 0,
+    this.reportes = 0,
+    this.motivos = const [],
+  });
+  final Subida subida;
+  final String nombre;
+  final int tamano;
+  final int reportes;
+  final List<String> motivos;
+
+  String get quien => nombre.trim().isNotEmpty ? nombre.trim() : subida.usuario;
+
+  factory SubidaRevision.desde(Map d) => SubidaRevision(
+        subida: Subida.desde(d),
+        nombre: _s(d['nombre']),
+        tamano: _i(d['tamano']),
+        reportes: _i(d['reportes']),
+        motivos: d['motivos'] is List ? [for (final m in d['motivos'] as List) if (_s(m).isNotEmpty) _s(m)] : const [],
+      );
 }
 
 /// Alguien de las listas de amigos, solicitudes, bloqueados o de una búsqueda.
@@ -512,7 +564,11 @@ class PerfilEditable {
     this.perfilPublico = false,
     this.mostrarTop = true,
     this.fechaNacimiento,
+    this.bannerUrl = '',
   });
+
+  /// Imagen de fondo (ruta `<id>/banner.jpg`), vacía si no tiene.
+  final String bannerUrl;
 
   final String nombre;
   final String bio;
@@ -549,6 +605,7 @@ class PerfilEditable {
         perfilPublico: _b(d['perfil_publico']),
         mostrarTop: _b(d['mostrar_top'], true),
         fechaNacimiento: DateTime.tryParse(_s(d['fecha_nacimiento'])),
+        bannerUrl: _s(d['banner_url']),
       );
 
   /// El cuerpo del PATCH. `cancion_fav`, `foto_url` y `color_perfil` van como
@@ -558,6 +615,7 @@ class PerfilEditable {
         'bio': bio.trim(),
         'frase': frase.trim(),
         'foto_url': fotoUrl.isEmpty ? null : fotoUrl,
+        'banner_url': bannerUrl.isEmpty ? null : bannerUrl,
         'cancion_fav': cancionFav?.toJson(),
         'artista_fav': artistaFav.trim(),
         'generos': generos,
@@ -569,6 +627,7 @@ class PerfilEditable {
   PerfilEditable copiar({
     String? nombre, String? bio, String? frase, String? fotoUrl, Object? cancionFav = _igual,
     String? artistaFav, List<String>? generos, String? colorPerfil, bool? perfilPublico, bool? mostrarTop,
+    String? bannerUrl,
   }) =>
       PerfilEditable(
         nombre: nombre ?? this.nombre,
@@ -582,6 +641,7 @@ class PerfilEditable {
         perfilPublico: perfilPublico ?? this.perfilPublico,
         mostrarTop: mostrarTop ?? this.mostrarTop,
         fechaNacimiento: fechaNacimiento,
+        bannerUrl: bannerUrl ?? this.bannerUrl,
       );
 }
 
@@ -597,11 +657,15 @@ class ImagenSocial {
   /// Foto de perfil: cuadrada, 512 px, JPEG que pese menos de 2 MB.
   static Future<Uint8List> foto(Uint8List original) => compute(_fotoPerfil, original);
 
+  /// Imagen de fondo: recorte al centro de 1280×480 (8:3), JPEG < 2 MB.
+  static Future<Uint8List> banner(Uint8List original) => compute(_bannerPerfil, original);
+
   /// Carátula: como mucho 800 px de lado, JPEG.
   static Future<Uint8List> caratula(Uint8List original) => compute(_caratula, original);
 }
 
 Uint8List _fotoPerfil(Uint8List b) => cuadrarYComprimir(b, 512, recortar: true);
+Uint8List _bannerPerfil(Uint8List b) => recortarBanner(b, 1280, 480);
 Uint8List _caratula(Uint8List b) => cuadrarYComprimir(b, 800, recortar: false);
 
 /// Decodifica, corrige la orientación, recorta al centro (o solo reduce) y
@@ -623,6 +687,34 @@ Uint8List cuadrarYComprimir(Uint8List bytes, int lado, {required bool recortar, 
     im = im.width >= im.height ? img.copyResize(im, width: lado) : img.copyResize(im, height: lado);
   }
   var calidad = 88;
+  var salida = img.encodeJpg(im, quality: calidad);
+  while (salida.length > maxBytes && calidad > 40) {
+    calidad -= 12;
+    salida = img.encodeJpg(im, quality: calidad);
+  }
+  return Uint8List.fromList(salida);
+}
+
+/// Recorta al centro con la proporción [ancho]:[alto] y lo deja exactamente
+/// de ese tamaño (si la imagen es más chica, se amplía lo justo). JPEG < 2 MB.
+Uint8List recortarBanner(Uint8List bytes, int ancho, int alto, {int maxBytes = 1900000}) {
+  img.Image? im;
+  try {
+    im = img.decodeImage(bytes);
+  } catch (_) {}
+  if (im == null) {
+    throw const ErrorNube('No se pudo leer esa imagen. Prueba con una foto JPG o PNG.');
+  }
+  im = img.bakeOrientation(im);
+  final proporcion = ancho / alto;
+  var w = im.width, h = (im.width / proporcion).round();
+  if (h > im.height) {
+    h = im.height;
+    w = (im.height * proporcion).round();
+  }
+  im = img.copyCrop(im, x: (im.width - w) ~/ 2, y: (im.height - h) ~/ 2, width: w, height: h);
+  if (im.width != ancho) im = img.copyResize(im, width: ancho, height: alto);
+  var calidad = 86;
   var salida = img.encodeJpg(im, quality: calidad);
   while (salida.length > maxBytes && calidad > 40) {
     calidad -= 12;
@@ -658,6 +750,9 @@ class Social {
     final v = marca ?? _marcaDelDia();
     return '${urlPublica('avatares', fotoUrl)}?v=$v';
   }
+
+  /// URL de la imagen de fondo del perfil (misma idea que [urlFoto]).
+  static String urlBanner(String bannerUrl, {Object? marca}) => urlFoto(bannerUrl, marca: marca);
 
   static int _marcaDelDia() => DateTime.now().millisecondsSinceEpoch ~/ Duration.millisecondsPerDay;
 
@@ -763,7 +858,7 @@ class Social {
   Future<int> quitarLike(String otro) async => _i(await sesion.rpc('quitar_like', {'p_otro': otro}));
 
   static const _columnasEditables =
-      'nombre,bio,frase,foto_url,cancion_fav,artista_fav,generos,color_perfil,perfil_publico,mostrar_top,fecha_nacimiento';
+      'nombre,bio,frase,foto_url,cancion_fav,artista_fav,generos,color_perfil,perfil_publico,mostrar_top,fecha_nacimiento,banner_url';
 
   Future<PerfilEditable> miPerfilEditable() async {
     final filas = await sesion.pedir('GET', 'perfiles?select=$_columnasEditables&id=eq.$yo');
@@ -781,11 +876,61 @@ class Social {
   }
 
   /// Sube la foto (ya recortada y comprimida) y devuelve la ruta guardada.
-  Future<String> subirFoto(Uint8List jpeg) async {
-    final ruta = '$yo/avatar.jpg';
-    await sesion.subir('avatares', ruta, jpeg, 'image/jpeg', reemplazar: true);
+  Future<String> subirFoto(Uint8List jpeg) => _subirImagenPerfil(jpeg, 'avatar.jpg', 'tu foto');
+
+  /// Sube la imagen de fondo y devuelve la ruta guardada.
+  Future<String> subirBanner(Uint8List jpeg) => _subirImagenPerfil(jpeg, 'banner.jpg', 'tu imagen de fondo');
+
+  Future<String> _subirImagenPerfil(Uint8List jpeg, String nombre, String que) async {
+    final ruta = '$yo/$nombre';
+    try {
+      await sesion.subir('avatares', ruta, jpeg, 'image/jpeg', reemplazar: true);
+    } on SinConexion {
+      rethrow;
+    } on ErrorNube catch (e) {
+      throw ErrorNube('No se pudo guardar $que. ${e.mensaje} Vuelve a intentarlo; si sigue igual, '
+          'cierra sesión, entra de nuevo y prueba otra vez.');
+    }
     return ruta;
   }
+
+  // ------------------------------------------------------------ revisión de música
+
+  /// ¿Lo que subo se publica sin revisión? (si falla, se asume que no)
+  Future<bool> publicaDirecto() async {
+    try {
+      return await sesion.rpc('publica_directo') == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<bool> soyModerador() async {
+    try {
+      return await sesion.rpc('soy_moderador') == true;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<int> revisionContar() async {
+    try {
+      return _i(await sesion.rpc('revision_contar'));
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  Future<List<SubidaRevision>> revisionPendientes({int limite = 60}) async =>
+      [for (final d in await _lista('revision_pendientes', {'p_limite': limite})) SubidaRevision.desde(d)];
+
+  Future<void> revisionResolver(String id, bool aprobar, {String nota = ''}) =>
+      sesion.rpc('revision_resolver', {'p_id': id, 'p_aprobar': aprobar, 'p_nota': nota.trim()});
+
+  /// Lo que se le dice a quien acaba de subir una canción.
+  static String mensajeTrasSubir(bool publicaDirecto) => publicaDirecto
+      ? 'Listo: tu canción ya está en la comunidad.'
+      : 'Tu canción quedó en revisión. El equipo de Caudal la revisará y te avisaremos aquí si se aprueba.';
 
   // ------------------------------------------------------------ música de la gente
 
