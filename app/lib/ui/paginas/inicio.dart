@@ -6,9 +6,11 @@ import '../../nucleo/recomendador.dart';
 import '../../nucleo/catalogo.dart';
 import '../../nucleo/coleccion.dart';
 import '../comunes.dart';
+import '../menu_comunidad.dart';
 import '../plataforma.dart';
 import '../servicios.dart';
 import '../tema.dart';
+import '../tu_mes_pasado.dart';
 import 'ajustes_pagina.dart';
 import 'juntos_pagina.dart';
 import 'mensajes_pagina.dart';
@@ -38,6 +40,7 @@ class _InicioPaginaState extends State<InicioPagina> with AutomaticKeepAliveClie
   List<Json> _enTelefono = [];
   Json? _descubre;
   List<Json> _tiempo = [];
+  Json? _mesPasado;
 
   @override
   bool get wantKeepAlive => true;
@@ -88,6 +91,10 @@ class _InicioPaginaState extends State<InicioPagina> with AutomaticKeepAliveClie
     ];
     final enTelefono = await col.descargadas();
     final tiempo = await Recomendador.maquinaDelTiempoDe(col);
+    Json? mesPasado;
+    try {
+      mesPasado = await Recomendador.mesPasadoDe(col);
+    } catch (_) {}
     if (!mounted) return;
     setState(() {
       _localListo = true;
@@ -96,6 +103,7 @@ class _InicioPaginaState extends State<InicioPagina> with AutomaticKeepAliveClie
       _mixes = mixes;
       _enTelefono = enTelefono;
       _tiempo = tiempo;
+      _mesPasado = mesPasado;
     });
     // "Descubre para ti" pide la radio de varias canciones: va aparte, sin frenar lo demas
     Recomendador.descubrir(col).then((d) {
@@ -218,6 +226,13 @@ class _InicioPaginaState extends State<InicioPagina> with AutomaticKeepAliveClie
                     if (_filtro == 'todo')
                       // hechos con tu historial; se oculta sola si aun no hay nada
                       SeccionMixes(alAbrir: (m) => Caudal.leer(context).abrirElemento(context, m)),
+                    if (_filtro == 'todo' && _mesPasado != null) ...[
+                      Entrada(indice: ++turno, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        const TituloSeccion('Vuelve en el tiempo'),
+                        TarjetaMesPasado(mix: _mesPasado!),
+                      ])),
+                      const SizedBox(height: Esp.entreSecciones),
+                    ],
                     if (_filtro == 'todo' && _tiempo.isNotEmpty) ...[
                       Entrada(indice: ++turno,
                           child: Carrusel(titulo: 'Máquina del tiempo', elementos: _tiempo)),
@@ -288,6 +303,11 @@ class _Cabecera extends StatelessWidget {
               tooltip: 'Tu resumen',
               icon: const Icon(Icons.insights_rounded),
               onPressed: () => ResumenPagina.abrir(context),
+            ),
+            IconButton(
+              tooltip: 'Comunidad',
+              icon: const Icon(Icons.people_alt_outlined),
+              onPressed: () => MenuComunidad.abrir(context),
             ),
             const _BotonMensajes(),
           ]),

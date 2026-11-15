@@ -5,10 +5,13 @@ import 'package:flutter/material.dart';
 import '../../nucleo/chat.dart';
 import '../../nucleo/coleccion.dart';
 import '../../nucleo/nube.dart';
+import '../../nucleo/social.dart';
 import '../comunes.dart';
 import '../emojis.dart';
 import '../servicios.dart';
 import '../tema.dart';
+import 'amigos_pagina.dart';
+import 'perfil_comun.dart';
 
 /// El chat de la cuenta (null sin sesión: se entró sin internet).
 Chat? chatDe(BuildContext context) {
@@ -42,17 +45,25 @@ class _MensajesPaginaState extends State<MensajesPagina> {
   List<ResumenChat>? _chats;
   String? _error_;
   Timer? _reloj;
+  ControladorAmigos? _amigos;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _cargar());
-    _reloj = Timer.periodic(const Duration(seconds: 8), (_) => _cargar());
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      setState(() => _amigos = ControladorAmigos(socialDe(context))..cargar());
+      _cargar();
+    });
+    _reloj = Timer.periodic(const Duration(seconds: 8), (_) {
+      _cargar();
+      _amigos?.cargar();
+    });
   }
 
   @override
   void dispose() {
     _reloj?.cancel();
+    _amigos?.dispose();
     super.dispose();
   }
 
@@ -83,60 +94,82 @@ class _MensajesPaginaState extends State<MensajesPagina> {
 
   @override
   Widget build(BuildContext context) {
-    final chats = _chats;
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Mensajes', style: estiloTituloBarra),
-        actions: [
-          IconButton(tooltip: 'Nuevo mensaje', icon: const Icon(Icons.edit_square), onPressed: _nuevo),
-        ],
+    final amigos = _amigos;
+    return DefaultTabController(
+      length: 3,
+      child: Scaffold(
+        appBar: AppBar(
+          title: const Text('Mensajes', style: estiloTituloBarra),
+          actions: [
+            IconButton(tooltip: 'Nuevo mensaje', icon: const Icon(Icons.edit_square), onPressed: _nuevo),
+          ],
+          bottom: TabBar(
+            indicatorColor: C.acento,
+            labelColor: C.texto,
+            tabs: [
+              const Tab(text: 'Chats'),
+              Tab(child: amigos == null ? const Text('Solicitudes') : EtiquetaSolicitudes(amigos)),
+              const Tab(text: 'Amigos'),
+            ],
+          ),
+        ),
+        body: amigos == null
+            ? _listaChats()
+            : TabBarView(children: [
+                _listaChats(),
+                SolicitudesVista(controlador: amigos),
+                AmigosVista(controlador: amigos),
+              ]),
       ),
-      body: _error_ != null && chats == null
-          ? Vacio(icono: Icons.wifi_off_rounded, titulo: 'Sin conexión', texto: _error_!, error: true, alAccion: _cargar)
-          : chats == null
-              ? const Center(child: CircularProgressIndicator())
-              : chats.isEmpty
-                  ? Vacio(
-                      icono: Icons.forum_outlined,
-                      titulo: 'Comparte música con tus amigos',
-                      texto: 'Escríbele a alguien por su usuario de Caudal, mándale canciones '
-                          'y crea una mezcla con lo que escuchan los dos.',
-                      textoAccion: 'Escribir a alguien',
-                      iconoAccion: Icons.edit_square,
-                      alAccion: _nuevo,
-                    )
-                  : RefreshIndicator(
-                      onRefresh: _cargar,
-                      child: ListView.builder(
-                        itemCount: chats.length,
-                        itemBuilder: (_, i) {
-                          final c = chats[i];
-                          return ListTile(
-                            contentPadding: const EdgeInsets.symmetric(horizontal: Esp.lado, vertical: 4),
-                            leading: CircleAvatar(radius: 24, backgroundColor: C.superficie3,
-                                child: Text(c.inicial, style: TextStyle(color: C.acento, fontWeight: FontWeight.w900, fontSize: 18))),
-                            title: Text(c.visible, style: TextStyle(fontWeight: c.sinLeer > 0 ? FontWeight.w900 : FontWeight.w700)),
-                            subtitle: Text(c.vistaPrevia, maxLines: 1, overflow: TextOverflow.ellipsis,
-                                style: TextStyle(color: c.sinLeer > 0 ? C.texto : C.texto2)),
-                            trailing: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.end, children: [
-                              Text(_hora(c.ultimo), style: estiloDetalle),
-                              const SizedBox(height: 4),
-                              if (c.sinLeer > 0)
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                                  decoration: BoxDecoration(color: C.acento, borderRadius: BorderRadius.circular(10)),
-                                  child: Text('${c.sinLeer}', style: TextStyle(color: C.acentoTexto, fontSize: 11, fontWeight: FontWeight.w900)),
-                                ),
-                            ]),
-                            onTap: () async {
-                              await Navigator.of(context).push(MaterialPageRoute(builder: (_) => ConversacionPagina(chat: c)));
-                              _cargar();
-                            },
-                          );
-                        },
-                      ),
-                    ),
     );
+  }
+
+  Widget _listaChats() {
+    final chats = _chats;
+    return _error_ != null && chats == null
+        ? Vacio(icono: Icons.wifi_off_rounded, titulo: 'Sin conexión', texto: _error_!, error: true, alAccion: _cargar)
+        : chats == null
+            ? const Center(child: CircularProgressIndicator())
+            : chats.isEmpty
+                ? Builder(builder: (ctx) => Vacio(
+                    icono: Icons.forum_outlined,
+                    titulo: 'Comparte música con tus amigos',
+                    texto: 'Primero agrega a alguien por su usuario de Caudal; cuando acepte, podrán escribirse, '
+                        'mandarse canciones y crear una mezcla con lo que escuchan los dos.',
+                    textoAccion: 'Buscar amigos',
+                    iconoAccion: Icons.person_add_alt_1_rounded,
+                    alAccion: () => DefaultTabController.of(ctx).animateTo(2),
+                  ))
+                : RefreshIndicator(
+                    onRefresh: _cargar,
+                    child: ListView.builder(
+                      itemCount: chats.length,
+                      itemBuilder: (_, i) {
+                        final c = chats[i];
+                        return ListTile(
+                          contentPadding: const EdgeInsets.symmetric(horizontal: Esp.lado, vertical: 4),
+                          leading: AvatarPerfil(nombre: c.visible, fotoUrl: c.fotoUrl, radio: 24),
+                          title: Text(c.visible, style: TextStyle(fontWeight: c.sinLeer > 0 ? FontWeight.w900 : FontWeight.w700)),
+                          subtitle: Text(c.vistaPrevia, maxLines: 1, overflow: TextOverflow.ellipsis,
+                              style: TextStyle(color: c.sinLeer > 0 ? C.texto : C.texto2)),
+                          trailing: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.end, children: [
+                            Text(_hora(c.ultimo), style: estiloDetalle),
+                            const SizedBox(height: 4),
+                            if (c.sinLeer > 0)
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                                decoration: BoxDecoration(color: C.acento, borderRadius: BorderRadius.circular(10)),
+                                child: Text('${c.sinLeer}', style: TextStyle(color: C.acentoTexto, fontSize: 11, fontWeight: FontWeight.w900)),
+                              ),
+                          ]),
+                          onTap: () async {
+                            await Navigator.of(context).push(MaterialPageRoute(builder: (_) => ConversacionPagina(chat: c)));
+                            _cargar();
+                          },
+                        );
+                      },
+                    ),
+                  );
   }
 }
 
@@ -172,6 +205,7 @@ class _DialogoNuevoChatState extends State<_DialogoNuevoChat> {
   String _estado = _ayuda;
   bool _buscando = false;
   bool _abriendo = false;
+  String? _aviso;
 
   @override
   void dispose() {
@@ -187,6 +221,7 @@ class _DialogoNuevoChatState extends State<_DialogoNuevoChat> {
     final u = _escrito;
     setState(() {
       _persona = null;
+      _aviso = null;
       _buscando = u.length >= 3;
       _estado = u.isEmpty ? _ayuda : u.length < 3 ? 'Sigue escribiendo…' : 'Buscando…';
     });
@@ -221,12 +256,13 @@ class _DialogoNuevoChatState extends State<_DialogoNuevoChat> {
   Future<void> _abrir() async {
     final p = _persona;
     if (p == null || _abriendo) return;
+    if (!p.esAmigo) return _solicitud(p);
     setState(() => _abriendo = true);
     try {
       final id = await widget.chat.abrir(p.id);
       if (!mounted) return;
       Navigator.of(context).pop(ResumenChat(id: id, otro: p.id, usuario: p.usuario, nombre: p.nombre,
-          ultimo: DateTime.now()));
+          ultimo: DateTime.now(), fotoUrl: p.fotoUrl));
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -237,10 +273,46 @@ class _DialogoNuevoChatState extends State<_DialogoNuevoChat> {
     }
   }
 
+  /// A quien no es amigo no se le escribe: se le envía una solicitud.
+  Future<void> _solicitud(Persona p) async {
+    if (p.relacion == Relacion.enviada || p.relacion == Relacion.bloqueado || p.relacion == Relacion.yo) return;
+    setState(() => _abriendo = true);
+    try {
+      final r = await Social(widget.chat.sesion).enviarSolicitud(p.id);
+      if (!mounted) return;
+      final nueva = Social.relacionTras(r);
+      setState(() {
+        _abriendo = false;
+        _persona = Persona(p.id, p.usuario, p.nombre, fotoUrl: p.fotoUrl, relacion: nueva);
+        _aviso = Social.resultadoSolicitud(r, p.nombre.isNotEmpty ? p.nombre : p.usuario);
+      });
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _abriendo = false;
+          _aviso = _error(e);
+        });
+      }
+    }
+  }
+
+  String _textoBoton(Persona? p) {
+    if (_abriendo) return p != null && p.esAmigo ? 'Abriendo…' : 'Enviando…';
+    if (p == null) return 'Escribir';
+    return switch (p.relacion) {
+      Relacion.amigo => 'Escribir',
+      Relacion.enviada => 'Solicitud enviada',
+      Relacion.recibida => 'Aceptar solicitud',
+      _ => 'Enviar solicitud',
+    };
+  }
+
   @override
   Widget build(BuildContext context) {
     final p = _persona;
     final visible = p == null ? '' : (p.nombre.isNotEmpty ? p.nombre : p.usuario);
+    final puede = p != null && !_abriendo &&
+        (p.esAmigo || p.relacion == Relacion.ninguna || p.relacion == Relacion.recibida);
     return AlertDialog(
       backgroundColor: C.superficie2,
       title: const Text('Nuevo mensaje'),
@@ -268,28 +340,37 @@ class _DialogoNuevoChatState extends State<_DialogoNuevoChat> {
             onSubmitted: (_) => _abrir(),
           ),
           const SizedBox(height: 12),
-          if (p != null)
+          if (p != null) ...[
             Material(
               color: C.superficie3,
               borderRadius: BorderRadius.circular(12),
               child: ListTile(
-                leading: CircleAvatar(backgroundColor: C.acento,
-                    child: Text(visible.substring(0, 1).toUpperCase(),
-                        style: TextStyle(color: C.acentoTexto, fontWeight: FontWeight.w900))),
+                leading: AvatarPerfil(nombre: visible, fotoUrl: p.fotoUrl, radio: 22),
                 title: Text(visible, style: const TextStyle(fontWeight: FontWeight.w700)),
                 subtitle: Text('@${p.usuario}', style: estiloSecundario),
-                onTap: _abrir,
               ),
-            )
-          else
+            ),
+            const SizedBox(height: 10),
+            Text(
+              _aviso ??
+                  switch (p.relacion) {
+                    Relacion.amigo => 'Ya son amigos: pueden escribirse.',
+                    Relacion.enviada => 'Ya le enviaste una solicitud. Podrán escribirse cuando la acepte.',
+                    Relacion.recibida => 'Te envió una solicitud. Acéptala para poder escribirse.',
+                    Relacion.bloqueado => 'No puedes escribirle a esta persona.',
+                    _ => 'Para escribirle, primero deben ser amigos. Envíale una solicitud.',
+                  },
+              style: estiloSecundario,
+            ),
+          ] else
             Text(_estado, style: estiloSecundario),
         ]),
       ),
       actions: [
-        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cancelar')),
+        TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cerrar')),
         FilledButton(
-          onPressed: p == null || _abriendo ? null : _abrir,
-          child: Text(_abriendo ? 'Abriendo…' : 'Escribir'),
+          onPressed: puede ? _abrir : null,
+          child: Text(_textoBoton(p)),
         ),
       ],
     );
@@ -332,8 +413,7 @@ Future<void> enviarPistaAChat(BuildContext context, Json pista) async {
         ),
         for (final c in chats)
           ListTile(
-            leading: CircleAvatar(backgroundColor: C.superficie3,
-                child: Text(c.inicial, style: TextStyle(color: C.acento, fontWeight: FontWeight.w900))),
+            leading: AvatarPerfil(nombre: c.visible, fotoUrl: c.fotoUrl, radio: 20),
             title: Text(c.visible),
             subtitle: Text('@${c.usuario}', style: estiloSecundario),
             onTap: () => Navigator.pop(ctx, c),
@@ -568,8 +648,11 @@ class _ConversacionPaginaState extends State<ConversacionPagina> {
       appBar: AppBar(
         titleSpacing: 0,
         title: Row(children: [
-          CircleAvatar(radius: 17, backgroundColor: C.superficie3,
-              child: Text(widget.chat.inicial, style: TextStyle(color: C.acento, fontWeight: FontWeight.w900))),
+          InkWell(
+            borderRadius: BorderRadius.circular(999),
+            onTap: () => abrirPerfil(context, widget.chat.usuario),
+            child: AvatarPerfil(nombre: widget.chat.visible, fotoUrl: widget.chat.fotoUrl, radio: 17),
+          ),
           const SizedBox(width: 10),
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [

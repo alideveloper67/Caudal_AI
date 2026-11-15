@@ -55,14 +55,38 @@ class Chat:
             f["visible"] = f.get("nombre") or f.get("usuario") or "?"
         return filas
 
+    def panorama(self):
+        """(chats, solicitudes nuevas). Cada chat trae `es_amigo`: solo se escribe a un amigo
+        (si se dejó de ser amigo, la conversación se ve pero ya no se puede escribir)."""
+        chats = self.mis_chats()
+        try:
+            r = self.sesion.pedir("POST", "rpc/mis_amigos", json={})
+            amigos = None if r is None else {str(a.get("id")) for a in r}   # sin respuesta: no se sabe
+        except Exception:  # noqa: BLE001 - sin las funciones nuevas, todo sigue como antes
+            amigos = None
+        for c in chats:
+            c["es_amigo"] = True if amigos is None else str(c.get("otro")) in amigos
+        try:
+            n = len(self.sesion.pedir("POST", "rpc/mis_solicitudes", json={}) or [])
+        except Exception:  # noqa: BLE001
+            n = 0
+        return chats, n
+
+    def solo_amigos(self):
+        """Los chats con quien sigue siendo amigo (para «Enviar en un chat»)."""
+        return [c for c in self.panorama()[0] if c.get("es_amigo")]
+
     def sin_leer(self):
         return sum(int(c.get("sin_leer") or 0) for c in self.mis_chats())
 
     def buscar(self, usuario):
+        """La persona con ese usuario exacto, con su `relacion` (amigo, enviada, recibida, ninguna)."""
         u = (usuario or "").strip().lstrip("@").lower()
         if not u:
             return None
         filas = self.sesion.pedir("POST", "rpc/buscar_persona", json={"p_usuario": u}) or []
+        if filas:
+            filas[0].setdefault("relacion", "ninguna")
         return filas[0] if filas else None
 
     def abrir(self, otro):

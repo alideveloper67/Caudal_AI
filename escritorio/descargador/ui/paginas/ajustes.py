@@ -198,6 +198,34 @@ class PaginaAjustes(Pagina):
         s.fila("Transiciones como un DJ", "Al pasar de canción se recortan los silencios del "
                                           "final y del principio, para que la siguiente entre "
                                           "justo a tiempo. Funciona con y sin fundido.", self.dj)
+        self.mezcla = _interruptor(a["mezcla_dj"])
+        self._conectar(self.mezcla, "mezcla_dj", self._mezcla_cambio)
+        s.fila("Mezcla DJ", "Las canciones se enlazan solas, como en una cabina: la siguiente "
+                            "entra antes de que acabe la que suena. Si la activas, manda sobre "
+                            "el fundido de arriba.", self.mezcla)
+        caja_mezcla = QWidget()
+        hm = QHBoxLayout(caja_mezcla)
+        hm.setContentsMargins(0, 0, 0, 0)
+        self.mezcla_seg = QSlider(Qt.Horizontal)
+        self.mezcla_seg.setRange(4, 16)
+        self.mezcla_seg.setValue(max(4, min(16, int(a["mezcla_dj_seg"] or 8))))
+        self.mezcla_seg.setFixedWidth(200)
+        self.mezcla_seg.setAccessibleName("Segundos de la mezcla DJ")
+        self.et_mezcla_seg = QLabel()
+        self.et_mezcla_seg.setFixedWidth(60)
+        hm.addWidget(self.mezcla_seg)
+        hm.addWidget(self.et_mezcla_seg)
+        self.mezcla_seg.valueChanged.connect(self._mezcla_segundos)
+        self._mezcla_segundos(self.mezcla_seg.value(), guardar=False)
+        self.fila_mezcla_seg = s.fila("Duración de la mezcla", "Cuántos segundos dura el "
+                                      "enlace entre dos canciones (de 4 a 16).", caja_mezcla)
+        self.mezcla_graves = _interruptor(a["mezcla_dj_graves"])
+        self._conectar(self.mezcla_graves, "mezcla_dj_graves")
+        self.fila_mezcla_graves = s.fila(
+            "Cambio de graves", "Mientras entra la nueva se le quitan los graves y, a mitad "
+                                "del enlace, pasan de una canción a la otra. Así no se pisan "
+                                "los bajos.", self.mezcla_graves)
+        self._mezcla_cambio()
         bt_eq = QPushButton("  Abrir el ecualizador")
         bt_eq.setIcon(iconos.icono("ecualizador", 16, C["texto"]))
         bt_eq.setCursor(Qt.PointingHandCursor)
@@ -428,6 +456,16 @@ class PaginaAjustes(Pagina):
             ventana.reabrir_con_aspecto()
         else:
             getattr(self.ctx, "reiniciar", lambda: None)()
+
+    def _mezcla_cambio(self):
+        activa = self.mezcla.isChecked()
+        self.fila_mezcla_seg.setEnabled(activa)
+        self.fila_mezcla_graves.setEnabled(activa)
+
+    def _mezcla_segundos(self, v, guardar=True):
+        self.et_mezcla_seg.setText(f"{v} s")
+        if guardar:
+            self._poner("mezcla_dj_seg", int(v))
 
     def _fundido(self, v, guardar=True):
         self.et_fundido.setText(f"{v} s" if v else "Sin fundido")

@@ -8,8 +8,11 @@ import 'package:flutter/services.dart';
 
 import '../nucleo/importar.dart';
 import '../nucleo/legal.dart';
+import '../nucleo/version.dart';
 import '../reproduccion/reproductor.dart';
 import 'comunes.dart';
+import 'menu_comunidad.dart';
+import 'novedades_grandes.dart';
 import 'paginas/acceso.dart';
 import 'paginas/mensajes_pagina.dart';
 import 'paginas/resumen.dart';
@@ -29,7 +32,13 @@ import 'tema.dart';
 /// Las cuatro pestanas (cada una con su propia navegacion, que se conserva al
 /// cambiar), el mini reproductor y la barra de abajo.
 class Armazon extends StatefulWidget {
-  const Armazon({super.key});
+  const Armazon({super.key, @visibleForTesting this.paginas, @visibleForTesting this.versionActual});
+
+  /// Solo para pruebas: las cuatro paginas de las pestañas.
+  final List<Widget>? paginas;
+
+  /// Solo para pruebas: la version que cree estar corriendo.
+  final String? versionActual;
 
   @override
   State<Armazon> createState() => _ArmazonState();
@@ -79,7 +88,11 @@ class _ArmazonState extends State<Armazon> {
         Caudal.leer(context).abrirEnlace?.call('${llamada.arguments}');
       }
     });
-    WidgetsBinding.instance.addPostFrameCallback((_) => _revisarTerminos());
+    // primero los terminos (si faltan) y despues, una sola vez por version, las novedades
+    WidgetsBinding.instance.addPostFrameCallback((_) async {
+      await _revisarTerminos();
+      await _novedadesDeLaVersion();
+    });
     WidgetsBinding.instance.addPostFrameCallback((_) => _avisoWebEnTelefono());
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       try {
@@ -88,6 +101,20 @@ class _ArmazonState extends State<Armazon> {
         if (inicial != null && mounted) Caudal.leer(context).abrirEnlace?.call(inicial);
       } catch (_) {}
     });
+  }
+
+  /// La primera vez que se abre una version con novedades grandes sale su
+  /// pantalla (sobre la app, sin tocar la musica). La version vista se guarda
+  /// antes de enseñarla: si la cierran o la app se cae, no vuelve a salir.
+  Future<void> _novedadesDeLaVersion() async {
+    try {
+      final p = await SharedPreferences.getInstance();
+      final actual = widget.versionActual ?? versionApp;
+      if (!tocaNovedades(p.getString(claveNovedadesVistas), actual) || !mounted) return;
+      await p.setString(claveNovedadesVistas, actual);
+      if (!mounted) return;
+      await NovedadesGrandes.mostrar(context);
+    } catch (_) {}
   }
 
   /// En el navegador de un teléfono, YouTube pausa la música al bloquearlo:
@@ -165,8 +192,8 @@ class _ArmazonState extends State<Armazon> {
 
   @override
   Widget build(BuildContext context) {
-    final paginas = [const InicioPagina(), const BuscarPagina(), const BibliotecaPagina(),
-      const DescargasPagina()];
+    final paginas = widget.paginas ??
+        [const InicioPagina(), const BuscarPagina(), const BibliotecaPagina(), const DescargasPagina()];
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (hecho, _) async {
@@ -210,7 +237,9 @@ class _ArmazonState extends State<Armazon> {
           );
         }
         return Scaffold(
-        body: contenido,
+        // la version, en una franja chiquita bajo todo el contenido (y sobre la barra):
+        // asi nunca tapa una pagina ni el mini reproductor
+        body: Column(children: [Expanded(child: contenido), const FranjaVersion()]),
         bottomNavigationBar: NavigationBar(
           selectedIndex: _pestana,
           onDestinationSelected: _ir,
@@ -264,7 +293,12 @@ class _BarraLateral extends StatelessWidget {
     return SizedBox(
       width: 232,
       child: SafeArea(
-        child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+        // el menu se desplaza si la ventana es baja; la version queda fija abajo
+        child: Column(children: [
+          Expanded(child: LayoutBuilder(builder: (context, c) => SingleChildScrollView(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(minHeight: c.maxHeight),
+              child: IntrinsicHeight(child: Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
           Padding(
             padding: const EdgeInsets.fromLTRB(22, 20, 16, 22),
             child: Row(children: [
@@ -283,13 +317,21 @@ class _BarraLateral extends StatelessWidget {
                 letterSpacing: 1, color: C.texto3)),
           ),
           item(Icons.forum_outlined, Icons.forum_rounded, 'Mensajes', false, () => alAbrir(const MensajesPagina())),
+          item(Icons.account_circle_outlined, Icons.account_circle_rounded, 'Mi perfil', false,
+              () => alAbrir(MenuComunidad.pantalla(0, context))),
+          item(Icons.explore_outlined, Icons.explore_rounded, 'Perfiles de Caudal', false,
+              () => alAbrir(MenuComunidad.pantalla(1, context))),
+          item(Icons.library_music_outlined, Icons.library_music_rounded, 'Música de la comunidad', false,
+              () => alAbrir(MenuComunidad.pantalla(3, context))),
+          item(Icons.album_outlined, Icons.album_rounded, 'Mezclador', false,
+              () => alAbrir(MenuComunidad.pantalla(5, context))),
           item(Icons.groups_2_outlined, Icons.groups_2_rounded, 'Escuchar juntos', false,
               () => alAbrir(const JuntosPagina())),
           item(Icons.insights_rounded, Icons.insights_rounded, 'Tu resumen', false, () => ResumenPagina.abrir(context)),
           const Spacer(),
           item(Icons.settings_outlined, Icons.settings_rounded, 'Ajustes', false, () => alAbrir(const AjustesPagina())),
           Padding(
-            padding: const EdgeInsets.fromLTRB(22, 10, 16, 18),
+            padding: const EdgeInsets.fromLTRB(22, 10, 16, 8),
             child: Row(children: [
               CircleAvatar(radius: 15, backgroundColor: C.acento,
                   child: Text(s.cuenta.inicial, style: TextStyle(color: C.acentoTexto, fontWeight: FontWeight.w900))),
@@ -298,7 +340,42 @@ class _BarraLateral extends StatelessWidget {
                   style: const TextStyle(fontWeight: FontWeight.w700))),
             ]),
           ),
+              ])),
+            ),
+          ))),
+          const Padding(padding: EdgeInsets.only(left: 8, bottom: 6), child: FranjaVersion()),
         ]),
+      ),
+    );
+  }
+}
+
+/// Donde se guarda la ultima version cuyas novedades ya se enseñaron.
+const String claveNovedadesVistas = 'novedades_version_vista';
+
+/// «Caudal 2.2.0», chiquito y tenue, abajo a la izquierda. No capta toques
+/// (no tapa nada de lo que haya debajo): ocupa su propia franja.
+class FranjaVersion extends StatelessWidget {
+  const FranjaVersion({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: Semantics(
+        label: 'Versión de Caudal $versionApp',
+        excludeSemantics: true,
+        child: Align(
+          alignment: Alignment.centerLeft,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(12, 2, 12, 3),
+            child: Text(
+              'Caudal $versionApp',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: 10.5, height: 1.1, letterSpacing: 0.2, color: C.texto3.withValues(alpha: 0.8)),
+            ),
+          ),
+        ),
       ),
     );
   }

@@ -5,6 +5,8 @@
 * «Descubre para ti»: canciones que aún no has oído (se arma una vez al día).
 * La radio automática sin lo que saltas ni lo que sonó estos días.
 * «Máquina del tiempo»: lo que escuchabas hace un mes, tres, seis o un año.
+* «Tu mes pasado»: lo más escuchado el mes calendario anterior (o los últimos
+  30 días si ese mes casi no tiene datos), que se puede guardar como lista.
 
 Señales: lo que escuchas (lo reciente pesa más), lo que saltas antes de 30 s
 y la radio / los relacionados de YouTube Music de varias canciones a la vez.
@@ -228,6 +230,71 @@ def maquina_del_tiempo(historial, ahora=None):
     return salida
 
 
+MINIMO_MES_PASADO = 5      # canciones distintas para que el mes pasado «cuente»
+MINIMO_LISTA = 3           # por debajo de esto no se ofrece nada
+
+
+def _mas_escuchadas(historial, desde, hasta, largo=50):
+    """Las canciones más escuchadas entre dos fechas (desde incluida, hasta no)."""
+    cuenta, pistas, ultima = {}, {}, {}
+    for e in historial:
+        clave = str((e["pista"] or {}).get("clave") or "")
+        if not clave or not (desde <= e["fecha"] < hasta):
+            continue
+        cuenta[clave] = cuenta.get(clave, 0) + 1
+        pistas.setdefault(clave, e["pista"])
+        ultima[clave] = max(ultima.get(clave, e["fecha"]), e["fecha"])
+    orden = sorted(cuenta, key=lambda k: (-cuenta[k], -ultima[k].timestamp()))
+    return [pistas[k] for k in orden[:largo]]
+
+
+def mes_pasado(historial, ahora=None):
+    """«Tu mes pasado»: lo más escuchado el mes calendario anterior. Si ese mes
+    tiene muy pocas canciones, se usan los últimos 30 días. None si no hay casi nada.
+
+    El mix lleva `nombre_lista` (p. ej. «Lo más escuchado en octubre») para guardarlo
+    como lista con un toque."""
+    hoy = ahora or datetime.now()
+    este_mes = hoy.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    mes_anterior = (este_mes - timedelta(days=1)).replace(day=1)
+    pistas = _mas_escuchadas(historial, mes_anterior, este_mes)
+    if len(pistas) >= MINIMO_MES_PASADO:
+        mes = MESES[mes_anterior.month - 1]
+        titulo, nombre = "Tu mes pasado", f"Lo más escuchado en {mes}"
+        sub = f"Lo que más sonó en {mes}"
+    else:
+        pistas = _mas_escuchadas(historial, hoy - timedelta(days=30), hoy + timedelta(seconds=1))
+        if len(pistas) < MINIMO_LISTA:
+            return None
+        titulo, nombre = "Tu último mes", "Lo más escuchado en los últimos 30 días"
+        sub = "Lo que más sonó en los últimos 30 días"
+    m = _mix("mes_pasado", titulo, sub, pistas, color="#FF5C8A")
+    m["nombre_lista"] = nombre
+    return m
+
+
+def nombre_lista_libre(col, base):
+    """El nombre tal cual si está libre; si no, «… (2)», «… (3)»…"""
+    usados = {l["nombre"].lower() for l in col.listas()}
+    if base.lower() not in usados:
+        return base
+    n = 2
+    while f"{base} ({n})".lower() in usados:
+        n += 1
+    return f"{base} ({n})"
+
+
+def guardar_como_lista(col, mix):
+    """Guarda un mix como lista de verdad. Devuelve (id de la lista, nombre)."""
+    pistas = [p for p in (mix.get("pistas") or []) if p.get("clave")]
+    if not pistas:
+        raise ValueError("Este mix no tiene canciones que guardar.")
+    nombre = nombre_lista_libre(col, mix.get("nombre_lista") or mix.get("titulo") or "Mi lista")
+    lista_id = col.crear_lista(nombre, mix.get("subtitulo") or "")
+    col.agregar_a_lista(lista_id, pistas)
+    return lista_id, nombre
+
+
 def _mix(ident, titulo, subtitulo, pistas, color="#7C5CFF"):
     miniaturas = []
     for p in pistas:
@@ -307,5 +374,10 @@ def descubrir(col, ahora=None):
     return m
 
 
-def maquina_del_tiempo_de(col):
-    return maquina_del_tiempo(mixes.leer_historial(col, desde=datetime.now() - timedelta(days=380)))
+def maquina_del_tiempo_de(col, ahora=None):
+    """«Vuelve en el tiempo»: tu mes pasado primero y después lo de hace meses."""
+    hoy = ahora or datetime.now()
+    historial = mixes.leer_historial(col, desde=hoy - timedelta(days=380))
+    salida = maquina_del_tiempo(historial, ahora=hoy)
+    mes = mes_pasado(historial, ahora=hoy)
+    return ([mes] if mes else []) + salida

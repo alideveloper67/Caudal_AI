@@ -385,4 +385,105 @@ class Recomendador {
         desde: DateTime.now().subtract(const Duration(days: 380)), limite: 40000);
     return maquinaDelTiempo(historial);
   }
+
+  // ------------------------------------------------------------ tu mes pasado
+
+  static const _nombresMes = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto',
+    'septiembre', 'octubre', 'noviembre', 'diciembre'];
+
+  /// El nombre del mes en español (1 = enero).
+  static String nombreDelMes(int mes) => _nombresMes[(mes - 1).clamp(0, 11)];
+
+  /// Desde cuándo hay que leer el historial para armar «Tu mes pasado»: el
+  /// primer día del mes calendario anterior (o, si cae más cerca, 30 días atrás).
+  static DateTime desdeMesPasado({DateTime? ahora}) {
+    final hoy = ahora ?? DateTime.now();
+    final inicioAnterior = DateTime(hoy.year, hoy.month - 1);
+    final hace30 = hoy.subtract(const Duration(days: 30));
+    return inicioAnterior.isBefore(hace30) ? inicioAnterior : hace30;
+  }
+
+  /// «Tu mes pasado»: lo que más escuchaste el mes calendario anterior. Si ese
+  /// mes tiene pocas canciones distintas (menos de [minimo]), se usan los
+  /// últimos 30 días. Devuelve null si tampoco hay datos para eso.
+  ///
+  /// El resultado es un «mix» como los demás, con `nombre_lista` (el nombre con
+  /// el que se guarda como lista real, p. ej. «Lo más escuchado en octubre»).
+  static Json? mesPasado(List<Escucha> historial, {DateTime? ahora, int minimo = 5, int largo = 30}) {
+    final hoy = ahora ?? DateTime.now();
+    final inicio = DateTime(hoy.year, hoy.month - 1);
+    final fin = DateTime(hoy.year, hoy.month);
+
+    List<(Json, int)> contar(bool Function(Escucha) cuenta) {
+      final veces = <String, int>{};
+      final ultima = <String, DateTime>{};
+      final pistas = <String, Json>{};
+      for (final e in historial) {
+        if (e.clave.isEmpty || !cuenta(e)) continue;
+        veces[e.clave] = (veces[e.clave] ?? 0) + 1;
+        if (ultima[e.clave] == null || e.fecha.isAfter(ultima[e.clave]!)) ultima[e.clave] = e.fecha;
+        pistas.putIfAbsent(e.clave, () => e.pista);
+      }
+      // las más escuchadas primero; a igualdad, la más reciente
+      final orden = veces.keys.toList()
+        ..sort((a, b) {
+          final c = veces[b]!.compareTo(veces[a]!);
+          return c != 0 ? c : ultima[b]!.compareTo(ultima[a]!);
+        });
+      return [for (final k in orden) (pistas[k]!, veces[k]!)];
+    }
+
+    var lista = contar((e) => !e.fecha.isBefore(inicio) && e.fecha.isBefore(fin));
+    var ultimos30 = false;
+    if (lista.length < minimo) {
+      final desde = hoy.subtract(const Duration(days: 30));
+      lista = contar((e) => !e.fecha.isBefore(desde) && !e.fecha.isAfter(hoy));
+      ultimos30 = true;
+    }
+    if (lista.length < minimo) return null;
+    final pistas = [for (final (p, _) in lista.take(largo)) p];
+    final nombre = ultimos30
+        ? 'Lo más escuchado en los últimos 30 días'
+        : 'Lo más escuchado en ${nombreDelMes(inicio.month)}';
+    return {
+      'tipo': 'mix',
+      'id': ultimos30 ? 'mes_pasado_30d' : 'mes_pasado_${inicio.year}_${inicio.month}',
+      'titulo': 'Tu mes pasado',
+      'subtitulo': ultimos30
+          ? 'Lo que más escuchaste en los últimos 30 días'
+          : 'Lo que más escuchaste en ${nombreDelMes(inicio.month)}',
+      'nombre_lista': nombre,
+      'ultimos_30_dias': ultimos30,
+      'miniatura': '${pistas.first['miniatura'] ?? ''}',
+      'miniaturas': {
+        for (final p in pistas) if ('${p['miniatura'] ?? ''}'.isNotEmpty) '${p['miniatura']}'
+      }.take(4).toList(),
+      'color': 0xFFE8795A,
+      'pistas': [for (final p in pistas) Coleccion.paraNube(p)],
+      'total': pistas.length,
+    };
+  }
+
+  static Future<Json?> mesPasadoDe(Coleccion c, {DateTime? ahora}) async {
+    final hoy = ahora ?? DateTime.now();
+    final historial = await Historial.leer(c, desde: desdeMesPasado(ahora: hoy), limite: 20000);
+    return mesPasado(historial, ahora: hoy);
+  }
+
+  /// Guarda «Tu mes pasado» como una lista real (con su portada de mosaico, que
+  /// sale de las primeras canciones). Si ya existe una con ese nombre, no se
+  /// duplica: se le añaden las canciones que falten y se devuelve su id.
+  static Future<int> guardarMesPasado(Coleccion c, Json mix) async {
+    final nombre = '${mix['nombre_lista'] ?? mix['titulo'] ?? 'Tu mes pasado'}';
+    final pistas = [
+      for (final e in (mix['pistas'] is List ? mix['pistas'] as List : const []))
+        if (e is Map) Map<String, dynamic>.from(e)
+    ];
+    final existente = (await c.listas()).where((l) => '${l['nombre']}' == nombre).firstOrNull;
+    final id = existente == null
+        ? await c.crearLista(nombre, descripcion: '${mix['subtitulo'] ?? ''}')
+        : (existente['id'] is int ? existente['id'] as int : int.parse('${existente['id']}'));
+    await c.agregarALista(id, pistas);
+    return id;
+  }
 }

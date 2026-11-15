@@ -9,11 +9,14 @@ from PySide6.QtWidgets import (QDialog, QFrame, QGraphicsOpacityEffect, QHBoxLay
                                QPushButton, QScrollArea, QToolButton, QVBoxLayout, QWidget)
 
 from ... import chat as CH
+from ... import social as S
 from ...hilos import en_segundo_plano
 from .. import iconos
 from ..componentes import Portada, _borrar_layout
 from ..estilos import C
+from .amigos import PanelAmigos, PanelSolicitudes
 from .juntos import _fuente_emoji, menu_emojis
+from .perfil_comun import Avatar
 
 
 def chat_de(ctx):
@@ -59,6 +62,10 @@ class DialogoNuevoChat(QDialog):
         t = QLabel("Nuevo mensaje")
         t.setStyleSheet("font-size:20px;font-weight:900;")
         v.addWidget(t)
+        nota = QLabel("Solo puedes escribir a tus amigos. Si todavía no lo es, le enviarás una solicitud.")
+        nota.setWordWrap(True)
+        nota.setObjectName("ayuda")
+        v.addWidget(nota)
         self.campo = QLineEdit()
         self.campo.setPlaceholderText("@usuario de la otra persona")
         self.campo.textEdited.connect(self._al_escribir)
@@ -77,7 +84,7 @@ class DialogoNuevoChat(QDialog):
         self.bt = QPushButton("Escribir")
         self.bt.setObjectName("principal")
         self.bt.setEnabled(False)
-        self.bt.clicked.connect(self._abrir)
+        self.bt.clicked.connect(self._accion)
         fila.addWidget(self.bt)
         v.addLayout(fila)
         self.reloj = QTimer(self)
@@ -111,14 +118,49 @@ class DialogoNuevoChat(QDialog):
             self.persona = p
             self.bt.setEnabled(p is not None)
             if p:
-                self.estado.setText(f"<b>{_html(p.get('nombre') or p['usuario'])}</b>  @{_html(p['usuario'])}"
-                                    "  — pulsa «Escribir»")
+                p.setdefault("relacion", "ninguna")
+                self._mostrar_persona()
             else:
                 self.estado.setText(f"No hay nadie con el usuario «{_html(u)}». Revisa que esté bien escrito.")
 
         en_segundo_plano(self.chat.buscar, u, ok=listo,
                          error=lambda _e: self.estado.setText("No se pudo conectar. Revisa tu internet."),
                          dueno=self, urgente=True)
+
+    def _mostrar_persona(self):
+        p = self.persona
+        rel = p.get("relacion") or "ninguna"
+        nombre = f"<b>{_html(p.get('nombre') or p['usuario'])}</b>  @{_html(p['usuario'])}"
+        texto, enabled, que = {
+            "amigo": ("Escribir", True, "es tu amigo: pulsa «Escribir»"),
+            "ninguna": ("Enviar solicitud", True, "aún no es tu amigo: envíale una solicitud"),
+            "recibida": ("Aceptar solicitud", True, "quiere ser tu amigo: acepta su solicitud"),
+            "enviada": ("Solicitud enviada", False, "ya le enviaste una solicitud; espera a que la acepte"),
+        }.get(rel, ("Escribir", False, "no se puede escribir a esta persona"))
+        self.estado.setText(f"{nombre}  — {que}")
+        self.bt.setText(texto)
+        self.bt.setEnabled(enabled)
+
+    def _accion(self):
+        p = self.persona
+        if not p:
+            return
+        if (p.get("relacion") or "ninguna") == "amigo":
+            self._abrir()
+            return
+        self.bt.setEnabled(False)
+        self.bt.setText("Enviando…")
+        social = S.Social(self.chat.sesion)
+
+        def listo(r):
+            p["relacion"] = S.relacion_tras_envio(r)
+            self._mostrar_persona()
+            self.estado.setText(S.mensaje_tras_envio(r, p.get("nombre") or p["usuario"]))
+
+        def fallo(e):
+            self._mostrar_persona()
+            self.estado.setText(S.explicar(e, "enviar la solicitud"))
+        en_segundo_plano(social.enviar_solicitud, p["id"], ok=listo, error=fallo, dueno=self, urgente=True)
 
     def _abrir(self):
         p = self.persona
@@ -133,8 +175,8 @@ class DialogoNuevoChat(QDialog):
             self.accept()
 
         en_segundo_plano(self.chat.abrir, p["id"], ok=listo,
-                         error=lambda _e: (self.estado.setText("No se pudo abrir la conversación."),
-                                           self.bt.setEnabled(True), self.bt.setText("Escribir")),
+                         error=lambda e: (self.estado.setText(S.explicar(e, "abrir la conversación")),
+                                          self.bt.setEnabled(True), self.bt.setText("Escribir")),
                          dueno=self, urgente=True)
 
 
@@ -174,7 +216,7 @@ def enviar_pista_a_chat(ctx, pista):
             menu.addAction(f"{ch['visible']}   @{ch.get('usuario') or ''}", lambda ch=ch: mandar(ch))
         menu.exec(QCursor.pos())
 
-    en_segundo_plano(c.mis_chats, ok=con_chats,
+    en_segundo_plano(c.solo_amigos, ok=con_chats,
                      error=lambda _e: ctx.aviso.emit("No se pudo conectar. Revisa tu internet."),
                      dueno=ventana, urgente=True)
 
@@ -226,6 +268,20 @@ class PaginaMensajes(QWidget):
         nuevo.clicked.connect(lambda: nuevo_chat(self.ctx, self, self._abrir))
         cab.addWidget(nuevo)
         izq.addLayout(cab)
+        tabs = QHBoxLayout()
+        tabs.setSpacing(0)
+        self.tabs = {}
+        for clave, texto in (("chats", "Chats"), ("solicitudes", "Solicitudes"), ("amigos", "Amigos")):
+            b = QPushButton(texto)
+            b.setObjectName("pestana")
+            b.setCheckable(True)
+            b.setCursor(Qt.PointingHandCursor)
+            b.setFocusPolicy(Qt.NoFocus)
+            b.clicked.connect(lambda _=False, k=clave: self._pestana(k))
+            self.tabs[clave] = b
+            tabs.addWidget(b)
+        tabs.addStretch(1)
+        izq.addLayout(tabs)
         self.scroll_lista = QScrollArea()
         self.scroll_lista.setWidgetResizable(True)
         self.scroll_lista.setFrameShape(QFrame.NoFrame)
@@ -243,7 +299,17 @@ class PaginaMensajes(QWidget):
         self.lay_lista.addStretch(1)
         self._lista_cargada = False
         self.scroll_lista.setWidget(self.interior_lista)
-        izq.addWidget(self.scroll_lista, 1)
+        self.panel_sol = PanelSolicitudes(ctx, compacto=True)
+        self.panel_ami = PanelAmigos(ctx, compacto=True)
+        self.paneles = {"chats": self.scroll_lista, "solicitudes": self.panel_sol, "amigos": self.panel_ami}
+        for w in self.paneles.values():
+            izq.addWidget(w, 1)
+        self.panel_sol.contador.connect(self._badge_solicitudes)
+        self.panel_sol.cambio.connect(self.panel_ami.cargar)
+        self.panel_sol.cambio.connect(self._cargar_lista)
+        self.panel_ami.cambio.connect(self.panel_sol.cargar)
+        self.panel_ami.cambio.connect(self._cargar_lista)
+        self.panel_ami.escribir.connect(self._escribir_a)
         self.caja_izq = QWidget()
         self.caja_izq.setLayout(izq)
         self.caja_izq.setFixedWidth(self.ANCHO_LISTA)
@@ -294,6 +360,13 @@ class PaginaMensajes(QWidget):
         self.lay.addStretch(1)
         self.scroll.setWidget(self.interior)
         vp.addWidget(self.scroll, 1)
+        self.aviso_no_amigo = QLabel("Ya no son amigos, así que no pueden escribirse. "
+                                     "Si quieres volver a hablar, envíale una solicitud desde su perfil.")
+        self.aviso_no_amigo.setWordWrap(True)
+        self.aviso_no_amigo.setStyleSheet(f"background:{C['superficie2']};color:{C['texto2']};"
+                                          "border-radius:10px;padding:10px 12px;")
+        self.aviso_no_amigo.hide()
+        vp.addWidget(self.aviso_no_amigo)
         fila = QHBoxLayout()
         fila.setSpacing(6)
         self.bt_emoji = QToolButton()
@@ -347,6 +420,39 @@ class PaginaMensajes(QWidget):
         if r is not None and hasattr(r, "pista_cambio"):
             r.pista_cambio.connect(self._al_cambiar_pista)
         self._al_cambiar_pista(getattr(r, "actual", None))
+        self._pestana("chats")
+        pend = getattr(ctx, "chat_pendiente", None)
+        if pend and self.chat is not None:
+            ctx.chat_pendiente = None
+            self._abrir_con(pend)
+
+    # ------------------------------------------------------------ pestañas y amigos
+    def _pestana(self, clave):
+        for k, w in self.paneles.items():
+            w.setVisible(k == clave)
+            self.tabs[k].setChecked(k == clave)
+
+    def _badge_solicitudes(self, n):
+        self.tabs["solicitudes"].setText(f"Solicitudes ({n})" if n else "Solicitudes")
+
+    def _abrir_con(self, p):
+        """Abre (o crea) la conversación con un amigo que se eligió fuera de la lista de chats."""
+        if self.chat is None:
+            return
+        nombre = p.get("visible") or p.get("nombre") or p.get("usuario") or "?"
+
+        def listo(cid):
+            self._pestana("chats")
+            self._abrir({"id": cid, "otro": p["id"], "usuario": p.get("usuario") or "",
+                         "nombre": p.get("nombre") or "", "visible": nombre, "es_amigo": True})
+        en_segundo_plano(self.chat.abrir, p["id"], ok=listo,
+                         error=lambda e: self.ctx.aviso.emit(_motivo(e, "abrir la conversación")),
+                         dueno=self, urgente=True)
+
+    def _escribir_a(self, p):
+        p = dict(p)
+        p["visible"] = S.nombre_visible(p)
+        self._abrir_con(p)
 
     # ------------------------------------------------------------ estado
     def _activar(self, si):
@@ -355,7 +461,7 @@ class PaginaMensajes(QWidget):
         self.bt_enviar.setEnabled(si and bool(self.campo.text().strip()))
 
     def _al_escribir(self, texto):
-        self.bt_enviar.setEnabled(self.actual is not None and bool(texto.strip()))
+        self.bt_enviar.setEnabled(self.actual is not None and self.campo.isEnabled() and bool(texto.strip()))
 
     def _al_cambiar_pista(self, p):
         try:
@@ -421,6 +527,7 @@ class PaginaMensajes(QWidget):
         self._activar(False)
         self.et_con.setText("Elige una conversación o empieza una nueva")
         self.campo.setPlaceholderText("Escribe un mensaje")
+        self.aviso_no_amigo.hide()
         self.cargando = None
         _borrar_layout(self.lay)
         self.lay.addStretch(1)
@@ -431,7 +538,7 @@ class PaginaMensajes(QWidget):
     def _cargar_lista(self):
         if self.chat is None or (not self.isVisible() and self._lista_cargada):
             return
-        en_segundo_plano(self.chat.mis_chats, ok=self._pintar_lista, error=self._lista_fallo,
+        en_segundo_plano(self.chat.panorama, ok=self._pintar_lista, error=self._lista_fallo,
                          dueno=self, urgente=True)
 
     def _lista_fallo(self, e):
@@ -443,14 +550,16 @@ class PaginaMensajes(QWidget):
             self.lay_lista.addWidget(et)
             self.lay_lista.addStretch(1)
 
-    def _pintar_lista(self, chats):
+    def _pintar_lista(self, datos):
+        chats, solicitudes = datos
+        self._badge_solicitudes(solicitudes)
         self._lista_cargada = True
         barra = self.scroll_lista.verticalScrollBar().value()
         _borrar_layout(self.lay_lista)
         if not chats:
-            et = QLabel("Aún no tienes conversaciones.\n\nPulsa «Nuevo», escribe el usuario de Caudal "
-                        "de alguien y mándale mensajes y canciones. Luego pueden crear una mezcla "
-                        "con lo que escuchan los dos.")
+            et = QLabel("Aún no tienes conversaciones.\n\nSolo puedes escribir a tus amigos: pulsa «Nuevo», "
+                        "escribe el usuario de Caudal de alguien y envíale una solicitud. Cuando la acepte "
+                        "podrán mandarse mensajes y canciones, y crear una mezcla con lo que escuchan los dos.")
             et.setWordWrap(True)
             et.setObjectName("ayuda")
             self.lay_lista.addWidget(et)
@@ -470,12 +579,7 @@ class PaginaMensajes(QWidget):
                         f"QPushButton:hover{{background:{C['superficie3'] if activo else C['superficie']};}}")
         h = QHBoxLayout(b)
         h.setContentsMargins(10, 6, 10, 6)
-        ini = QLabel((c["visible"] or "?")[:1].upper())
-        ini.setFixedSize(40, 40)
-        ini.setAlignment(Qt.AlignCenter)
-        ini.setStyleSheet(f"background:{C['superficie3']};color:{C['acento']};border-radius:20px;"
-                          "font-weight:900;font-size:16px;")
-        h.addWidget(ini)
+        h.addWidget(Avatar(40, c["visible"] or "?", C["acento"], c.get("foto_url")))
         col = QVBoxLayout()
         col.setSpacing(0)
         n = QLabel(c["visible"])
@@ -513,7 +617,11 @@ class PaginaMensajes(QWidget):
         self.et_con.setText(f"{_html(c['visible'])}  <span style='color:{C['texto3']};font-size:13px;"
                             f"font-weight:600'>@{_html(usuario)}</span>" if usuario else _html(c["visible"]))
         self.campo.setPlaceholderText(f"Escríbele a {c['visible']}")
-        self._activar(True)
+        amigo = c.get("es_amigo", True)
+        self._activar(bool(amigo))
+        self.aviso_no_amigo.setVisible(not amigo)
+        if not amigo:
+            self.campo.setPlaceholderText("Ya no son amigos")
         _borrar_layout(self.lay)
         self.cargando = QLabel("Cargando la conversación…")
         self.cargando.setAlignment(Qt.AlignCenter)

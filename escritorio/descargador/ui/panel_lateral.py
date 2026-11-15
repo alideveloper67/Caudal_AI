@@ -184,6 +184,9 @@ class PanelLateral(QWidget):
     traer_lista = Signal()
 
     NAV = [("inicio", "Inicio", "casa"), ("explorar", "Explorar", "brujula"),
+           ("directorio", "Perfiles de Caudal", "usuario"),
+           ("comunidad", "Música de la comunidad", "musica"),
+           ("mezclador", "Mezclador", "ecualizador"),
            ("descargas", "Descargar videos", "descargar")]
 
     def __init__(self, ctx, padre=None):

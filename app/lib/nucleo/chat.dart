@@ -2,13 +2,15 @@ import 'dart:async';
 
 import 'coleccion.dart';
 import 'nube.dart';
+import 'social.dart' show Relacion;
 
 /// Mensajes entre dos personas (como los de Spotify): texto y canciones.
 /// Todo pasa por Supabase con las reglas de supabase/esquema.sql: cada uno
 /// solo ve sus conversaciones.
 class ResumenChat {
   ResumenChat({required this.id, required this.otro, required this.usuario, required this.nombre,
-      required this.ultimo, this.ultimoTexto = '', this.ultimaPista, this.ultimoMio = false, this.sinLeer = 0});
+      required this.ultimo, this.ultimoTexto = '', this.ultimaPista, this.ultimoMio = false, this.sinLeer = 0,
+      this.fotoUrl = ''});
 
   final String id;
   final String otro;
@@ -19,6 +21,9 @@ class ResumenChat {
   final Json? ultimaPista;
   final bool ultimoMio;
   final int sinLeer;
+
+  /// Ruta de su foto de perfil (vacía si no tiene).
+  final String fotoUrl;
 
   String get inicial => (nombre.isNotEmpty ? nombre : usuario).substring(0, 1).toUpperCase();
   String get visible => nombre.isNotEmpty ? nombre : usuario;
@@ -43,6 +48,7 @@ class ResumenChat {
         ultimaPista: d['ultimo_pista'] is Map ? Map<String, dynamic>.from(d['ultimo_pista'] as Map) : null,
         ultimoMio: '${d['ultimo_autor']}' == yo,
         sinLeer: (d['sin_leer'] as num?)?.toInt() ?? 0,
+        fotoUrl: '${d['foto_url'] ?? ''}',
       );
 }
 
@@ -64,10 +70,17 @@ class Mensaje {
 }
 
 class Persona {
-  Persona(this.id, this.usuario, this.nombre);
+  Persona(this.id, this.usuario, this.nombre, {this.fotoUrl = '', this.relacion = 'ninguna'});
   final String id;
   final String usuario;
   final String nombre;
+  final String fotoUrl;
+
+  /// yo, amigo, enviada, recibida, ninguna o bloqueado (ver [Relacion]).
+  final String relacion;
+
+  /// Solo a los amigos se les puede escribir.
+  bool get esAmigo => relacion == 'amigo';
 }
 
 class Chat {
@@ -93,9 +106,12 @@ class Chat {
     final l = r as List? ?? const [];
     if (l.isEmpty || l.first is! Map) return null;
     final d = l.first as Map;
-    return Persona('${d['id']}', '${d['usuario']}', '${d['nombre'] ?? ''}');
+    return Persona('${d['id']}', '${d['usuario']}', '${d['nombre'] ?? ''}',
+        fotoUrl: '${d['foto_url'] ?? ''}', relacion: Relacion.normal(d['relacion']));
   }
 
+  /// Abre (o crea) el chat con un amigo. Con alguien que no es amigo la base
+  /// responde «primero deben ser amigos» y aquí sale como un [ErrorNube] claro.
   Future<String> abrir(String otro) async {
     final r = await sesion.pedir('POST', 'rpc/abrir_chat', cuerpo: {'p_otro': otro});
     return '$r'.replaceAll('"', '');

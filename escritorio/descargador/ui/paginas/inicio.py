@@ -7,7 +7,8 @@ from datetime import datetime, timedelta
 from PySide6.QtCore import QObject, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import (QColor, QFont, QFontMetrics, QLinearGradient, QPainter, QPainterPath,
                            QPixmap)
-from PySide6.QtWidgets import QApplication, QGridLayout, QHBoxLayout, QLabel, QMenu, QWidget
+from PySide6.QtWidgets import (QApplication, QGridLayout, QHBoxLayout, QLabel, QMenu,
+                               QPushButton, QWidget)
 
 from ... import catalogo
 from ...hilos import en_segundo_plano
@@ -300,7 +301,8 @@ class PaginaInicio(Pagina):
         v = QVBoxLayout(caja)
         v.setContentsMargins(0, 0, 0, 0)
         self.zv.addWidget(caja)
-        self._carrusel_de_mixes(v, "Máquina del tiempo", "lo que escuchabas antes", lista)
+        self._carrusel_de_mixes(v, "Vuelve en el tiempo",
+                                "tu mes pasado y lo que escuchabas antes", lista)
 
     def _carrusel_de_mixes(self, v, titulo, subtitulo, lista):
         from ..componentes import _borrar_layout
@@ -394,9 +396,25 @@ def menu_mix(ctx, el, pos):
     menu.addAction(iconos.icono("lista", 16, C["texto2"]), "Añadir a la cola",
                    lambda: ctx.reproductor.agregar_a_cola(pistas))
     menu.addSeparator()
+    if el.get("nombre_lista"):
+        menu.addAction(iconos.icono("lista", 16, C["texto2"]), "Guardar como lista",
+                       lambda: guardar_mix_como_lista(ctx, el))
     ctx._submenu_listas(menu, pistas)
     ctx.menu_descargar(menu, pistas)
     menu.exec(pos)
+
+
+def guardar_mix_como_lista(ctx, el):
+    """«Tu mes pasado» (y parecidos) pasa a ser una lista tuya de verdad."""
+    from ... import recomendador as rc
+    try:
+        _id, nombre = rc.guardar_como_lista(ctx.coleccion, el)
+    except ValueError as e:
+        ctx.aviso.emit(str(e))
+        return None
+    ctx.listas_cambio.emit()
+    ctx.aviso.emit(f"Guardada como lista: «{nombre}»")
+    return nombre
 
 
 def dibujar_cubriendo(p, img, celda):
@@ -536,7 +554,9 @@ class PaginaMix(Pagina):
         self.titulo = el.get("titulo") or "Mix diario"
         pistas = el.get("pistas") or []
         self.set_color(QColor(el.get("color") or C["acento"]).darker(230).name())
-        cab = Cabecera(ctx, "Mix diario", self.titulo, "", lado=212)
+        guardable = bool(el.get("nombre_lista"))
+        cab = Cabecera(ctx, "Tu mes pasado" if guardable else "Mix diario", self.titulo, "",
+                       lado=212)
         self._mosaico = Mosaico(el, 212, rotulo=False, padre=self)
         portada = cab.portada
         portada.pm = self._mosaico.pixmap()
@@ -548,8 +568,12 @@ class PaginaMix(Pagina):
             except RuntimeError:
                 pass
         self._mosaico.listo.connect(nuevo)
-        cab.set_descripcion("Lo que más escuchas mezclado con canciones parecidas. "
-                            "Se renueva cada día.")
+        if guardable:
+            cab.set_descripcion(f"{el.get('subtitulo') or ''}. Guárdala como lista para "
+                                "no perderla cuando pase el tiempo.")
+        else:
+            cab.set_descripcion("Lo que más escuchas mezclado con canciones parecidas. "
+                                "Se renueva cada día.")
         nombres = el.get("artistas") or []
         if nombres:
             cab.add_dato(", ".join(nombres[:4]) + (" y más" if len(nombres) > 4 else ""),
@@ -567,6 +591,14 @@ class PaginaMix(Pagina):
                        lambda: reproducir_mix(ctx, el, True), 26, 40)
         acciones.boton("cola", "Añadir a la cola",
                        lambda: ctx.reproductor.agregar_a_cola(pistas), 24, 40)
+        if guardable:
+            self.bt_guardar = QPushButton("  Guardar como lista")
+            self.bt_guardar.setObjectName("contorno")
+            self.bt_guardar.setIcon(iconos.icono("lista", 16, C["texto"]))
+            self.bt_guardar.setCursor(Qt.PointingHandCursor)
+            self.bt_guardar.setToolTip(f"Crea la lista «{el['nombre_lista']}» con estas canciones")
+            self.bt_guardar.clicked.connect(self._guardar_lista)
+            acciones.widget(self.bt_guardar)
         self.bt_mas = acciones.boton("puntos", "Más opciones", self._menu, 24, 40)
         acciones.terminar()
         self.cuerpo.addWidget(acciones)
@@ -575,6 +607,12 @@ class PaginaMix(Pagina):
         self.lista.set_pistas(pistas, contexto_mix(el))
         self.cuerpo.addWidget(self.lista)
         self.cuerpo.addStretch(1)
+
+    def _guardar_lista(self):
+        nombre = guardar_mix_como_lista(self.ctx, self.el)
+        if nombre:
+            self.bt_guardar.setText("  Guardada en tus listas")
+            self.bt_guardar.setEnabled(False)
 
     def _menu(self):
         menu_mix(self.ctx, self.el, self.bt_mas.mapToGlobal(self.bt_mas.rect().bottomLeft()))

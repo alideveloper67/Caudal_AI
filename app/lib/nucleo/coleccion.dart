@@ -508,6 +508,8 @@ class Coleccion extends ChangeNotifier {
   final Map<String, (bool, int)> _existeCache = {};
 
   bool _existe(String ruta) {
+    // la música de la comunidad es una dirección de internet, no un archivo
+    if (ruta.startsWith('http')) return true;
     final ahora = DateTime.now().millisecondsSinceEpoch;
     final dato = _existeCache[ruta];
     if (dato != null && ahora - dato.$2 < 20000) return dato.$1;

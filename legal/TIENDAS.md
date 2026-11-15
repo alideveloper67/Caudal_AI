@@ -121,3 +121,23 @@ Lo que Play revisa de esto: la política de privacidad ya describe el dato de Go
 - [ ] Subir el `.aab` de la variante `play` (target SDK 36, firmado con la clave de `key.properties`) a una pista de pruebas internas primero.
 - [ ] Cuentas nuevas de Play: 12 testers durante 14 días en prueba cerrada antes de poder publicar en producción.
 - [ ] Entrar con Google probado de punta a punta (arriba).
+
+## Cambios de la gran actualización (Android 2.2.0 / Windows 2.3.0)
+
+**Seguridad de los datos (formulario de Google Play) — añadir:**
+
+| Pregunta | Respuesta |
+|---|---|
+| **Fotos y videos → Fotos** (foto de perfil) | Recogido · Opcional · Funcionalidad de la app · **Compartido** con otros usuarios solo si el perfil es público |
+| **Archivos de audio → Archivos de música** (canciones que sube la gente) | Recogido · Opcional · Funcionalidad de la app · **Compartido** con la comunidad |
+| **Información personal → Otra información** (descripción, canción y artista favoritos) | Recogido · Opcional · Personalización · Compartido solo si el perfil es público |
+| **Mensajes / Contenido generado por usuarios** | Recogido · Funcionalidad · Los chats solo entre amigos |
+| ¿Se pueden pedir que se borren? | Sí: «Eliminar mi cuenta» borra también fotos y música subida |
+
+**Política de contenido generado por usuarios de Google Play** (la app permite subir música y tener perfil):
+- Términos que prohíben contenido ilegal, abusivo o que infrinja derechos: **sí**, puntos 5 y 6 de los términos.
+- Forma de **reportar** contenido dentro de la app: **sí**, «Reportar» en cada canción de la comunidad.
+- Forma de **bloquear** usuarios: **sí**, desde el perfil y desde Amigos.
+- Moderación: 3 reportes de personas distintas ocultan la canción hasta revisarla; quitamos lo que incumpla.
+- Chat solo con solicitud aceptada; perfiles públicos solo de mayores de 18 años; los menores no salen en el directorio.
+- Derechos de autor: casilla obligatoria al subir y contacto para titulares de derechos.

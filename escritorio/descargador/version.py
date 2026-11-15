@@ -18,7 +18,7 @@ import tempfile
 import urllib.error
 import urllib.request
 
-VERSION = "2.2.4"
+VERSION = "2.3.0"
 
 # usuario/repositorio de GitHub donde publicas las versiones
 ORIGEN = "alideveloper67/Caudal_AI"
@@ -43,6 +43,18 @@ def hay_novedad(instalada, publicada):
     return _numeros(publicada) > _numeros(instalada)
 
 
+MARCA_GRANDE = "[grande]"
+
+
+def separar_marca_grande(notas):
+    """(es_grande, notas sin la marca). Una release avisa de una actualización grande
+    si sus notas empiezan con la línea `[grande]`."""
+    texto = str(notas or "").strip()
+    if texto.lower().startswith(MARCA_GRANDE):
+        return True, texto[len(MARCA_GRANDE):].strip()
+    return False, texto
+
+
 def elegir_release(publicadas):
     """La version mas alta del escritorio (ignora borradores, pruebas y las del movil)."""
     candidatas = [r for r in publicadas or []
@@ -57,7 +69,7 @@ def buscar_actualizacion(espera=12):
     """Mira si hay una version nueva publicada.
 
     Devuelve None si ya estas al dia o si no se pudo comprobar, y si la hay:
-    {"version", "notas", "instalador", "apk", "pagina"}
+    {"version", "notas", "grande", "instalador", "apk", "pagina"}
     """
     try:
         peticion = urllib.request.Request(API, headers=CABECERAS)
@@ -83,9 +95,11 @@ def buscar_actualizacion(espera=12):
 
     if not instalador:
         return None
+    grande, notas = separar_marca_grande(datos.get("body"))
     return {
         "version": etiqueta,
-        "notas": (datos.get("body") or "").strip(),
+        "notas": notas,
+        "grande": grande,
         "instalador": instalador,
         "apk": apk,
         "pagina": datos.get("html_url") or "",

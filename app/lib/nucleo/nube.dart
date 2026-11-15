@@ -71,7 +71,44 @@ class Nube {
     if (texto.contains('refresh') && (texto.contains('not found') || texto.contains('invalid'))) {
       return const ErrorNube('La sesión guardada caducó. Vuelve a iniciar sesión.');
     }
+    final social = _traducirSocial(texto);
+    if (social != null) return ErrorNube(social);
     return ErrorNube('El servidor de cuentas respondió un error (${r.statusCode}).');
+  }
+
+  /// Los avisos de la parte social (amigos, perfiles, música) en lenguaje normal.
+  /// Se deja visible para poder probarlo.
+  static String? traducirSocial(String texto) => _traducirSocial(texto.toLowerCase());
+
+  static String? _traducirSocial(String t) {
+    const casos = <String, String>{
+      'primero deben ser amigos': 'Para escribirse primero tienen que ser amigos. Envía una solicitud de amistad.',
+      'espera unos dias': 'Esa persona rechazó tu solicitud hace poco. Podrás volver a enviarla pasados 30 días.',
+      'demasiadas solicitudes': 'Tienes demasiadas solicitudes pendientes. Espera a que respondan o cancela alguna.',
+      'no se puede enviar': 'No se puede enviar la solicitud a esta persona.',
+      'esa persona no existe': 'Esa persona ya no existe en Caudal.',
+      'solicitud no encontrada': 'Esa solicitud ya no está disponible. Actualiza la lista.',
+      'ese perfil no es publico': 'Ese perfil es privado, así que no se le puede dar me gusta.',
+      'la cancion necesita una portada': 'Para subir una canción necesitas elegir su carátula.',
+      'ya subiste 30 canciones': 'Ya subiste 30 canciones, que es el máximo. Borra alguna para subir otra.',
+      'ya subiste 10 canciones': 'Hoy ya subiste 10 canciones, que es el máximo por día. Sigue mañana.',
+      'ruta no valida': 'No se pudo registrar el archivo. Vuelve a intentarlo.',
+      'sin sesion': 'Tu sesión terminó. Vuelve a iniciar sesión.',
+      'no se puede': 'No se puede hacer eso con esta persona.',
+    };
+    for (final e in casos.entries) {
+      if (t.contains(e.key)) return e.value;
+    }
+    if (t.contains('row-level security') || t.contains('policy')) {
+      return 'No tienes permiso para hacer eso.';
+    }
+    if (t.contains('payload too large') || t.contains('too large') || t.contains('exceeded the maximum')) {
+      return 'El archivo es demasiado grande.';
+    }
+    if (t.contains('mime') || t.contains('not supported') || t.contains('invalid_mime')) {
+      return 'Ese tipo de archivo no es válido.';
+    }
+    return null;
   }
 
   static Future<bool> usuarioLibre(String usuario) async {
@@ -209,6 +246,51 @@ class Sesion {
         token: await token(), cuerpo: cuerpo, cabeceras: cabeceras);
     if (r.statusCode >= 300) throw Nube._traducir(r);
     return r.body.trim().isEmpty ? null : jsonDecode(r.body);
+  }
+
+  /// Llama a una función de la base (`/rest/v1/rpc/<nombre>`).
+  Future<dynamic> rpc(String nombre, [Map<String, dynamic> parametros = const {}]) =>
+      pedir('POST', 'rpc/$nombre', cuerpo: parametros);
+
+  /// Sube un archivo al almacén ([bucket]/[ruta]). [alAvanzar] recibe 0..1.
+  Future<void> subir(String bucket, String ruta, List<int> bytes, String tipo,
+      {bool reemplazar = false, void Function(double)? alAvanzar}) async {
+    final req = http.StreamedRequest('POST', Uri.parse('${Nube.url}/storage/v1/object/$bucket/$ruta'));
+    req.headers.addAll({
+      'apikey': Nube.clavePublica,
+      'Authorization': 'Bearer ${await token()}',
+      'Content-Type': tipo,
+      'x-upsert': reemplazar ? 'true' : 'false',
+    });
+    req.contentLength = bytes.length;
+    try {
+      final envio = req.send();
+      const trozo = 32 * 1024;
+      for (var i = 0; i < bytes.length; i += trozo) {
+        final fin = min(i + trozo, bytes.length);
+        req.sink.add(bytes.sublist(i, fin));
+        alAvanzar?.call(fin / bytes.length);
+        await Future<void>.delayed(Duration.zero);
+      }
+      await req.sink.close();
+      final r = await http.Response.fromStream(await envio.timeout(const Duration(minutes: 5)));
+      if (r.statusCode >= 300) throw Nube._traducir(r);
+      alAvanzar?.call(1);
+    } on SocketException {
+      throw const SinConexion();
+    } on TimeoutException {
+      throw const SinConexion();
+    } on http.ClientException {
+      throw const SinConexion();
+    }
+  }
+
+  /// Borra archivos propios del almacén (no falla si no se puede: es limpieza).
+  Future<void> borrarArchivos(String bucket, List<String> rutas) async {
+    try {
+      await Nube._peticion('DELETE', '/storage/v1/object/$bucket',
+          token: await token(), cuerpo: {'prefixes': rutas});
+    } catch (_) {}
   }
 
   Future<Map<String, dynamic>> perfil() async {

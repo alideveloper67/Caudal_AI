@@ -51,8 +51,13 @@ def _traducir(r):
         datos = r.json()
     except ValueError:
         datos = {}
+    if not isinstance(datos, dict):
+        datos = {}
     texto = " ".join(str(datos.get(k, "")) for k in ("msg", "message", "error_description",
-                                                     "error", "code")).lower()
+                                                     "error", "code", "details", "hint")).lower()
+    for clave, frase in _FRASES_SOCIAL:
+        if clave in texto:
+            return ErrorNube(frase)
     if "invalid login" in texto or "invalid_grant" in texto or "invalid_credentials" in texto:
         return ErrorNube("Usuario o contraseña incorrectos.")
     if "already registered" in texto or "already exists" in texto or "user_already_exists" in texto:
@@ -63,7 +68,45 @@ def _traducir(r):
         return ErrorNube("Demasiados intentos seguidos. Espera un minuto y vuelve a probar.")
     if "refresh" in texto and ("not found" in texto or "invalid" in texto):
         return ErrorNube("La sesión guardada caducó. Vuelve a iniciar sesión.")
-    return ErrorNube(f"El servidor de cuentas respondió un error ({r.status_code}).")
+    return _por_estado(r.status_code)
+
+
+# lo que la base de datos de «Perfiles, amigos y música» contesta, dicho para personas
+_FRASES_SOCIAL = (
+    ("primero deben ser amigos", "Primero deben ser amigos: envía una solicitud y, cuando la acepten, podrán escribirse."),
+    ("espera unos dias", "Esa persona rechazó tu solicitud hace poco. Podrás volver a enviarla pasados 30 días."),
+    ("demasiadas solicitudes", "Tienes demasiadas solicitudes pendientes (el máximo es 30). Espera a que respondan o cancela alguna."),
+    ("no se puede enviar", "No se puede enviar la solicitud a esa persona."),
+    ("esa persona no existe", "Esa persona ya no existe en Caudal."),
+    ("solicitud no encontrada", "Esa solicitud ya no existe: puede que la hayan cancelado. Actualiza la lista."),
+    ("solicitud no valida", "No se puede enviar una solicitud a esa persona."),
+    ("ese perfil no es publico", "Ese perfil es privado: solo sus amigos pueden darle me gusta."),
+    ("no se puede", "No se puede hacer eso con esa persona."),
+    ("la cancion necesita una portada", "Cada canción necesita su carátula. Elige una imagen y vuelve a intentarlo."),
+    ("ya subiste 30", "Ya subiste 30 canciones, que es el máximo. Borra alguna para subir otra."),
+    ("hoy ya subiste 10", "Hoy ya subiste 10 canciones, que es el máximo por día. Sigue mañana."),
+    ("ruta no valida", "No se pudo guardar el archivo en tu carpeta. Vuelve a intentarlo."),
+    ("row-level security", "Solo puedes escribir a tus amigos. Envía una solicitud primero."),
+    ("perfil_limites", "Algo de lo que escribiste es demasiado largo o no es válido. Revisa la descripción, la frase y el artista favorito."),
+    ("mime type", "Ese formato de archivo no se puede subir. Usa mp3, m4a, aac, flac, ogg, wav o webm; y jpg, png o webp para las imágenes."),
+    ("exceeded the maximum allowed size", "El archivo pesa demasiado: el audio puede llegar a 15 MB y las imágenes a 2 MB."),
+    ("payload too large", "El archivo pesa demasiado: el audio puede llegar a 15 MB y las imágenes a 2 MB."),
+    ("resource already exists", "Ya existe un archivo con ese nombre. Vuelve a intentarlo."),
+    ("could not find the function", "Esta función todavía no está activa en el servidor de Caudal."),
+    ("pgrst202", "Esta función todavía no está activa en el servidor de Caudal."),
+    ("42703", "Esta función todavía no está activa en el servidor de Caudal."),
+    ("pgrst204", "Esta función todavía no está activa en el servidor de Caudal."),
+)
+
+
+def _por_estado(estado):
+    if estado == 413:
+        return ErrorNube("El archivo pesa demasiado: el audio puede llegar a 15 MB y las imágenes a 2 MB.")
+    if estado in (401, 403):
+        return ErrorNube("No tienes permiso para hacer eso. Cierra sesión, vuelve a entrar y prueba otra vez.")
+    if estado >= 500:
+        return ErrorNube("El servidor de Caudal tuvo un problema. Vuelve a intentarlo en un momento.")
+    return ErrorNube(f"El servidor de cuentas respondió un error ({estado}).")
 
 
 def _peticion(metodo, ruta, token=None, **kw):
@@ -71,8 +114,9 @@ def _peticion(metodo, ruta, token=None, **kw):
     if token:
         cab["Authorization"] = f"Bearer {token}"
     cab.update(kw.pop("cabeceras", {}))
+    tiempo = kw.pop("tiempo", TIEMPO)
     try:
-        return requests.request(metodo, URL + ruta, headers=cab, timeout=TIEMPO, **kw)
+        return requests.request(metodo, URL + ruta, headers=cab, timeout=tiempo, **kw)
     except requests.RequestException as e:
         raise SinConexion(_motivo_sin_conexion(e)) from e
 
@@ -173,6 +217,33 @@ def renovar(refresh_token):
     return Sesion.desde_respuesta(r.json())
 
 
+class _CuerpoConAvance:
+    """Bytes que se envían de a pedazos avisando cuánto va (para la barra de progreso).
+    Tiene `__len__`, así requests manda el tamaño exacto y no usa envío por tramos."""
+
+    def __init__(self, datos, avance=None, bloque=64 * 1024):
+        self._datos = bytes(datos)
+        self._pos = 0
+        self._avance = avance
+        self._bloque = bloque
+
+    def __len__(self):
+        return len(self._datos)
+
+    def read(self, n=-1):
+        if self._pos >= len(self._datos):
+            return b""
+        n = self._bloque if n is None or n < 0 else min(n, self._bloque)
+        trozo = self._datos[self._pos:self._pos + n]
+        self._pos += len(trozo)
+        if self._avance:
+            try:
+                self._avance(self._pos, len(self._datos))
+            except Exception:  # noqa: BLE001 - la barra no debe romper la subida
+                pass
+        return trozo
+
+
 class Sesion:
     """Tokens de una sesion abierta; se renueva sola antes de caducar."""
 
@@ -204,6 +275,32 @@ class Sesion:
         if r.status_code >= 300:
             raise _traducir(r)
         return r.json() if r.text.strip() else None
+
+    def rpc(self, nombre, **parametros):
+        """Llama a una función de la base de datos (los parámetros empiezan con p_)."""
+        return self.pedir("POST", "rpc/" + nombre, json=parametros)
+
+    # --- almacén de archivos (fotos y música)
+    def subir_archivo(self, bucket, ruta, datos, tipo, reemplazar=False, avance=None, tiempo=120):
+        """Sube bytes a /storage/v1/object/<bucket>/<ruta>. `avance(enviado, total)` se llama
+        mientras se envía (desde el hilo que sube, no desde la ventana)."""
+        cuerpo = _CuerpoConAvance(datos, avance)
+        r = _peticion("POST", f"/storage/v1/object/{bucket}/{ruta}", token=self.token(),
+                      data=cuerpo, tiempo=tiempo,
+                      cabeceras={"Content-Type": tipo, "x-upsert": "true" if reemplazar else "false",
+                                 "cache-control": "max-age=3600"})
+        if r.status_code >= 300:
+            raise _traducir(r)
+
+    def borrar_archivos(self, bucket, rutas):
+        """Borra archivos de su carpeta (los que no existan se ignoran)."""
+        rutas = [x for x in rutas if x]
+        if not rutas:
+            return
+        r = _peticion("DELETE", f"/storage/v1/object/{bucket}", token=self.token(),
+                      json={"prefixes": rutas})
+        if r.status_code >= 300:
+            raise _traducir(r)
 
     def perfil(self):
         filas = self.pedir("GET", f"perfiles?select=usuario,nombre&id=eq.{self.user_id}")

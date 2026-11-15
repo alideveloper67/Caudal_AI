@@ -39,6 +39,15 @@ class Descarga(QThread):
             self.fallo.emit(f"No se pudo bajar la actualizacion: {str(e)[:110]}")
 
 
+def mostrar_aviso(novedad, padre=None):
+    """Avisa de una versión nueva: con el aviso grande si la release lo pide
+    (notas que empiezan con `[grande]`), con el normal si no."""
+    if novedad.get("grande"):
+        from .novedades_grandes import NovedadesGrandes
+        return NovedadesGrandes(padre, novedad).exec()
+    return DialogoActualizacion(novedad, padre).exec()
+
+
 class DialogoActualizacion(QDialog):
     """Cuenta que hay version nueva y la instala si el usuario quiere."""
 

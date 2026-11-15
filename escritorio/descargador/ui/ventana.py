@@ -7,14 +7,14 @@ import sys
 from PySide6.QtCore import QAbstractNativeEventFilter, QByteArray, QEvent, QObject, QPoint, Qt, QTimer
 from PySide6.QtGui import QAction, QGuiApplication, QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QAbstractSpinBox, QApplication, QComboBox, QFrame, QHBoxLayout,
-                               QLineEdit, QMenu, QMessageBox, QPlainTextEdit, QPushButton, QSplitter,
+                               QLabel, QLineEdit, QMenu, QMessageBox, QPlainTextEdit, QPushButton, QSplitter,
                                QStackedWidget, QSystemTrayIcon, QTextEdit, QVBoxLayout, QWidget)
 
 from .. import catalogo, redes, version
 from ..config import APP_NOMBRE
 from ..hilos import en_segundo_plano
 from . import iconos
-from .actualizador import Buscador, DialogoActualizacion
+from .actualizador import Buscador, mostrar_aviso
 from .barra_reproduccion import BarraReproduccion
 from .componentes import Aviso, BotonIcono
 from .estilos import C, hoja
@@ -157,6 +157,9 @@ class Ventana(QWidget):
                                   "se puede reproducir. Las descargas sí funcionan.\n\n"
                                   + (self.r.motivo_no_disponible or "")))
         self.buscador_version = None
+        self._aviso_grande = None
+        self._novedad_pendiente = None
+        QTimer.singleShot(2500, self._avisar_novedades)
         QTimer.singleShot(6000, lambda: self.buscar_version(True))
         QApplication.instance().installEventFilter(_Teclas(self))
         self.teclas_multimedia = TeclasMultimedia(self)
@@ -178,6 +181,17 @@ class Ventana(QWidget):
 
         self.lateral = PanelLateral(self.ctx)
         self.divisor.addWidget(self.lateral)
+        # la versión, siempre a la vista y sin estorbar: abajo del panel izquierdo
+        # (se queda en la vista de video; en pantalla completa se esconde con el panel)
+        self.et_version = QLabel(f"Caudal {version.VERSION}")
+        self.et_version.setObjectName("version_visible")
+        self.et_version.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self.et_version.setFocusPolicy(Qt.NoFocus)
+        self.et_version.setAccessibleName(f"Versión de Caudal {version.VERSION}")
+        self.et_version.setStyleSheet(
+            f"color:{C['texto3']};background:transparent;font-size:10px;"
+            "padding:0 0 3px 14px;")
+        self.lateral.layout().addWidget(self.et_version)
 
         self.centro = QFrame()
         self.centro.setObjectName("panel_centro")
@@ -234,6 +248,9 @@ class Ventana(QWidget):
         self.campo.addAction(self.icono_lupa, QLineEdit.LeadingPosition)
         h.addWidget(self.campo, 1)
         h.addStretch(1)
+        self.bt_perfil = BotonIcono("usuario", 19, "Mi perfil", 36)
+        self.bt_perfil.clicked.connect(lambda: self.navegar({"pagina": "perfil"}))
+        h.addWidget(self.bt_perfil)
         self.bt_mensajes = BotonIcono("chat", 19, "Mensajes", 36)
         self.bt_mensajes.clicked.connect(lambda: self.navegar({"pagina": "mensajes"}))
         h.addWidget(self.bt_mensajes)
@@ -406,6 +423,13 @@ class Ventana(QWidget):
             w.volver.connect(self.atras_desde_video)
             w.pidio_mini.connect(self.alternar_mini)
             w.pidio_completa.connect(self.alternar_completa)
+        if w is None and pag == "mezclador":
+            from .paginas.mezclador import PaginaMezclador
+            w = PaginaMezclador(self.ctx)
+        if w is None:
+            # perfiles, directorio, amigos, subir música y comunidad
+            from .paginas.perfil_rutas import fabricar
+            w = fabricar(self.ctx, destino)
         if w is None:
             from .paginas.inicio import PaginaInicio
             w = PaginaInicio(self.ctx)
@@ -479,6 +503,7 @@ class Ventana(QWidget):
         self.bt_atras.setEnabled(self.indice > 0)
         self.bt_adelante.setEnabled(self.indice < len(self.historia) - 1)
         self.bt_resumen.set_activo(pag == "resumen", punto=False)
+        self.bt_perfil.set_activo(pag == "perfil" and not destino.get("usuario"), punto=False)
         self.bt_mensajes.set_activo(pag == "mensajes" or self._sin_leer > 0, punto=self._sin_leer > 0)
         self.bt_descargas.set_activo(pag == "descargas", punto=False)
         self.bt_ajustes.set_activo(pag == "ajustes", punto=False)
@@ -913,7 +938,31 @@ class Ventana(QWidget):
             if not callado:
                 self.aviso.mostrar(f"Tienes la versión {version.VERSION}, la más reciente.")
             return
-        DialogoActualizacion(novedad, self).exec()
+        if self._aviso_grande is not None and self._aviso_grande.isVisible():
+            # no se apilan dos avisos: este sale cuando se cierre el de novedades
+            self._novedad_pendiente = novedad
+            return
+        mostrar_aviso(novedad, self)
+
+    def _avisar_novedades(self):
+        """Una sola vez por versión, y sin tocar la música."""
+        if self.en_completa or self._saliendo:
+            QTimer.singleShot(20000, self._avisar_novedades)
+            return
+        from .novedades_grandes import mostrar_si_toca
+        try:
+            self._aviso_grande = mostrar_si_toca(self)
+        except Exception:  # noqa: BLE001 - un aviso nunca debe romper la app
+            self._aviso_grande = None
+            return
+        if self._aviso_grande is not None:
+            self._aviso_grande.finished.connect(self._tras_novedades)
+
+    def _tras_novedades(self, _resultado=0):
+        self._aviso_grande = None
+        pendiente, self._novedad_pendiente = self._novedad_pendiente, None
+        if pendiente:
+            QTimer.singleShot(400, lambda: mostrar_aviso(pendiente, self))
 
     # ------------------------------------------------------------ arrastrar y soltar
 
@@ -1033,8 +1082,66 @@ class Ventana(QWidget):
                 QSystemTrayIcon.Information, 4000)
 
     def reabrir_con_aspecto(self):
-        """«Aplicar ahora» en Ajustes › Aspecto: Caudal se reabre con los colores
-        nuevos y la música sigue donde iba (y en la misma pantalla de Ajustes)."""
+        """«Aplicar ahora» en Ajustes › Aspecto: los colores nuevos se ven al momento,
+        sin cerrar Caudal y sin cortar la música. Si algo fallara, se reabre como antes."""
+        try:
+            self._recolorear_en_vivo()
+        except Exception:  # noqa: BLE001
+            self._reabrir_por_reinicio()
+
+    def _recolorear_en_vivo(self):
+        import re
+        from PySide6.QtWidgets import QApplication
+        from . import iconos
+        from .estilos import C, aplicar_aspecto, hoja
+        viejo = dict(C)
+        aplicar_aspecto(self.ajustes["acento"], self.ajustes["fondo"])
+        # cada color de la paleta vieja pasa a su color nuevo en todas las hojas de estilo
+        mapa = {}
+        for k, v in viejo.items():
+            n = C.get(k)
+            if isinstance(v, str) and isinstance(n, str) and v.startswith("#") \
+                    and n.lower() != v.lower():
+                mapa.setdefault(v.lower(), n)
+        iconos._CACHE.clear()
+        self.setStyleSheet(hoja(iconos.flechas_qss()))
+        if mapa:
+            patron = re.compile("(?:" + "|".join(re.escape(k) for k in mapa) + ")(?![0-9a-fA-F])",
+                                re.IGNORECASE)
+            for w in QApplication.allWidgets():
+                ss = w.styleSheet()
+                if ss and w is not self:
+                    nuevo = patron.sub(lambda m: mapa[m.group(0).lower()], ss)
+                    if nuevo != ss:
+                        w.setStyleSheet(nuevo)
+        # las paginas se rehacen con la paleta nueva (menos el video, que tiene su ventana nativa)
+        actual = self.historia[self.indice][0] if 0 <= self.indice < len(self.historia) else None
+        en_video = bool(actual) and actual.get("pagina") == "video"
+        conservar = self.singletons.get("video")
+        for i, (d, w) in enumerate(self.historia):
+            if w is not None and w is not conservar:
+                self.pila.removeWidget(w)
+                w.deleteLater()
+                self.historia[i] = (d, None)
+        for nombre, w in list(self.singletons.items()):
+            if w is not conservar:
+                if self.pila.indexOf(w) >= 0:
+                    self.pila.removeWidget(w)
+                w.deleteLater()
+                self.singletons.pop(nombre, None)
+        if actual and not en_video:
+            w = self._fabricar(actual)
+            self.historia[self.indice] = (actual, w)
+            self._mostrar(actual, w)
+        for w in QApplication.allWidgets():
+            w.update()
+        try:
+            self.aviso.mostrar("Listo: Caudal ya tiene sus colores nuevos")
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _reabrir_por_reinicio(self):
+        """Plan B: Caudal se reabre con los colores nuevos y la música sigue donde iba."""
         import time as _t
         sonando = self.r.estado == "sonando"
         try:

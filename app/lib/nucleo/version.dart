@@ -20,7 +20,7 @@ import 'package:path_provider/path_provider.dart';
 import 'plataforma.dart';
 
 /// Version que lleva esta copia. Sube tambien la de pubspec.yaml al publicar.
-const String versionApp = '2.1.3';
+const String versionApp = '2.2.0';
 
 /// Instalada desde una tienda (variante "play" de Android): las versiones
 /// nuevas llegan por la tienda, no por la propia app.
@@ -73,6 +73,40 @@ class Novedad {
 
   /// Lo que hay que abrir para ver o bajar la version: en iPhone, su pagina.
   String get enlace => sePuedeInstalar ? apk : pagina;
+
+  /// La release se marco como grande (primera linea de sus notas: `[grande]`):
+  /// en vez del aviso normal sale la pantalla de novedades grande.
+  bool get esGrande => notasGrandes(notas);
+
+  /// Las notas sin la marca `[grande]`, listas para leerse.
+  String get notasVisibles => quitarMarcaGrande(notas);
+}
+
+/// Marca que pone una release en la primera linea de sus notas para pedir el
+/// aviso grande.
+const String marcaGrande = '[grande]';
+
+/// ¿Las notas de la release empiezan con la linea `[grande]`?
+bool notasGrandes(String notas) => notas.trimLeft().toLowerCase().startsWith(marcaGrande);
+
+/// Quita la linea `[grande]` del principio de las notas (si esta).
+String quitarMarcaGrande(String notas) {
+  final t = notas.trimLeft();
+  if (!notasGrandes(t)) return notas.trim();
+  return t.substring(marcaGrande.length).trim();
+}
+
+/// Desde que version existe la pantalla de novedades grande de esta edicion.
+/// Sale una sola vez al pasar a ella (o a un parche suyo), no con cada parche.
+const String edicionNovedades = '2.2.0';
+
+/// ¿Toca enseñar las novedades grandes? [vista] es la ultima version en la
+/// que ya se enseñaron (null si nunca). Solo cuando la version que corre
+/// llega a la edicion y la vista es anterior a ella.
+bool tocaNovedades(String? vista, String actual, {String edicion = edicionNovedades}) {
+  if (hayNovedad(actual, edicion)) return false;     // aun no es la edicion
+  if (vista == null || vista.trim().isEmpty) return true;
+  return hayNovedad(vista, edicion);                 // la vista es anterior
 }
 
 /// '1.10.0' -> [1, 10, 0]. Compara numero a numero, no como texto: si no,

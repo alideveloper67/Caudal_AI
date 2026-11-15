@@ -11,8 +11,11 @@ import '../../nucleo/version.dart';
 import '../comunes.dart';
 import '../plataforma.dart';
 import '../servicios.dart';
+import '../novedades_grandes.dart';
 import '../tema.dart';
 import 'aspecto_pagina.dart';
+import 'mezclador_ajustes.dart';
+import 'mezclador_pagina.dart';
 import 'privacidad_pagina.dart';
 import 'sonido.dart';
 
@@ -262,6 +265,13 @@ class _AjustesPaginaState extends State<AjustesPagina> {
               style: estiloSecundario),
           value: a.sino('transicion_dj'), onChanged: (v) => _sino('transicion_dj', v),
         ),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: Esp.lado),
+          child: MezclaDjControles(
+            alAbrirMezclador: () => Navigator.of(context)
+                .push(MaterialPageRoute(builder: (_) => const MezcladorPagina())),
+          ),
+        ),
         SwitchListTile.adaptive(
           title: const Text('Apagar la música poco a poco'),
           subtitle: const Text('Con el temporizador para dormir, el volumen baja en los últimos 30 segundos',
@@ -369,12 +379,17 @@ class _AjustesPaginaState extends State<AjustesPagina> {
 
 /// La version nueva. En Android se baja el APK y se abre el instalador; en
 /// iPhone (Apple no deja instalar desde dentro) se abre la pagina de descarga.
-Future<void> mostrarActualizacion(BuildContext context, Novedad n) => showModalBottomSheet<void>(
-      context: context,
-      useRootNavigator: true,
-      isScrollControlled: true,
-      builder: (_) => _HojaVersion(n: n),
-    );
+///
+/// Si la release lleva `[grande]` al inicio de sus notas, en vez de esta hoja
+/// sale la pantalla grande de novedades con «Actualizar ahora».
+Future<void> mostrarActualizacion(BuildContext context, Novedad n) => n.esGrande
+    ? NovedadesGrandes.mostrar(context, actualizacion: n)
+    : showModalBottomSheet<void>(
+        context: context,
+        useRootNavigator: true,
+        isScrollControlled: true,
+        builder: (_) => _HojaVersion(n: n),
+      );
 
 class _HojaVersion extends StatefulWidget {
   const _HojaVersion({required this.n});

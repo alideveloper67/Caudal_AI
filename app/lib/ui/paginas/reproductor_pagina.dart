@@ -19,6 +19,8 @@ import '../reproductor/linea_karaoke.dart';
 import '../reproductor/portada_deslizable.dart';
 import '../servicios.dart';
 import '../tema.dart';
+import 'mezclador_ajustes.dart';
+import 'mezclador_pagina.dart';
 import 'sonido.dart';
 
 class ReproductorPagina extends StatefulWidget {
@@ -329,6 +331,18 @@ class _ReproductorPaginaState extends State<ReproductorPagina> {
                           tooltip: 'Temporizador',
                           icon: Icon(Icons.bedtime_outlined, color: r.restanteApagado != null ? C.acento : C.texto),
                           onPressed: () => _temporizador(context, r),
+                        ),
+                        ListenableBuilder(
+                          listenable: s.ajustes,
+                          builder: (_, _) => IconButton(
+                            tooltip: 'Mezcla DJ',
+                            icon: Icon(Icons.album_rounded, color: s.ajustes.sino('mezcla_dj') ? C.acento : C.texto),
+                            onPressed: () => mostrarMezclaDj(context, alAbrirMezclador: () {
+                              // la mesa se abre en la pestaña: antes se cierra el reproductor grande
+                              Navigator.of(context, rootNavigator: true).maybePop();
+                              s.abrirEnPestana?.call(const MezcladorPagina());
+                            }),
+                          ),
                         ),
                         IconButton(
                           tooltip: 'Sonido',

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
@@ -7,6 +8,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 import '../nucleo/ajustes.dart';
 import '../nucleo/catalogo.dart';
 import '../nucleo/coleccion.dart';
+import '../nucleo/mezcla_dj.dart';
 import '../nucleo/recomendador.dart';
 import '../nucleo/red.dart';
 import '../nucleo/streams.dart';
@@ -210,6 +212,21 @@ class Reproductor extends ChangeNotifier {
 
   bool get _dj => ajustes.sino('transicion_dj');
 
+  /// «Mezcla DJ»: enlaza las canciones con un cambio largo y de graves.
+  bool get _mezclaDj => ajustes.sino('mezcla_dj');
+
+  /// Los pasos del set de la mesa del Mezclador que suena ahora: cada pista
+  /// de [secuencia] (por identidad) con como se pasa de ella a la siguiente.
+  final Map<Json, PasoMezcla> _pasosSet = HashMap<Json, PasoMezcla>.identity();
+  bool _cargandoSet = false;
+
+  /// Una prueba de un paso: al terminar el cambio se pausa sola.
+  bool _probando = false;
+  String _resolviendoSiguiente = '';
+
+  /// ¿Suena ahora un set de la mesa del Mezclador?
+  bool get sonandoSet => actual != null && _pasosSet.containsKey(actual);
+
   // ------------------------------------------------------------ sonido
 
   /// En iPhone no hay limitador ni normalizador: el super volumen sube sin
@@ -373,8 +390,12 @@ class Reproductor extends ChangeNotifier {
   // ------------------------------------------------------------ cola
 
   Future<void> reproducirLista(List<Json> pistas, {int inicio = 0, Json? contexto,
-      bool? aleatorio, String? modo}) async {
+      bool? aleatorio, String? modo, Duration desde = Duration.zero}) async {
     if (pistas.isEmpty) return;
+    if (!_cargandoSet) {
+      _pasosSet.clear();
+      _probando = false;
+    }
     if (aleatorio != null) {
       this.aleatorio = aleatorio;
       await ajustes.poner('aleatorio', aleatorio, avisar: false);
@@ -392,10 +413,56 @@ class Reproductor extends ChangeNotifier {
       pos = inicio;
     }
     if (modo != null) this.modo = modo;
-    await _cargar(secuencia[pos]);
+    await _cargar(secuencia[pos], inicio: desde);
+  }
+
+  /// Reproduce un set de la mesa del Mezclador: las canciones en ese orden y,
+  /// entre cada dos, el cambio que pide su paso (cuando entra la siguiente,
+  /// cuanto dura y si cambian los graves). Empieza en [desde] de la primera.
+  Future<void> reproducirSet(List<PasoMezcla> pasos, {String titulo = 'Tu mezcla',
+      Duration desde = Duration.zero}) async {
+    if (pasos.isEmpty) return;
+    final copias = [for (final p in pasos) <String, dynamic>{...p.pista}];
+    _cargandoSet = true;
+    try {
+      _pasosSet.clear();
+      for (final (i, c) in copias.indexed) {
+        _pasosSet[c] = pasos[i];
+      }
+      proximas.clear();
+      await reproducirLista(copias,
+          contexto: {'tipo': 'mezcla', 'id': titulo, 'titulo': titulo},
+          aleatorio: false, modo: 'audio', desde: desde);
+    } finally {
+      _cargandoSet = false;
+    }
+  }
+
+  /// Prueba un solo paso: empieza unos segundos antes del cambio de [paso] y
+  /// deja oir como entra [siguiente]. Al acabar el cambio se pausa sola.
+  Future<void> probarPaso(PasoMezcla paso, Json siguiente) async {
+    if (paso.duracionPista <= 0) {
+      return _aviso('No se sabe cuánto dura esa canción, así que no se puede probar el cambio.');
+    }
+    // el enlace de la siguiente, listo antes de empezar, para que el cambio no se pierda
+    final vid = '${siguiente['video_id'] ?? ''}';
+    if (vid.isNotEmpty && !coleccion.estaDescargada(siguiente)) {
+      try {
+        await streams.resolver(vid, video: false, calidad: ajustes.texto('calidad_audio'),
+            codec: _codecVideo);
+      } catch (_) {}
+    }
+    final desde = max(0.0, paso.inicioDelCambio - 6);
+    await reproducirSet([
+      paso,
+      PasoMezcla(pista: siguiente),
+    ], titulo: 'Prueba del cambio', desde: Duration(seconds: desde.round()));
+    _probando = true;
   }
 
   Future<void> reproducirPista(Json pista, {Json? contexto, String? modo, bool conRadio = true}) async {
+    _pasosSet.clear();
+    _probando = false;
     original = [pista];
     secuencia = [pista];
     pos = 0;
@@ -592,6 +659,11 @@ class Reproductor extends ChangeNotifier {
     }
     final objetivo = _avanzar();
     if (objetivo == null) {
+      if (sonandoSet) {
+        // se acabo el set: no se le pega una radio detras
+        await detener();
+        return;
+      }
       if (ajustes.sino('autoplay') && '${actual!['video_id'] ?? ''}'.isNotEmpty) {
         _pedirRadio(actual!, ySeguir: true);
       } else {
@@ -893,7 +965,7 @@ class Reproductor extends ChangeNotifier {
     streams.resolver(vid, video: modo == 'video',
         calidad: modo == 'video' ? ajustes.texto('calidad_video') : ajustes.texto('calidad_audio'),
         codec: _codecVideo).catchError((_) => Fuente(url: ''));
-    if (ajustes.sino('autoplay') && repetir == 'no' && proximas.isEmpty &&
+    if (ajustes.sino('autoplay') && repetir == 'no' && proximas.isEmpty && !sonandoSet &&
         secuencia.length - pos <= 3 && '${actual?['video_id'] ?? ''}'.isNotEmpty) {
       _pedirRadio(actual!);
     }
@@ -948,7 +1020,19 @@ class Reproductor extends ChangeNotifier {
     // con "al terminar la cancion" no se funde con la siguiente: se apaga
     if (modo == 'audio' && _fundido == null && dur > 20 && repetir != 'una' && !_apagarAlFinal &&
         estado == EstadoRepro.sonando) {
-      if (_dj) {
+      final paso = _pasosSet[actual];
+      if (paso != null) {
+        // la mesa del Mezclador: el cambio que pidio el usuario para este paso
+        if (_mirarSiguiente() != null && finDeMusica(_tramosDj, dur) - seg <= paso.entraEfectivo) {
+          _empezarFundido(largo: paso.fundidoEfectivo, graves: paso.graves);
+        }
+      } else if (_mezclaDj) {
+        // «Mezcla DJ»: entra la siguiente `largo` segundos antes del final, con cambio de graves
+        final largo = segundosDj(ajustes.entero('mezcla_dj_seg')).toDouble();
+        if (dur > largo * 2 + 4 && finDeMusica(_tramosDj, dur) - seg <= largo) {
+          _empezarFundido(largo: largo, graves: ajustes.sino('mezcla_dj_graves'));
+        }
+      } else if (_dj) {
         final largo = duracionFundidoDj(cf);
         if (finDeMusica(_tramosDj, dur) - seg <= largo) {
           _empezarFundido(largo: largo);
@@ -1102,7 +1186,14 @@ class Reproductor extends ChangeNotifier {
         .whenComplete(() => _midiendo.remove(m));
   }
 
-  Future<void> _empezarFundido({double? largo}) async {
+  /// Pone en un motor el sonido de siempre mas, si se pide, un recorte de graves.
+  Future<void> _ponerAf(_Motor m, String graves) async {
+    try {
+      await m.player.setProperty('af', sumarFiltro(cadenaFiltros(), graves));
+    } catch (_) {}
+  }
+
+  Future<void> _empezarFundido({double? largo, bool graves = false}) async {
     final sig = _mirarSiguiente();
     if (sig == null) return;
     Fuente? f;
@@ -1115,7 +1206,16 @@ class Reproductor extends ChangeNotifier {
       f = streams.enCache('${sig['video_id']}', video: false, calidad: ajustes.texto('calidad_audio'),
           codec: _codecVideo);
     }
-    if (f == null) return;
+    if (f == null) {
+      // la siguiente aun no tiene enlace: se pide ya para el proximo intento
+      final vid = '${sig['video_id'] ?? ''}';
+      if (vid.isNotEmpty && _resolviendoSiguiente != vid) {
+        _resolviendoSiguiente = vid;
+        streams.resolver(vid, video: false, calidad: ajustes.texto('calidad_audio'), codec: _codecVideo)
+            .catchError((_) => Fuente(url: ''));
+      }
+      return;
+    }
     final saliente = _activo;
     final entrante = _otro;
     final objetivoPista = _avanzar();
@@ -1127,10 +1227,14 @@ class Reproductor extends ChangeNotifier {
     final durSig = ((objetivoPista['duracion'] as num?) ?? 0).toDouble();
     // DJ: la siguiente entra donde empieza su musica, sin la intro muda
     final inicio = dj ? inicioDeMusica(tramos, durSig) : 0.0;
+    final conGraves = graves && !_sinFiltros;
     _fundido = {'saliente': saliente, 'entrante': entrante, 'inicio': DateTime.now(),
-      'dur': largo ?? ajustes.entero('crossfade').toDouble(), 'dj': dj, 'saltos': 0};
+      'dur': largo ?? ajustes.entero('crossfade').toDouble(), 'dj': dj, 'saltos': 0,
+      'graves': conGraves, 'nivS': 0, 'nivE': dbGravesCortados};
     _silencioEntrada.reiniciar();
     _silencioFinal.reiniciar();
+    // cambio de graves: la que entra empieza sin graves
+    if (conGraves) await _ponerAf(entrante, filtroGraves(dbGravesCortados));
     await entrante.abrir(f, volumen: 0, velocidad: velocidad,
         inicio: Duration(milliseconds: (inicio * 1000).round()));
     fuente = f;
@@ -1168,22 +1272,48 @@ class Reproductor extends ChangeNotifier {
         });
       }
     }
+    final saliente = f['saliente'] as _Motor;
     entrante.player.setVolume(_salida * sin(avance * pi / 2));
-    (f['saliente'] as _Motor).player.setVolume(_salida * cos(avance * pi / 2));
+    saliente.player.setVolume(_salida * cos(avance * pi / 2));
+    if (f['graves'] == true && !_sinFiltros) {
+      // el cambio de graves: cada motor, en saltos de 6 dB (no a cada fotograma)
+      final nS = dbGraves(avance, entrante: false);
+      final nE = dbGraves(avance, entrante: true);
+      if (nS != f['nivS']) {
+        f['nivS'] = nS;
+        _ponerAf(saliente, filtroGraves(nS));
+      }
+      if (nE != f['nivE']) {
+        f['nivE'] = nE;
+        _ponerAf(entrante, filtroGraves(nE));
+      }
+    }
     if (avance >= 1) {
-      _apagar(f['saliente'] as _Motor);
+      _apagar(saliente).whenComplete(() {
+        if (f['graves'] == true) _ponerAf(saliente, '');
+      });
       _fundido = null;
       _pasosFundido?.cancel();
       _activo.player.setVolume(_salida);
+      if (_probando) {
+        // era una prueba: unos segundos de la que entra y se pausa
+        _probando = false;
+        Timer(const Duration(seconds: 8), () {
+          if (_pasosSet.isNotEmpty && _fundido == null) pausar();
+        });
+      }
     }
   }
 
   void _cortarFundido() {
     final f = _fundido;
     if (f == null) return;
-    _apagar(f['saliente'] as _Motor);
+    _apagar(f['saliente'] as _Motor).whenComplete(() {
+      if (f['graves'] == true) _ponerAf(f['saliente'] as _Motor, '');
+    });
     _fundido = null;
     _pasosFundido?.cancel();
+    if (f['graves'] == true) _ponerAf(f['entrante'] as _Motor, '');
     _activo.player.setVolume(_salida);
   }
 

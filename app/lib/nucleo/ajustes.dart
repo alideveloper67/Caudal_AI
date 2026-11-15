@@ -55,6 +55,11 @@ class Ajustes extends ChangeNotifier {
     'descarga_inteligente_gb': 5, // tope de espacio, en GB
     // fundido que recorta los silencios del final y del inicio
     'transicion_dj': true,
+    // «Mezcla DJ»: enlaza las canciones como un DJ (la siguiente entra antes del
+    // final, con cambio de graves); duracion del cambio de 4 a 16 s
+    'mezcla_dj': false,
+    'mezcla_dj_seg': 8,
+    'mezcla_dj_graves': true,
     // el temporizador para dormir baja el volumen los ultimos 30 s
     'apagado_suave': true,
   };

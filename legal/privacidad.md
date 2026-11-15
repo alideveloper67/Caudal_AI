@@ -1,6 +1,6 @@
 # Política de privacidad de Caudal
 
-Versión 2026-11-15 · Vigente desde el 15 de noviembre de 2026
+Versión 2026-11-15.2 · Vigente desde el 15 de noviembre de 2026
 
 Esta política explica qué datos usa Caudal (la app para Android y Windows), para qué, con quién se comparten y cómo puedes decidir sobre ellos. Está escrita para cumplir la Ley N.º 29733 de Protección de Datos Personales del Perú y su reglamento, y las normas de Google Play.
 
@@ -26,6 +26,13 @@ El responsable de tus datos es el titular de Caudal. Puedes contactarnos en {{CO
 - Aun así, te pedimos tu fecha de nacimiento, tu país y que aceptes estos textos la primera vez que entras.
 - Puedes quitar el acceso de Caudal a tu cuenta de Google cuando quieras en myaccount.google.com/permissions.
 
+**Si completas tu perfil, haces amigos o subes música**
+- Tu foto de perfil, tu descripción, una frase, tu canción, artista y géneros favoritos y el color de tu perfil.
+- Tus amistades: las solicitudes que envías y recibes, las personas a las que bloqueas y los me gusta que das y recibes.
+- La música que subes (el audio, su carátula, el título, el artista y el álbum) y cuántas veces se escucha.
+- Si haces **público** tu perfil, otras personas mayores de 18 años de Caudal podrán ver tu usuario, tu nombre, tu foto, tu descripción, tu canción y artista favoritos, tus me gusta, tu música subida y, si lo permites, tus artistas más escuchados del mes y tus insignias. Puedes hacerlo privado cuando quieras. Las personas menores de 18 años no pueden tener el perfil público ni aparecen en el directorio.
+- La foto de perfil, las carátulas y las canciones que subes se guardan en el almacén de archivos de Supabase y se pueden abrir con su enlace directo.
+
 **Los que se generan al usar Caudal**
 - Tu biblioteca: canciones que te gustan, tus listas, lo que guardas y tus ajustes.
 - Tu historial de escuchas: qué canción sonó, cuándo y desde dónde (un álbum, una lista...). Se guarda un historial limitado, no infinito.
@@ -44,6 +51,7 @@ El responsable de tus datos es el titular de Caudal. Puedes contactarnos en {{CO
 - **Para que Caudal funcione**: entrar a tu cuenta, guardar tu biblioteca y tenerla igual en todos tus dispositivos.
 - **Para recomendarte música**: los Mixes, «Descubre para ti», «Canciones similares» y la «Máquina del tiempo» se calculan con tu historial.
 - **Para el chat y la «Mezcla con un amigo»**: tus mensajes solo los ven las dos personas del chat. La mezcla usa lo que más escucháis los dos y solo la pueden crear las personas de ese chat.
+- **Para tu perfil, tus amigos y la comunidad**: mostrar tu perfil a quien tú decidas, enviar y recibir solicitudes de amistad, contar los me gusta y mostrar la música que subes a la comunidad.
 - **Para estadísticas anónimas**, solo si das tu permiso (punto 5).
 
 La base para usar tus datos es tu consentimiento y que son necesarios para darte el servicio que pides.
@@ -52,7 +60,7 @@ La base para usar tus datos es tu consentimiento y que son necesarios para darte
 
 Para funcionar, Caudal se apoya en estos servicios. Algunos están fuera del Perú (por ejemplo, en Estados Unidos), por lo que hay transferencia internacional de datos; solo usamos proveedores con medidas de seguridad adecuadas:
 
-- **Supabase** (cuentas y base de datos): guarda tu cuenta, tu biblioteca, tu historial y tus mensajes.
+- **Supabase** (cuentas, base de datos y almacén de archivos): guarda tu cuenta, tu biblioteca, tu historial, tus mensajes, tus amistades, tu foto de perfil y la música que subes.
 - **Google (Acceso con Google)**: solo si eliges entrar con tu cuenta de Google; ver punto 2.
 - **YouTube / YouTube Music** (Google): de ahí sale la música y los videos. Al reproducir o buscar, tu dispositivo se conecta con ellos.
 - **LRCLIB**: letras de canciones (se envía el título y el artista).
@@ -81,7 +89,8 @@ Cómo te protegemos:
 ## 6. Cuánto tiempo los guardamos
 
 - Mientras tengas tu cuenta.
-- Si borras tu cuenta, se borra todo lo asociado a ella (biblioteca, historial, ajustes y mensajes) de forma inmediata y definitiva.
+- Si borras tu cuenta, se borra todo lo asociado a ella (biblioteca, historial, ajustes, mensajes, amistades, me gusta, foto de perfil y música subida) de forma inmediata y definitiva.
+- Si borras una canción que subiste, deja de estar disponible en ese momento.
 - Lo que está solo en tu dispositivo se borra al desinstalar la app.
 
 ## 7. Seguridad

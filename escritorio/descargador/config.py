@@ -145,6 +145,11 @@ DEFECTOS = {
     "descarga_inteligente_gb": 5,    # hasta cuantos GB
     "transicion_dj": True,           # recortar silencios del final y del inicio al pasar
     "apagado_suave": True,           # el temporizador baja el volumen en los ultimos 30 s
+    # --- mezcla DJ y aviso de novedades (solo de este equipo)
+    "mezcla_dj": False,              # enlazar las canciones como un DJ (entra antes del final)
+    "mezcla_dj_seg": 8,              # segundos de mezcla, de 4 a 16
+    "mezcla_dj_graves": True,        # cambio de graves: los graves de una cancion ceden a los de la otra
+    "version_novedades_vista": "",   # ultima version cuyo aviso de novedades grande ya se vio
 }
 
 

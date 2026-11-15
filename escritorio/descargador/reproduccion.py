@@ -19,7 +19,7 @@ import time
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
-from . import catalogo, mpv_carga
+from . import catalogo, mezcla_dj, mpv_carga
 from .hilos import en_segundo_plano
 
 FRECUENCIAS_EQ = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]
@@ -536,6 +536,8 @@ class Reproductor(QObject):
 
         self._bordes = {}                 # clave de pista -> (inicio, fin) de la musica
         self._salto_dj = -1               # gen en la que ya se salto el silencio final
+        self.plan_mezcla = {}             # clave de pista -> paso del Mezclador hacia la siguiente
+        self._prueba = None               # prueba de un paso del Mezclador en marcha
 
         self._pasos_fundido = QTimer(self)
         self._pasos_fundido.setInterval(50)
@@ -670,10 +672,13 @@ class Reproductor(QObject):
 
     # ------------------------------------------------------------ cola
 
-    def reproducir_lista(self, pistas, inicio=0, contexto=None, aleatorio=None, modo=None):
+    def reproducir_lista(self, pistas, inicio=0, contexto=None, aleatorio=None, modo=None,
+                         plan=None):
         pistas = [p for p in pistas if p]
         if not pistas:
             return
+        self.plan_mezcla = dict(plan or {})
+        self._prueba = None
         if aleatorio is not None:
             self.aleatorio = bool(aleatorio)
             self.ajustes["aleatorio"] = self.aleatorio
@@ -694,10 +699,49 @@ class Reproductor(QObject):
         self._cargar(self.secuencia[self.pos])
         self.cola_cambio.emit()
 
+    def reproducir_set(self, pistas, pasos, nombre="Mezcla"):
+        """Suena un set del Mezclador: en el orden dado y con los pasos a medida."""
+        pistas = [p for p in pistas if p]
+        if not pistas:
+            return
+        plan = mezcla_dj.plan_de_set(pistas, mezcla_dj.pasos_para(pistas, pasos))
+        self.reproducir_lista(pistas, 0, {"tipo": "mezcla", "id": nombre, "titulo": nombre,
+                                          "miniatura": pistas[0].get("miniatura") or ""},
+                              aleatorio=False, modo="audio", plan=plan)
+
+    def probar_paso(self, a, b, paso):
+        """Suena solo la unión de dos canciones: arranca poco antes de que empiece a
+        entrar la segunda y se calla unos segundos después de que haya entrado."""
+        if not a or not b:
+            return
+        paso = mezcla_dj.normalizar_paso(paso, a.get("duracion") or 0)
+        clave = str(a.get("clave") or a.get("video_id") or "")
+        self.plan_mezcla = {clave: paso} if clave else {}
+        self._prueba = {"b": b, "paso": paso}
+        self.aleatorio = False
+        self.original = [a, b]
+        self.secuencia = [a, b]
+        self.pos = 0
+        self.contexto = {"tipo": "mezcla", "id": "prueba", "titulo": "Prueba de mezcla"}
+        self._poner_modo("audio")
+        self._cargar(a, inicio=mezcla_dj.inicio_de_prueba(a.get("duracion") or 0, paso))
+        self.cola_cambio.emit()
+
+    def _fin_de_prueba(self, prueba):
+        if self._prueba is not prueba:
+            return
+        self._prueba = None
+        self.plan_mezcla = {}
+        if self.estado == "sonando":
+            self.pausar()
+            self.aviso.emit("Fin de la prueba de la mezcla")
+
     def reproducir_pista(self, pista, contexto=None, modo=None, con_radio=True):
         """Una cancion suelta: suena y detras viene su radio, como en YouTube Music."""
         if not pista:
             return
+        self.plan_mezcla = {}
+        self._prueba = None
         ctx = contexto or {"tipo": "radio", "id": pista.get("video_id") or pista.get("clave"),
                            "titulo": f"Radio de {pista.get('titulo', '')}"}
         self.original = [pista]
@@ -1371,10 +1415,9 @@ class Reproductor(QObject):
         if dj:
             self._vigilar_final_dj(m)
         elif (self.modo == "audio" and not self._fundido and not self._apagar_al_final
-                and int(self.ajustes["crossfade"] or 0) > 0
                 and self._duracion > 20 and self.repetir != "una"
-                and self._duracion - self._posicion <= int(self.ajustes["crossfade"])
-                and self.estado == "sonando"):
+                and self.estado == "sonando"
+                and 0 < self.config_fundido()[0] >= self._duracion - self._posicion):
             self._empezar_fundido()
         if time.time() - self._ultimo_guardado > 15:
             self._guardar_sesion_pronto()
@@ -1541,7 +1584,7 @@ class Reproductor(QObject):
         if self.repetir == "una" or self._duracion <= 20 or self._salto_dj == self._gen:
             return
         fin = self._fin_musica()
-        crossfade = int(self.ajustes["crossfade"] or 0)
+        crossfade = self.config_fundido()[0]
         recorta = fin < self._duracion - RECORTE_MINIMO
         if self._apagar_al_final:
             # el temporizador "al terminar esta cancion" para donde acaba la musica
@@ -1568,10 +1611,21 @@ class Reproductor(QObject):
 
     # ------------------------------------------------------------ fundido
 
+    def config_fundido(self, pista=None):
+        """(disparo, dur, graves) del fundido de esta canción hacia la siguiente: el paso
+        del Mezclador si lo hay, si no la «Mezcla DJ», si no el fundido de siempre."""
+        pista = pista if pista is not None else self.actual
+        clave = str((pista or {}).get("clave") or (pista or {}).get("video_id") or "")
+        paso = self.plan_mezcla.get(clave) if clave else None
+        return mezcla_dj.configuracion_fundido(
+            paso, self.ajustes["mezcla_dj"], self.ajustes["mezcla_dj_seg"],
+            self.ajustes["mezcla_dj_graves"], self.ajustes["crossfade"], self._duracion)
+
     def _empezar_fundido(self, duracion=None):
         sig = self._mirar_siguiente()
         if sig is None or len(self.audio) < 2:
             return
+        _disparo, dur_cfg, graves = self.config_fundido()
         # solo si la siguiente ya esta lista (en disco o precargada)
         local = sig.get("archivo") if sig.get("archivo") and os.path.exists(sig["archivo"]) else None
         if not local and self.ajustes["preferir_descargado"]:
@@ -1600,11 +1654,15 @@ class Reproductor(QObject):
         self.activo = 1 - self.activo
         self._fundido = {"saliente": saliente, "entrante": entrante,
                          "inicio": time.time(),
-                         "dur": float(duracion or self.ajustes["crossfade"] or FUNDIDO_DJ_CORTO)}
+                         "dur": float(duracion or dur_cfg or self.ajustes["crossfade"]
+                                      or FUNDIDO_DJ_CORTO),
+                         "graves": bool(graves) and not duracion, "estado_graves": None}
         # transicion DJ: la que entra empieza donde empieza su musica
         entrada = self._inicio_dj(objetivo_pista)
         entrante.fijar_volumen(0)
         entrante.fijar_velocidad(self.velocidad)
+        if self._fundido["graves"]:
+            self._cambiar_graves(0.0)       # la que entra llega sin graves
         entrante.cargar(fuente, inicio=entrada)
         self._fuente = fuente
         self.actual = objetivo_pista
@@ -1632,17 +1690,43 @@ class Reproductor(QObject):
         import math
         f["entrante"].fijar_volumen(self._vol() * math.sin(avance * math.pi / 2))
         f["saliente"].fijar_volumen(self._vol() * math.cos(avance * math.pi / 2))
+        if f.get("graves"):
+            self._cambiar_graves(avance)
         if avance >= 1.0:
             f["saliente"].detener()
+            con_graves = f.get("graves")
             self._fundido = None
             self._pasos_fundido.stop()
+            if con_graves:
+                self.aplicar_sonido()       # los dos motores vuelven a su sonido normal
             self._aplicar_volumen()
+            if self._prueba:
+                prueba = self._prueba
+                QTimer.singleShot(7000, lambda: self._fin_de_prueba(prueba))
+
+    def _cambiar_graves(self, avance):
+        """Cambio de graves: mientras la nueva entra no tiene graves; a mitad del
+        fundido los graves pasan de una canción a la otra."""
+        f = self._fundido
+        if not f:
+            return
+        estado = mezcla_dj.graves_cortados(avance)
+        if estado == f.get("estado_graves"):
+            return
+        f["estado_graves"] = estado
+        base = self.cadena_filtros()
+        cortada = mezcla_dj.con_graves(base)
+        f["saliente"].fijar_filtros(cortada if estado[0] else base)
+        f["entrante"].fijar_filtros(cortada if estado[1] else base)
 
     def _cortar_fundido(self):
         if self._fundido:
+            con_graves = self._fundido.get("graves")
             self._fundido["saliente"].detener()
             self._fundido = None
             self._pasos_fundido.stop()
+            if con_graves:
+                self.aplicar_sonido()
             self._aplicar_volumen()
 
     # ------------------------------------------------------------ temporizador
