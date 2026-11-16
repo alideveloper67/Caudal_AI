@@ -3,10 +3,12 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../nucleo/ajustes.dart';
 import '../../nucleo/catalogo.dart';
 import '../../nucleo/coleccion.dart';
+import '../../nucleo/pantalla.dart';
 import '../../nucleo/traductor.dart';
 import '../../reproduccion/jugador.dart';
 import '../../reproduccion/reproductor.dart';
@@ -17,6 +19,7 @@ import '../reproductor/barra_progreso.dart';
 import '../reproductor/fondo_ambiente.dart';
 import '../reproductor/linea_karaoke.dart';
 import '../reproductor/portada_deslizable.dart';
+import '../reproductor/vinilo.dart';
 import '../servicios.dart';
 import '../tema.dart';
 import 'compartir_letra.dart';
@@ -44,6 +47,26 @@ class _ReproductorPaginaState extends State<ReproductorPagina> {
   int _direccion = 1;
   String _claveVista = '';
 
+  // modo vinilo: la portada es el disco de un tocadiscos y la pantalla se queda encendida
+  bool _vinilo = false;
+
+  @override
+  void initState() {
+    super.initState();
+    SharedPreferences.getInstance().then((p) {
+      if (mounted && p.getBool('modo_vinilo') == true) {
+        setState(() => _vinilo = true);
+        PantallaEncendida.mantener(true);
+      }
+    }).catchError((_) {});
+  }
+
+  void _alternarVinilo() {
+    setState(() => _vinilo = !_vinilo);
+    PantallaEncendida.mantener(_vinilo);
+    SharedPreferences.getInstance().then((p) => p.setBool('modo_vinilo', _vinilo)).catchError((_) => false);
+  }
+
   // el contenido aparece un poco despues de que la portada empieza a volar
   Animation<double>? _ruta;
   Animation<double> _entrada = kAlwaysCompleteAnimation;
@@ -60,6 +83,7 @@ class _ReproductorPaginaState extends State<ReproductorPagina> {
 
   @override
   void dispose() {
+    PantallaEncendida.mantener(false); // al salir de la pantalla del reproductor, el sistema vuelve a apagarla
     _arrastre.dispose();
     super.dispose();
   }
@@ -191,6 +215,12 @@ class _ReproductorPaginaState extends State<ReproductorPagina> {
                           Text('${ctx?['titulo'] ?? ''}', maxLines: 1, overflow: TextOverflow.ellipsis,
                               style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5)),
                         ])),
+                        if (!Jugador.esWeb)
+                          IconButton(
+                            tooltip: _vinilo ? 'Quitar el vinilo' : 'Reproducir con vinilo',
+                            icon: Icon(Icons.album_rounded, color: _vinilo ? C.acento : null),
+                            onPressed: _alternarVinilo,
+                          ),
                         IconButton(icon: const Icon(Icons.more_vert_rounded), onPressed: () => s.hojaPista(context, p)),
                       ]),
                     ),
@@ -203,6 +233,23 @@ class _ReproductorPaginaState extends State<ReproductorPagina> {
                           ? const _HuecoVideoWeb()
                           : video
                           ? _VideoEnLinea(r: r)
+                          : _vinilo
+                          ? Center(
+                              child: GestureDetector(
+                                onDoubleTap: () => _meGustaDobleToque(s, p),
+                                onHorizontalDragEnd: (d) {
+                                  final v = d.primaryVelocity ?? 0;
+                                  if (v < -300) _siguiente(r);
+                                  if (v > 300) _anterior(r);
+                                },
+                                child: VinilVista(
+                                  url: url,
+                                  color: _color,
+                                  sonando: r.estado == EstadoRepro.sonando,
+                                  lado: ladoPortadaGrande(ancho),
+                                ),
+                              ),
+                            )
                           : PortadaDeslizable(
                               pista: p,
                               lado: ladoPortadaGrande(ancho),

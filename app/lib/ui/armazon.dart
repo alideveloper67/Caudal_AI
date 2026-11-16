@@ -20,6 +20,7 @@ import 'paginas/ajustes_pagina.dart';
 import 'paginas/biblioteca.dart';
 import 'paginas/buscar.dart';
 import 'paginas/descargas_pagina.dart';
+import 'paginas/estudio_pagina.dart';
 import 'paginas/importar_pagina.dart';
 import 'paginas/inicio.dart';
 import 'paginas/juntos_pagina.dart';
@@ -68,6 +69,11 @@ class _ArmazonState extends State<Armazon> {
       if (texto.trim().toLowerCase().startsWith('caudal://juntos')) {
         _navegadores[_pestana].currentState
             ?.push(MaterialPageRoute(builder: (_) => JuntosPagina(codigoInicial: texto.trim())));
+        return;
+      }
+      // caudal://estudio abre el Modo estudio (atajo de la app en Android)
+      if (texto.trim().toLowerCase().startsWith('caudal://estudio')) {
+        _navegadores[_pestana].currentState?.push(MaterialPageRoute(builder: (_) => const EstudioPagina()));
         return;
       }
       // una lista de Spotify o Apple Music compartida: se trae a la biblioteca
@@ -376,6 +382,8 @@ class _BarraLateral extends StatelessWidget {
           item(Icons.groups_2_outlined, Icons.groups_2_rounded, 'Escuchar juntos', false,
               () => alAbrir(const JuntosPagina())),
           item(Icons.insights_rounded, Icons.insights_rounded, 'Tu resumen', false, () => ResumenPagina.abrir(context)),
+          item(Icons.self_improvement_outlined, Icons.self_improvement_rounded, 'Modo estudio', false,
+              () => alAbrir(const EstudioPagina())),
           const Spacer(),
           item(Icons.settings_outlined, Icons.settings_rounded, 'Ajustes', false, () => alAbrir(const AjustesPagina())),
           Padding(

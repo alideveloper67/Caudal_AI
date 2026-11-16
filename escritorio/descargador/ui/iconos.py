@@ -321,6 +321,13 @@ def _dibujar_extra(p, nombre, e, color):
         p.drawArc(QRectF(6 * e, 6 * e, 12 * e, 11 * e), 200 * 16, 140 * 16)
         p.drawLine(QPointF(12 * e, 17 * e), QPointF(12 * e, 21 * e))
         p.drawLine(QPointF(8.5 * e, 21 * e), QPointF(15.5 * e, 21 * e))
+    elif nombre == "disco":
+        p.drawEllipse(QPointF(12 * e, 12 * e), 9 * e, 9 * e)
+        p.drawEllipse(QPointF(12 * e, 12 * e), 3.2 * e, 3.2 * e)
+        p.drawArc(QRectF(5.6 * e, 5.6 * e, 12.8 * e, 12.8 * e), 20 * 16, 50 * 16)
+        lleno()
+        p.drawEllipse(QPointF(12 * e, 12 * e), 0.9 * e, 0.9 * e)
+        _pluma(p, color)
     elif nombre == "mini":
         p.drawRoundedRect(QRectF(2.5 * e, 4.5 * e, 19 * e, 15 * e), 2.2 * e, 2.2 * e)
         lleno()
@@ -541,6 +548,17 @@ def _dibujar_extra(p, nombre, e, color):
         p.drawLine(QPointF(7.5 * e, 3.5 * e), QPointF(7.5 * e, 5.5 * e))
         p.drawPolyline([QPointF(10.5 * e, 5.5 * e), QPointF(8 * e, 11 * e), QPointF(4 * e, 14.5 * e)])
         p.drawLine(QPointF(6 * e, 8.5 * e), QPointF(11 * e, 13 * e))
+    elif nombre == "graduado":
+        # birrete de graduación (Modo estudio)
+        p.drawPolygon([QPointF(12 * e, 4.5 * e), QPointF(22 * e, 9.5 * e), QPointF(12 * e, 14.5 * e),
+                       QPointF(2 * e, 9.5 * e)])
+        ruta = QPainterPath()
+        ruta.moveTo(6 * e, 12.2 * e)
+        ruta.lineTo(6 * e, 16.2 * e)
+        ruta.cubicTo(8 * e, 19 * e, 16 * e, 19 * e, 18 * e, 16.2 * e)
+        ruta.lineTo(18 * e, 12.2 * e)
+        p.drawPath(ruta)
+        p.drawLine(QPointF(22 * e, 9.5 * e), QPointF(22 * e, 15.5 * e))
     else:
         # desconocido: un punto, para no romper nada
         lleno()

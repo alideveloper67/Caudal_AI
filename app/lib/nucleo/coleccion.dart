@@ -9,8 +9,22 @@ import 'package:sqflite/sqflite.dart';
 
 import 'base_datos_io.dart' if (dart.library.js_interop) 'base_datos_web.dart';
 import 'plataforma.dart';
+import 'social.dart' show ImagenSocial;
 
 typedef Json = Map<String, dynamic>;
+
+/// Portadas personalizadas de listas que viven en memoria (en el navegador no
+/// hay carpetas: los bytes van en la base y se suben aqui al abrirla).
+/// La referencia que se guarda en la columna `portada` es `mem:<id>:<marca>`.
+class PortadasMem {
+  PortadasMem._();
+  static final Map<String, Uint8List> _datos = {};
+  static bool esRef(String ref) => ref.startsWith('mem:');
+  static Uint8List? bytes(String ref) => _datos[ref];
+  static void poner(String ref, Uint8List b) => _datos[ref] = b;
+  static void quitar(String ref) => _datos.remove(ref);
+  static void limpiar() => _datos.clear();
+}
 
 /// Tu coleccion: me gusta, listas, escuchas, guardados y lo descargado.
 ///
@@ -35,7 +49,8 @@ class Coleccion extends ChangeNotifier {
     if (kIsWeb) {
       // navegador: la base en su almacenamiento; sin carpetas ni archivos
       await prepararBaseDeDatos();
-      final db = await openDatabase('caudal_$cuentaId.db', version: 1, onCreate: (db, _) => _crear(db));
+      final db = await openDatabase('caudal_$cuentaId.db', version: _versionBase,
+          onCreate: (db, _) => _crear(db), onUpgrade: _migrar);
       final c = Coleccion._(db, 'caudal_$cuentaId.db');
       await c._cargarMemoria();
       return c;
@@ -51,8 +66,8 @@ class Coleccion extends ChangeNotifier {
     if (Plataforma.esIOS) {
       _documentosIOS = (await getApplicationDocumentsDirectory()).path;
     }
-    final db = await openDatabase(ruta, version: 1, onCreate: (db, _) => _crear(db),
-        onOpen: (db) async {
+    final db = await openDatabase(ruta, version: _versionBase, onCreate: (db, _) => _crear(db),
+        onUpgrade: _migrar, onOpen: (db) async {
       await db.rawQuery('PRAGMA journal_mode=WAL');
     });
     final c = Coleccion._(db, ruta);
@@ -60,13 +75,46 @@ class Coleccion extends ChangeNotifier {
     return c;
   }
 
+  /// Version de la base: 2 = listas con `portada` y `portada_datos`.
+  static const _versionBase = 2;
+
+  /// Para las pruebas: abre (y migra) una base en una ruta concreta.
+  @visibleForTesting
+  static Future<Coleccion> abrirEn(String ruta) async {
+    final db = await openDatabase(ruta, version: _versionBase,
+        onCreate: (db, _) => _crear(db), onUpgrade: _migrar);
+    final c = Coleccion._(db, ruta);
+    await c._cargarMemoria();
+    return c;
+  }
+
+  /// Cierra la base (pruebas).
+  @visibleForTesting
+  Future<void> cerrar() => db.close();
+
+  static Future<void> _migrar(Database db, int desde, int hasta) async {
+    if (desde < 2) {
+      final cols = [for (final c in await db.rawQuery('PRAGMA table_info(listas)')) '${c['name']}'];
+      if (!cols.contains('portada')) await db.execute('ALTER TABLE listas ADD COLUMN portada TEXT');
+      if (!cols.contains('portada_datos')) await db.execute('ALTER TABLE listas ADD COLUMN portada_datos BLOB');
+    }
+  }
+
+  /// En el navegador (o si se fuerza) la portada va en la base; si no, en un archivo.
+  @visibleForTesting
+  static bool portadaEnBytes = kIsWeb;
+
+  /// Carpeta de las portadas (las pruebas la cambian).
+  @visibleForTesting
+  static String? carpetaPortadasPrueba;
+
   static Future<void> _crear(Database db) async {
     final b = db.batch();
     b.execute('CREATE TABLE pistas (clave TEXT PRIMARY KEY, datos TEXT NOT NULL, actualizada REAL)');
     b.execute('CREATE TABLE me_gusta (clave TEXT PRIMARY KEY, fecha REAL)');
     b.execute('CREATE TABLE listas (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT NOT NULL, '
         "creada REAL, descripcion TEXT DEFAULT '', fijada INTEGER DEFAULT 0, tocada REAL DEFAULT 0, "
-        'uuid TEXT)');
+        'uuid TEXT, portada TEXT, portada_datos BLOB)');
     b.execute('CREATE TABLE lista_items (lista_id INTEGER NOT NULL, clave TEXT NOT NULL, '
         'orden REAL DEFAULT 0, agregada REAL, PRIMARY KEY (lista_id, clave))');
     b.execute('CREATE TABLE reproducciones (id INTEGER PRIMARY KEY AUTOINCREMENT, clave TEXT NOT NULL, '
@@ -89,6 +137,14 @@ class Coleccion extends ChangeNotifier {
   static double get _ahora => DateTime.now().millisecondsSinceEpoch / 1000.0;
 
   Future<void> _cargarMemoria() async {
+    for (final f in await db.rawQuery(
+        'SELECT portada, portada_datos FROM listas WHERE portada_datos IS NOT NULL')) {
+      final ref = '${f['portada'] ?? ''}';
+      final d = f['portada_datos'];
+      if (ref.isNotEmpty && d is List<int>) {
+        PortadasMem.poner(ref, d is Uint8List ? d : Uint8List.fromList(d));
+      }
+    }
     _gustan
       ..clear()
       ..addAll((await db.query('me_gusta', columns: ['clave'])).map((f) => '${f['clave']}'));
@@ -293,6 +349,7 @@ class Coleccion extends ChangeNotifier {
   Future<void> borrarLista(int id) async {
     final u = await _uuidLista(id);
     if (u.isNotEmpty) await _anotar('lista_borrar', {'uuid': u});
+    await _borrarArchivoPortada(await _portadaActual(id));
     await db.delete('lista_items', where: 'lista_id = ?', whereArgs: [id]);
     await db.delete('listas', where: 'id = ?', whereArgs: [id]);
     notifyListeners();
@@ -357,7 +414,62 @@ class Coleccion extends ChangeNotifier {
     return pistas(claves);
   }
 
+  Future<String> _portadaActual(int id) async {
+    final f = await db.query('listas', columns: ['portada'], where: 'id = ?', whereArgs: [id]);
+    return f.isEmpty ? '' : '${f.first['portada'] ?? ''}';
+  }
+
+  Future<void> _borrarArchivoPortada(String ref) async {
+    if (ref.isEmpty) return;
+    if (PortadasMem.esRef(ref)) {
+      PortadasMem.quitar(ref);
+      return;
+    }
+    try {
+      final a = File(ref);
+      if (await a.exists()) await a.delete();
+    } catch (_) {}
+  }
+
+  /// Ruta o referencia de la portada personalizada ('' si no hay).
+  Future<String> portadaPersonalizada(int id) => _portadaActual(id);
+
+  /// Pone la imagen elegida como portada de la lista. [imagen] es cualquier
+  /// foto: se recorta al centro en cuadrado, se reduce a 800 px y queda en JPEG.
+  Future<void> ponerPortadaLista(int id, Uint8List imagen) async {
+    final jpeg = await ImagenSocial.cuadrada(imagen);
+    final marca = DateTime.now().microsecondsSinceEpoch;
+    final anterior = await _portadaActual(id);
+    String ref;
+    if (portadaEnBytes) {
+      ref = 'mem:$id:$marca';
+      PortadasMem.poner(ref, jpeg);
+      await db.update('listas', {'portada': ref, 'portada_datos': jpeg}, where: 'id = ?', whereArgs: [id]);
+    } else {
+      final dir = Directory(carpetaPortadasPrueba ??
+          p.join((await getApplicationDocumentsDirectory()).path, 'portadas_listas'));
+      if (!await dir.exists()) await dir.create(recursive: true);
+      final uuid = await _uuidLista(id);
+      final clave = uuid.isNotEmpty ? uuid : '$id';
+      ref = p.join(dir.path, '${clave}_$marca.jpg');
+      await File(ref).writeAsBytes(jpeg, flush: true);
+      await db.update('listas', {'portada': ref, 'portada_datos': null}, where: 'id = ?', whereArgs: [id]);
+    }
+    if (anterior.isNotEmpty && anterior != ref) await _borrarArchivoPortada(anterior);
+    notifyListeners();
+  }
+
+  /// Vuelve al mosaico de carátulas.
+  Future<void> quitarPortadaLista(int id) async {
+    final anterior = await _portadaActual(id);
+    await db.update('listas', {'portada': null, 'portada_datos': null}, where: 'id = ?', whereArgs: [id]);
+    await _borrarArchivoPortada(anterior);
+    notifyListeners();
+  }
+
   Future<List<String>> portadasDeLista(int id, [int n = 4]) async {
+    final propia = await _portadaActual(id);
+    if (propia.isNotEmpty) return [propia];
     final salida = <String>[];
     for (final pista in (await pistasDeLista(id)).take(40)) {
       final m = '${pista['miniatura'] ?? ''}';

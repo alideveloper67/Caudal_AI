@@ -10,6 +10,7 @@ La primera vez que una cuenta entra en este equipo se sube lo que ya habia.
 """
 
 import json
+import os
 import sqlite3
 import threading
 import time
@@ -329,6 +330,12 @@ class Sincronizador(QObject):
             _ = locales     # las canciones solo locales (archivos) se quedan como estaban
         for l in con.execute("SELECT id, uuid FROM listas WHERE uuid IS NOT NULL").fetchall():
             if l["uuid"] not in uuids:
+                _p = con.execute("SELECT portada FROM listas WHERE id = ?", (l["id"],)).fetchone()
+                if _p and _p["portada"]:
+                    try:
+                        os.remove(_p["portada"])
+                    except OSError:
+                        pass
                 con.execute("DELETE FROM lista_items WHERE lista_id = ?", (l["id"],))
                 con.execute("DELETE FROM listas WHERE id = ?", (l["id"],))
 

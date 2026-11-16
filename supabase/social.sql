@@ -858,3 +858,58 @@ revoke execute on function public.puede_tener_fondo(uuid) from public, anon;
 grant execute on function public.puede_tener_fondo(uuid) to authenticated;
 revoke execute on function public.puede_poner_fondo() from public, anon;
 grant execute on function public.puede_poner_fondo() to authenticated;
+
+-- ---------------------------------------------------------------- Artistas favoritos (gustos)
+-- Al crear la cuenta la persona puede elegir sus artistas (o saltarlo). Sirven para recomendar.
+-- gustos: [{"nombre": "...", "id": "<id de artista en el catálogo>", "portada": "<url>"}], hasta 30.
+alter table public.perfiles add column if not exists gustos jsonb not null default '[]'::jsonb;
+do $$
+begin
+    -- las cuentas que ya existían no vuelven a ver la pantalla de elegir artistas
+    if not exists (select 1 from information_schema.columns
+                   where table_schema = 'public' and table_name = 'perfiles' and column_name = 'gustos_elegidos') then
+        alter table public.perfiles add column gustos_elegidos boolean not null default false;
+        update public.perfiles set gustos_elegidos = true;
+    end if;
+end $$;
+alter table public.perfiles add column if not exists gustos_elegidos boolean not null default false;
+alter table public.perfiles drop constraint if exists perfil_gustos_limites;
+alter table public.perfiles add constraint perfil_gustos_limites check (
+    jsonb_typeof(gustos) = 'array' and jsonb_array_length(gustos) <= 30 and pg_column_size(gustos) < 24000
+);
+
+-- ---------------------------------------------------------------- GIF en la foto y el fondo del perfil (donadores y fundadores)
+update storage.buckets set allowed_mime_types = array['image/jpeg', 'image/png', 'image/webp', 'image/gif'] where id = 'avatares';
+
+-- el servidor manda: un GIF en la foto o en el fondo del perfil solo lo guarda quien puede
+create or replace function public.perfil_validar()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+    if new.perfil_publico and not (new.fecha_nacimiento is not null
+                                   and age(new.fecha_nacimiento) >= interval '18 years') then
+        new.perfil_publico := false;
+    end if;
+    if new.fondo_url is not null and not public.puede_tener_fondo(new.id) then
+        new.fondo_url := null;
+    end if;
+    if not public.puede_tener_fondo(new.id) then
+        if new.foto_url ~* '\.gif$' then
+            new.foto_url := case when tg_op = 'UPDATE' and old.foto_url !~* '\.gif$' then old.foto_url else null end;
+        end if;
+        if new.banner_url ~* '\.gif$' then
+            new.banner_url := case when tg_op = 'UPDATE' and old.banner_url !~* '\.gif$' then old.banner_url else null end;
+        end if;
+    end if;
+    return new;
+end $$;
+
+-- y el almacén: los archivos .gif de la carpeta propia solo los sube quien puede
+drop policy if exists "avatar: subir el mio" on storage.objects;
+create policy "avatar: subir el mio" on storage.objects for insert to authenticated
+    with check (bucket_id = 'avatares' and (storage.foldername(name))[1] = auth.uid()::text
+                and ((name not like '%/fondo.%' and name not ilike '%.gif') or public.puede_tener_fondo(auth.uid())));
+drop policy if exists "avatar: cambiar el mio" on storage.objects;
+create policy "avatar: cambiar el mio" on storage.objects for update to authenticated
+    using (bucket_id = 'avatares' and (storage.foldername(name))[1] = auth.uid()::text)
+    with check (bucket_id = 'avatares' and (storage.foldername(name))[1] = auth.uid()::text
+                and ((name not like '%/fondo.%' and name not ilike '%.gif') or public.puede_tener_fondo(auth.uid())));

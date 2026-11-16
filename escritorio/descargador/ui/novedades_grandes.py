@@ -50,9 +50,22 @@ TARJETAS = [
 
 # ================================================================ cuándo sale
 
+def toca_presentacion(ajustes, version_actual=None):
+    """True si hay que enseñar la segunda actualización grande (la presentación a pantalla
+    completa): la versión instalada ya es de esa edición o posterior y la última presentación
+    vista es anterior. Quien ya la vio no la vuelve a ver con los parches siguientes."""
+    actual = version_actual or _version.VERSION
+    if not _version.alcanza_edicion(actual):
+        return False
+    return not _version.alcanza_edicion(str(ajustes["version_novedades_vista"] or ""))
+
+
 def debe_mostrarse(ajustes, version_actual=None):
     """True si esta versión aún no ha enseñado su aviso."""
     actual = version_actual or _version.VERSION
+    if _version.alcanza_edicion(actual):
+        # desde la edición grande, el aviso es la presentación y sale una sola vez
+        return toca_presentacion(ajustes, actual)
     return str(ajustes["version_novedades_vista"] or "") != str(actual)
 
 
@@ -595,6 +608,21 @@ class NovedadesGrandes(QDialog):
         super().reject()
 
 
+def crear_aviso(padre=None, novedad=None):
+    """El aviso que toca: la presentación de la segunda actualización grande si la
+    versión (la instalada, o la publicada si hay `novedad`) es de esa edición; si no,
+    el aviso de tarjetas de la primera."""
+    if novedad:
+        usa_nueva = (_version.es_de_la_edicion(novedad.get("version"))
+                     and not _version.alcanza_edicion(_version.VERSION))
+    else:
+        usa_nueva = _version.alcanza_edicion(_version.VERSION)
+    if usa_nueva:
+        from .presentacion_grande import PresentacionGrande
+        return PresentacionGrande(padre, novedad)
+    return NovedadesGrandes(padre, novedad)
+
+
 def mostrar_si_toca(ventana):
     """Al abrir la app: enseña el aviso de esta versión si aún no se vio.
     No bloquea (la música sigue) y queda anotado al abrirse, no al cerrarse, para
@@ -603,7 +631,7 @@ def mostrar_si_toca(ventana):
     if not debe_mostrarse(ajustes):
         return None
     marcar_vista(ajustes)
-    d = NovedadesGrandes(ventana)
+    d = crear_aviso(ventana)
     d.setAttribute(Qt.WA_DeleteOnClose, True)
     d.open()
     return d

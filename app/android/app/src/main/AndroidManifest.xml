@@ -68,6 +68,10 @@
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data android:scheme="caudal"/>
             </intent-filter>
+            <!-- atajo de la app: «Iniciar sesión de estudio» (caudal://estudio) -->
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts"/>
         </activity>
 
         <service

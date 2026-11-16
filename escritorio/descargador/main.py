@@ -142,6 +142,9 @@ def main():
         catalogo.fijar_region(ajustes["region"])
         historial = Historial()
         coleccion = Coleccion()
+        # cuenta nueva (o que aún no eligió): «¿Qué artistas te gustan?» antes de la pantalla principal
+        from descargador.ui import pantalla_gustos
+        pantalla_gustos.al_entrar(cuenta, coleccion, ajustes["region"])
         gestor = Gestor(ajustes, historial)
         reproductor = Reproductor(ajustes, coleccion)
         ctx = Contexto(ajustes, historial, coleccion, gestor, reproductor)

@@ -8,6 +8,7 @@ import '../../nucleo/social.dart';
 import '../comunes.dart';
 import '../servicios.dart';
 import '../tema.dart';
+import 'compartir_perfil.dart';
 import 'mensajes_pagina.dart';
 import 'perfil_comun.dart';
 import 'perfil_editar_pagina.dart';
@@ -211,6 +212,13 @@ class _PerfilPaginaState extends State<PerfilPagina> {
         elevation: 0,
         scrolledUnderElevation: 0,
         actions: [
+          // «Compartir perfil»: una imagen 9:16 para estados de WhatsApp e historias
+          if (p != null && (propio || !p.privado))
+            IconButton(
+              tooltip: 'Compartir perfil',
+              icon: const Icon(Icons.ios_share_rounded),
+              onPressed: () => compartirPerfil(context, p),
+            ),
           if (p != null && !propio)
             PopupMenuButton<String>(
               tooltip: 'Más opciones',

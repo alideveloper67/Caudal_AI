@@ -1,4 +1,4 @@
-import 'package:dio/dio.dart';
+﻿import 'package:dio/dio.dart';
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
@@ -6,6 +6,7 @@ import '../../nucleo/ajustes.dart';
 import '../../nucleo/catalogo.dart';
 import '../../nucleo/cuentas.dart';
 import '../../nucleo/formato.dart';
+import '../../nucleo/gustos.dart';
 import '../../nucleo/mixes.dart';
 import '../../nucleo/version.dart';
 import '../comunes.dart';
@@ -16,6 +17,7 @@ import '../tema.dart';
 import '../../nucleo/fondo_app.dart';
 import 'aspecto_pagina.dart';
 import 'fondo_pagina.dart';
+import 'gustos_pagina.dart';
 import 'bateria_ajuste.dart';
 import 'mezclador_ajustes.dart';
 import 'mezclador_pagina.dart';
@@ -236,6 +238,22 @@ class _AjustesPaginaState extends State<AjustesPagina> {
           onTap: () async {
             await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AspectoPagina()));
             if (mounted) setState(() {});
+          },
+        ),
+
+        ListTile(
+          leading: Icon(Icons.favorite_border_rounded, color: C.acento),
+          title: const Text('Mis artistas favoritos'),
+          subtitle: const Text('Afinan tus recomendaciones y el Inicio', style: estiloSecundario),
+          trailing: const Icon(Icons.chevron_right_rounded, color: C.texto3),
+          onTap: () async {
+            final nav = Navigator.of(context);
+            final actuales = await Gustos.actualesDe(s.cuenta.sesion, s.cuenta.id);
+            if (!mounted) return;
+            await nav.push(MaterialPageRoute(
+                builder: (_) => GustosPagina(
+                    sesion: s.cuenta.sesion, cuentaId: s.cuenta.id, desdeAjustes: true, inicial: actuales,
+                    alTerminar: () => nav.pop())));
           },
         ),
 

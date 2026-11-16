@@ -161,6 +161,12 @@ class PaginaAjustes(Pagina):
         self._conectar(self.letras, "letras_auto")
         s.fila("Mostrar la letra al reproducir", "Abre la letra en el panel derecho cuando "
                                                  "empieza una canción.", self.letras)
+        self.vinilo = _interruptor(a["vinilo_auto"])
+        self._conectar(self.vinilo, "vinilo_auto")
+        s.fila("Mostrar el vinilo al reproducir", "Cuando empieza una canción se abre el tocadiscos "
+                                                  "a pantalla completa, con la carátula girando. "
+                                                  "También lo abres con el botón del disco.",
+               self.vinilo)
         self.suave = _interruptor(a["apagado_suave"])
         self._conectar(self.suave, "apagado_suave")
         s.fila("Apagar la música poco a poco", "Con el temporizador para dormir, el volumen va "
@@ -170,6 +176,12 @@ class PaginaAjustes(Pagina):
         self._conectar(self.region, "region", lambda: catalogo.fijar_region(self.a["region"]))
         s.fila("País para las recomendaciones", "Inicio, novedades y tendencias de este país.",
                self.region)
+        self.bt_gustos = QPushButton("Elegir artistas")
+        self.bt_gustos.setObjectName("contorno")
+        self.bt_gustos.setCursor(Qt.PointingHandCursor)
+        self.bt_gustos.clicked.connect(self._elegir_gustos)
+        s.fila("Mis artistas favoritos", "Los artistas que elegiste al crear tu cuenta. Caudal los "
+                                         "usa para recomendarte música parecida.", self.bt_gustos)
         self.cuerpo.addWidget(s)
 
         # ---------------- sonido
@@ -451,6 +463,31 @@ class PaginaAjustes(Pagina):
     def _poner(self, clave, valor):
         self.a[clave] = valor
         self.a.guardar()
+
+    def _elegir_gustos(self):
+        """Reabre «¿Qué artistas te gustan?» con lo elegido, para cambiarlo."""
+        from ... import gustos as G
+        from .. import pantalla_gustos
+        cuenta = getattr(self.ctx, "cuenta", None) or {}
+        sesion = cuenta.get("sesion")
+        gestor = G.Gustos(sesion, self.ctx.coleccion) if sesion is not None else None
+        inicial = []
+        if gestor is not None:
+            inicial = gestor.local()["lista"]
+        accion, lista = pantalla_gustos.abrir(gestor, inicial, ajustes=True,
+                                              region=self.a["region"], padre=self.window())
+        if accion != "guardar":
+            return
+        if gestor is None:
+            self.ctx.coleccion.guardar_estado(G.CLAVE, {"lista": lista, "elegidos": True,
+                                                       "pendiente": False})
+            return
+        def listo(llego):
+            aviso = getattr(self.ctx, "aviso", None)
+            if aviso is not None:
+                aviso.emit("Tus artistas favoritos se guardaron." if llego else
+                           "Se guardaron aquí; se subirán cuando haya conexión.")
+        en_segundo_plano(gestor.guardar, lista, ok=listo, error=lambda _e: None, dueno=self)
 
     def _conectar(self, widget, clave, despues=None):
         if isinstance(widget, QCheckBox):

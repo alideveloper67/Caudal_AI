@@ -43,8 +43,8 @@ def mostrar_aviso(novedad, padre=None):
     """Avisa de una versión nueva: con el aviso grande si la release lo pide
     (notas que empiezan con `[grande]`), con el normal si no."""
     if novedad.get("grande"):
-        from .novedades_grandes import NovedadesGrandes
-        return NovedadesGrandes(padre, novedad).exec()
+        from .novedades_grandes import crear_aviso
+        return crear_aviso(padre, novedad).exec()
     return DialogoActualizacion(novedad, padre).exec()
 
 

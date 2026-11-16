@@ -660,12 +660,16 @@ class ImagenSocial {
   /// Imagen de fondo: recorte al centro de 1280×480 (8:3), JPEG < 2 MB.
   static Future<Uint8List> banner(Uint8List original) => compute(_bannerPerfil, original);
 
+  /// Portada de una lista: recorte al centro en cuadrado, 800 px, JPEG.
+  static Future<Uint8List> cuadrada(Uint8List original) => compute(_portadaLista, original);
+
   /// Carátula: como mucho 800 px de lado, JPEG.
   static Future<Uint8List> caratula(Uint8List original) => compute(_caratula, original);
 }
 
 Uint8List _fotoPerfil(Uint8List b) => cuadrarYComprimir(b, 512, recortar: true);
 Uint8List _bannerPerfil(Uint8List b) => recortarBanner(b, 1280, 480);
+Uint8List _portadaLista(Uint8List b) => cuadrarYComprimir(b, 800, recortar: true);
 Uint8List _caratula(Uint8List b) => cuadrarYComprimir(b, 800, recortar: false);
 
 /// Decodifica, corrige la orientación, recorta al centro (o solo reduce) y
@@ -878,13 +882,19 @@ class Social {
   /// Sube la foto (ya recortada y comprimida) y devuelve la ruta guardada.
   Future<String> subirFoto(Uint8List jpeg) => _subirImagenPerfil(jpeg, 'avatar.jpg', 'tu foto');
 
+  /// Sube un GIF animado como foto (solo donadores; el servidor lo impone).
+  Future<String> subirFotoGif(Uint8List gif) => _subirImagenPerfil(gif, 'avatar.gif', 'tu foto', tipo: 'image/gif');
+
+  /// Sube un GIF animado como imagen de fondo (solo donadores).
+  Future<String> subirBannerGif(Uint8List gif) => _subirImagenPerfil(gif, 'banner.gif', 'tu imagen de fondo', tipo: 'image/gif');
+
   /// Sube la imagen de fondo y devuelve la ruta guardada.
   Future<String> subirBanner(Uint8List jpeg) => _subirImagenPerfil(jpeg, 'banner.jpg', 'tu imagen de fondo');
 
-  Future<String> _subirImagenPerfil(Uint8List jpeg, String nombre, String que) async {
+  Future<String> _subirImagenPerfil(Uint8List jpeg, String nombre, String que, {String tipo = 'image/jpeg'}) async {
     final ruta = '$yo/$nombre';
     try {
-      await sesion.subir('avatares', ruta, jpeg, 'image/jpeg', reemplazar: true);
+      await sesion.subir('avatares', ruta, jpeg, tipo, reemplazar: true);
     } on SinConexion {
       rethrow;
     } on ErrorNube catch (e) {

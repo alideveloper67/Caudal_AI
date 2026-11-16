@@ -211,10 +211,10 @@ class Reproductor extends ChangeNotifier {
   final _silencioEntrada = DetectorSilencio(umbralDb: -50, minimo: const Duration(milliseconds: 300));
   final Set<_Motor> _midiendo = {};
 
-  bool get _dj => ajustes.sino('transicion_dj');
+  bool get _dj => ajustes.sino('transicion_dj') && !modoEstudio;
 
   /// «Mezcla DJ»: enlaza las canciones con un cambio largo y de graves.
-  bool get _mezclaDj => ajustes.sino('mezcla_dj');
+  bool get _mezclaDj => ajustes.sino('mezcla_dj') && !modoEstudio;
 
   /// Los pasos del set de la mesa del Mezclador que suena ahora: cada pista
   /// de [secuencia] (por identidad) con como se pasa de ella a la siguiente.
@@ -266,7 +266,7 @@ class Reproductor extends ChangeNotifier {
   }
 
   /// Volumen que se le da al motor (el de la app por el factor de iPhone).
-  double get _salida => volumen * _factorSalida * _factorDormir;
+  double get _salida => volumen * _factorSalida * _factorDormir * _factorEstudio;
 
   /// En iPhone el VP9 no tiene decodificador por hardware y el AV1 de este
   /// libmpv tampoco: H.264 (videotoolbox) gasta mucho menos bateria.
@@ -405,6 +405,64 @@ class Reproductor extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ------------------------------------------------------------ modo estudio
+
+  /// Mientras es true: sin transiciones DJ, con fundido suave de al menos 5 s,
+  /// sin radio automatica (la cola es la del perfil y no cambia de estilo).
+  bool modoEstudio = false;
+  double _factorEstudio = 1;
+  String? _repetirAntes;
+  bool? _aleatorioAntes;
+
+  bool get _autoplay => ajustes.sino('autoplay') && !modoEstudio;
+
+  /// Segundos de fundido entre canciones: en modo estudio, nunca menos de 5.
+  int get _crossfade {
+    final c = ajustes.entero('crossfade');
+    return modoEstudio ? max(5, c) : c;
+  }
+
+  /// Cuanto de su volumen conserva la musica (1 = todo). Lo baja el modo estudio
+  /// durante los bloques de enfoque o los descansos.
+  double get factorEstudio => _factorEstudio;
+
+  Future<void> fijarFactorEstudio(double f) async {
+    _factorEstudio = f.clamp(0.0, 1.0);
+    if (_fundido == null && _traspaso == null && _activo.fuente != null) {
+      try {
+        await _activo.player.setVolume(_salida);
+      } catch (_) {}
+    }
+    notifyListeners();
+  }
+
+  /// Pone a sonar la cola de un perfil de estudio: en orden, en bucle y sin
+  /// que el autoplay la cambie de estilo. No toca tus ajustes guardados.
+  Future<void> iniciarEstudio(List<Json> pistas, {String titulo = 'Modo estudio'}) async {
+    if (pistas.isEmpty) return;
+    if (!modoEstudio) {
+      _repetirAntes = repetir;
+      _aleatorioAntes = aleatorio;
+    }
+    modoEstudio = true;
+    repetir = 'todo';
+    aleatorio = false;
+    proximas.clear();
+    await reproducirLista(pistas,
+        contexto: {'tipo': 'estudio', 'id': titulo, 'titulo': titulo}, modo: 'audio');
+  }
+
+  /// Sale del modo estudio y devuelve repetir, aleatorio y volumen a como estaban.
+  Future<void> salirEstudio() async {
+    if (!modoEstudio) return;
+    modoEstudio = false;
+    repetir = _repetirAntes ?? repetir;
+    aleatorio = _aleatorioAntes ?? aleatorio;
+    _repetirAntes = null;
+    _aleatorioAntes = null;
+    await fijarFactorEstudio(1);
+  }
+
   // ------------------------------------------------------------ cola
 
   Future<void> reproducirLista(List<Json> pistas, {int inicio = 0, Json? contexto,
@@ -490,7 +548,7 @@ class Reproductor extends ChangeNotifier {
         {'tipo': 'radio', 'id': pista['video_id'] ?? pista['clave'], 'titulo': 'Radio de ${pista['titulo']}'};
     if (modo != null) this.modo = modo;
     await _cargar(pista);
-    if (conRadio && '${pista['video_id'] ?? ''}'.isNotEmpty && ajustes.sino('autoplay')) {
+    if (conRadio && '${pista['video_id'] ?? ''}'.isNotEmpty && _autoplay) {
       _pedirRadio(pista);
     }
   }
@@ -684,7 +742,7 @@ class Reproductor extends ChangeNotifier {
         await detener();
         return;
       }
-      if (ajustes.sino('autoplay') && '${actual!['video_id'] ?? ''}'.isNotEmpty) {
+      if (_autoplay && '${actual!['video_id'] ?? ''}'.isNotEmpty) {
         _pedirRadio(actual!, ySeguir: true);
       } else {
         await detener();
@@ -740,9 +798,16 @@ class Reproductor extends ChangeNotifier {
       final vistos = secuencia.map((p) => p['video_id']).toSet();
       final nuevas = <Json>[];
       var candidatas = List<Json>.from(datos['pistas'] as List);
-      // sin lo que sueles saltar ni lo que ya sono estos dias
+      // afinada con tu gusto: sin lo saltado ni lo de las ultimas ~50, sin tandas del
+      // mismo artista y con ~20 % de artistas nuevos afines
       final g = await _gustoActual();
-      if (g != null) candidatas = Recomendador.limpiarRadio(candidatas, g);
+      if (g != null) {
+        final yaEnCola = {for (final p in secuencia) '${p['video_id']}'};
+        final ordenadas = Recomendador.prepararRadio(pista, candidatas, g,
+            vistos: yaEnCola, azar: '${pista['video_id']}'.hashCode);
+        // si el filtro deja la cola casi vacia, se usa la radio sin afinar
+        candidatas = ordenadas.length >= 4 ? ordenadas : Recomendador.limpiarRadio(candidatas, g);
+      }
       for (final p in candidatas) {
         if (p['video_id'] != null && !vistos.contains(p['video_id'])) {
           nuevas.add({...p, '_auto': true});
@@ -993,7 +1058,7 @@ class Reproductor extends ChangeNotifier {
     streams.resolver(vid, video: modo == 'video',
         calidad: modo == 'video' ? ajustes.texto('calidad_video') : ajustes.texto('calidad_audio'),
         codec: _codecVideo).catchError((_) => Fuente(url: ''));
-    if (ajustes.sino('autoplay') && repetir == 'no' && proximas.isEmpty && !sonandoSet &&
+    if (_autoplay && repetir == 'no' && proximas.isEmpty && !sonandoSet &&
         secuencia.length - pos <= 3 && '${actual?['video_id'] ?? ''}'.isNotEmpty) {
       _pedirRadio(actual!);
     }
@@ -1043,7 +1108,7 @@ class Reproductor extends ChangeNotifier {
         unawaited(Recomendador.perdonar(coleccion, actual!).catchError((_) {}));
       }
     }
-    final cf = ajustes.entero('crossfade');
+    final cf = _crossfade;
     final dur = duracion.value.inMilliseconds / 1000.0;
     // con "al terminar la cancion" no se funde con la siguiente: se apaga
     if (modo == 'audio' && _fundido == null && dur > 20 && repetir != 'una' && !_apagarAlFinal &&
@@ -1288,7 +1353,7 @@ class Reproductor extends ChangeNotifier {
     }
     final eqEntra = filtroEq3(pasoSig?.eq ?? const [0, 0, 0]);
     _fundido = {'saliente': saliente, 'entrante': entrante, 'inicio': DateTime.now(),
-      'dur': largo ?? ajustes.entero('crossfade').toDouble(), 'dj': dj,
+      'dur': largo ?? _crossfade.toDouble(), 'dj': dj,
       'saltos': pasoSig?.entrada != null ? 8 : 0,
       'tipo': tipo, 'curva': paso?.curva ?? CurvaFader.suave, 'usaAf': usaAf, 'razon': razon,
       'nivS': 0, 'nivE': dbGravesCortados};

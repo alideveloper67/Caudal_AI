@@ -5,11 +5,14 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 
 import '../../nucleo/catalogo.dart';
+import '../../nucleo/fondo_app.dart';
+import '../../nucleo/gif_perfil.dart';
 import '../../nucleo/nube.dart';
 import '../../nucleo/social.dart';
 import '../comunes.dart';
 import '../servicios.dart';
 import '../tema.dart';
+import 'gif_buscador.dart';
 import 'perfil_comun.dart';
 
 /// Editar el perfil propio. Se cierra con `true` si se guardó algo.
@@ -44,6 +47,12 @@ class _PerfilEditarPaginaState extends State<PerfilEditarPagina> {
   bool _bannerQuitado = false;
   bool _procesandoBanner = false;
   bool _procesandoFoto = false;
+  bool _fotoEsGif = false;
+  bool _bannerEsGif = false;
+  final GifBuscador _gifs = GifBuscador();
+
+  /// Solo donadores y fundadores pueden poner GIF animados (lo impone el servidor).
+  bool get _puedeGif => FondoApp.i.puede;
 
   @override
   void initState() {
@@ -56,6 +65,7 @@ class _PerfilEditarPaginaState extends State<PerfilEditarPagina> {
 
   @override
   void dispose() {
+    _gifs.cerrar();
     for (final c in [_nombre, _frase, _bio, _artista, _genero]) {
       c.dispose();
     }
@@ -105,8 +115,26 @@ class _PerfilEditarPaginaState extends State<PerfilEditarPagina> {
       final bytes = r?.files.firstOrNull?.bytes;
       if (bytes == null) return;
       setState(() => _procesandoFoto = true);
+      if (GifPerfil.esGif(bytes, nombre: r?.files.firstOrNull?.name ?? '')) {
+        if (_puedeGif) {
+          final gif = await GifPerfil.preparar(bytes, foto: true);
+          if (mounted) {
+            setState(() {
+              _fotoNueva = gif;
+              _fotoEsGif = true;
+            });
+          }
+          return;
+        }
+        if (mounted) _aviso(GifPerfil.sinPermiso);
+      }
       final jpeg = await ImagenSocial.foto(bytes);
-      if (mounted) setState(() => _fotoNueva = jpeg);
+      if (mounted) {
+        setState(() {
+          _fotoNueva = jpeg;
+          _fotoEsGif = false;
+        });
+      }
     } catch (e) {
       if (mounted) _aviso(e is ErrorNube ? e.mensaje : 'No se pudo usar esa foto. Prueba con otra imagen.');
     } finally {
@@ -121,10 +149,25 @@ class _PerfilEditarPaginaState extends State<PerfilEditarPagina> {
       final bytes = r?.files.firstOrNull?.bytes;
       if (bytes == null) return;
       setState(() => _procesandoBanner = true);
+      if (GifPerfil.esGif(bytes, nombre: r?.files.firstOrNull?.name ?? '')) {
+        if (_puedeGif) {
+          final gif = await GifPerfil.preparar(bytes, foto: false);
+          if (mounted) {
+            setState(() {
+              _bannerNuevo = gif;
+              _bannerEsGif = true;
+              _bannerQuitado = false;
+            });
+          }
+          return;
+        }
+        if (mounted) _aviso(GifPerfil.sinPermiso);
+      }
       final jpeg = await ImagenSocial.banner(bytes);
       if (mounted) {
         setState(() {
           _bannerNuevo = jpeg;
+          _bannerEsGif = false;
           _bannerQuitado = false;
         });
       }
@@ -135,8 +178,42 @@ class _PerfilEditarPaginaState extends State<PerfilEditarPagina> {
     }
   }
 
+  /// Abre la hoja de búsqueda de GIF y deja el elegido como foto o fondo.
+  Future<void> _buscarGif({required bool foto}) async {
+    final bytes = await showModalBottomSheet<Uint8List>(
+      context: context,
+      useRootNavigator: true,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: C.superficie,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(24))),
+      builder: (_) => HojaBuscarGif(buscador: _gifs, esFoto: foto),
+    );
+    if (bytes == null || !mounted) return;
+    setState(() => foto ? _procesandoFoto = true : _procesandoBanner = true);
+    try {
+      final gif = await GifPerfil.preparar(bytes, foto: foto);
+      if (!mounted) return;
+      setState(() {
+        if (foto) {
+          _fotoNueva = gif;
+          _fotoEsGif = true;
+        } else {
+          _bannerNuevo = gif;
+          _bannerEsGif = true;
+          _bannerQuitado = false;
+        }
+      });
+    } catch (e) {
+      if (mounted) _aviso(e is ErrorNube ? e.mensaje : 'No se pudo usar ese GIF. Prueba con otro.');
+    } finally {
+      if (mounted) setState(() => foto ? _procesandoFoto = false : _procesandoBanner = false);
+    }
+  }
+
   void _quitarBanner() => setState(() {
         _bannerNuevo = null;
+        _bannerEsGif = false;
         _bannerQuitado = true;
       });
 
@@ -176,10 +253,10 @@ class _PerfilEditarPaginaState extends State<PerfilEditarPagina> {
     setState(() => _guardando = true);
     try {
       var foto = p.fotoUrl;
-      if (_fotoNueva != null) foto = await social.subirFoto(_fotoNueva!);
+      if (_fotoNueva != null) foto = _fotoEsGif ? await social.subirFotoGif(_fotoNueva!) : await social.subirFoto(_fotoNueva!);
       var banner = p.bannerUrl;
       if (_bannerNuevo != null) {
-        banner = await social.subirBanner(_bannerNuevo!);
+        banner = _bannerEsGif ? await social.subirBannerGif(_bannerNuevo!) : await social.subirBanner(_bannerNuevo!);
       } else if (_bannerQuitado) {
         banner = '';
       }
@@ -368,10 +445,32 @@ class _PerfilEditarPaginaState extends State<PerfilEditarPagina> {
         Positioned(bottom: -50, child: _foto(p, color)),
       ]),
       const SizedBox(height: 56),
+      if (_puedeGif) ...[
+        Wrap(alignment: WrapAlignment.center, spacing: 8, runSpacing: 8, children: [
+          _botonGif('Buscar GIF (foto)', () => _buscarGif(foto: true), _procesandoFoto),
+          _botonGif('Buscar GIF (fondo)', () => _buscarGif(foto: false), _procesandoBanner),
+        ]),
+        const SizedBox(height: 10),
+      ],
       Text(_bannerNuevo != null ? 'Imagen lista. Se subirá al guardar.' : tieneBanner ? 'Toca el icono para cambiar tu imagen de fondo' : 'Añade una imagen de fondo a tu perfil',
           style: estiloDetalle),
     ]);
   }
+
+  Widget _botonGif(String texto, VoidCallback alPulsar, bool ocupado) => OutlinedButton(
+        onPressed: ocupado ? null : alPulsar,
+        style: OutlinedButton.styleFrom(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(999)),
+        ),
+        child: Row(mainAxisSize: MainAxisSize.min, children: [
+          const Icon(Icons.gif_box_rounded, size: 18),
+          const SizedBox(width: 6),
+          Flexible(child: Text(texto, overflow: TextOverflow.ellipsis, maxLines: 1)),
+          const SizedBox(width: 8),
+          const InsigniaGifDonador(),
+        ]),
+      );
 
   Widget _foto(PerfilEditable p, Color color) => Column(children: [
         GestureDetector(

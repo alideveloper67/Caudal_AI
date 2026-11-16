@@ -1,10 +1,14 @@
-// El aviso de novedades grande: cuando toca, que se vea bien en pantallas
-// distintas, que se pueda cerrar y que la release marcada [grande] lo use.
+// La segunda actualizacion grande: cuando toca ensenarla, que cada diapositiva
+// se vea bien en pantallas distintas, que se pueda recorrer (tactil, botones,
+// teclado), que se cierre con «Saltar» y «Empezar», y que la release marcada
+// [grande] use el aviso previo.
 import 'package:caudal/nucleo/plataforma.dart';
 import 'package:caudal/nucleo/version.dart';
+import 'package:caudal/ui/novedades/diapositivas.dart';
 import 'package:caudal/ui/novedades_grandes.dart';
 import 'package:caudal/ui/tema.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 Future<void> _montar(WidgetTester t, Size tamano, Widget aviso,
@@ -13,7 +17,7 @@ Future<void> _montar(WidgetTester t, Size tamano, Widget aviso,
   t.view.devicePixelRatio = 2;
   addTearDown(t.view.reset);
   await t.pumpWidget(MaterialApp(
-    theme: temaCaudal().copyWith(splashFactory: NoSplash.splashFactory),
+    theme: temaCaudal().copyWith(splashFactory: InkRipple.splashFactory),
     builder: (ctx, hijo) => MediaQuery(
       data: MediaQuery.of(ctx).copyWith(textScaler: TextScaler.linear(texto), disableAnimations: sinAnimar),
       child: hijo!,
@@ -22,25 +26,37 @@ Future<void> _montar(WidgetTester t, Size tamano, Widget aviso,
   ));
 }
 
+Future<void> _avanza(WidgetTester t, [int segundos = 1]) async {
+  await t.pump();
+  await t.pump(Duration(seconds: segundos));
+}
+
 void main() {
-  group('cuando toca enseñarlo', () {
+  group('cuando toca ensenarlo', () {
+    test('la edicion es la 2.3.0', () => expect(edicionNovedades, '2.3.0'));
+
+    test('quien ya vio la primera (2.2.0) ve esta al pasar a la 2.3.0 o a un parche', () {
+      expect(tocaNovedades('2.2.0', '2.3.0'), isTrue);
+      expect(tocaNovedades('2.2.0', '2.3.1'), isTrue);
+      expect(tocaNovedades('2.2.3', '2.3.0'), isTrue);
+    });
+
     test('la primera vez que se abre la edicion (o un parche suyo)', () {
-      expect(tocaNovedades(null, '2.2.0'), isTrue);
-      expect(tocaNovedades('', '2.2.0'), isTrue);
-      expect(tocaNovedades('2.1.3', '2.2.0'), isTrue);
-      expect(tocaNovedades('2.1.3', '2.2.1'), isTrue);
-      expect(tocaNovedades('1.9.0', '2.3.0'), isTrue);
+      expect(tocaNovedades(null, '2.3.0'), isTrue);
+      expect(tocaNovedades('', '2.3.0'), isTrue);
+      expect(tocaNovedades('2.1.3', '2.3.1'), isTrue);
+      expect(tocaNovedades('1.9.0', '2.4.0'), isTrue);
     });
 
     test('una sola vez: si ya se vio no vuelve, ni con un parche', () {
-      expect(tocaNovedades('2.2.0', '2.2.0'), isFalse);
-      expect(tocaNovedades('2.2.0', '2.2.1'), isFalse);
-      expect(tocaNovedades('2.2.1', '2.2.4'), isFalse);
       expect(tocaNovedades('2.3.0', '2.3.0'), isFalse);
+      expect(tocaNovedades('2.3.0', '2.3.1'), isFalse);
+      expect(tocaNovedades('2.3.1', '2.3.4'), isFalse);
     });
 
-    test('antes de la edicion no sale', () {
-      expect(tocaNovedades(null, '2.1.3'), isFalse);
+    test('antes de la edicion no sale (la 2.2.x ya no ensena la anterior)', () {
+      expect(tocaNovedades(null, '2.2.0'), isFalse);
+      expect(tocaNovedades('2.2.0', '2.2.1'), isFalse);
       expect(tocaNovedades('2.0.0', '2.1.9'), isFalse);
     });
   });
@@ -79,129 +95,167 @@ void main() {
     });
   });
 
-  group('la pantalla', () {
-    const tamanos = [Size(320, 568), Size(360, 640), Size(411, 891), Size(768, 1024), Size(1280, 800)];
+  group('la presentacion', () {
+    const tamanos = [Size(320, 568), Size(412, 915), Size(915, 412), Size(800, 1280), Size(1440, 900)];
+
+    test('tiene once diapositivas y la portada lleva el titulo de la edicion', () {
+      expect(diapositivas.length, 11);
+      expect(diapositivas.first.titulo, 'ACTUALIZACIÓN GRANDE DE CAUDAL');
+      expect(diapositivas.last.titulo, 'Gracias por ser parte de Caudal');
+    });
 
     for (final tam in tamanos) {
-      testWidgets('se ve entera y sin desbordes en ${tam.width.toInt()}x${tam.height.toInt()}', (t) async {
-        await _montar(t, tam, const NovedadesGrandes());
-        // la entrada dura 2,4 s: se avanza el reloj a mano (hay luces que no paran)
-        await t.pump();
-        await t.pump(const Duration(milliseconds: 600));
-        await t.pump(const Duration(seconds: 3));
-        expect(find.text('La actualización más grande de Caudal'), findsOneWidget);
-        expect(find.text('Perfiles, amigos, tu propia música y un DJ dentro de la app'), findsOneWidget);
-        for (final it in novedadesDeEstaEdicion) {
-          expect(find.text(it.titular, skipOffstage: false), findsOneWidget, reason: it.titular);
-        }
-        expect(find.text('Empezar'), findsOneWidget);
-        expect(find.byTooltip('Cerrar'), findsOneWidget);
-        expect(t.takeException(), isNull);
-      });
+      for (var i = 0; i < 11; i++) {
+        testWidgets('diapositiva ${i + 1} sin desbordes en ${tam.width.toInt()}x${tam.height.toInt()}', (t) async {
+          await _montar(t, tam, NovedadesGrandes(paginaInicial: i));
+          // las ilustraciones no paran: el reloj se avanza a mano, varios segundos
+          await t.pump();
+          for (var k = 0; k < 6; k++) {
+            await t.pump(const Duration(seconds: 1));
+          }
+          expect(find.text(diapositivas[i].titulo), findsOneWidget);
+          expect(find.text('Saltar'), findsOneWidget);
+          expect(find.text('Empezar'), i == 10 ? findsOneWidget : findsNothing);
+          expect(t.takeException(), isNull);
+        });
+      }
     }
 
-    testWidgets('con la letra al 130 % tampoco se desborda', (t) async {
-      await _montar(t, const Size(320, 568), const NovedadesGrandes(), texto: 1.3);
+    testWidgets('con la letra al 130 % no se desborda ninguna diapositiva en 320x568', (t) async {
+      for (var i = 0; i < 11; i++) {
+        await _montar(t, const Size(320, 568), NovedadesGrandes(paginaInicial: i), texto: 1.3);
+        await _avanza(t, 3);
+        expect(find.text('Saltar'), findsOneWidget);
+        expect(t.takeException(), isNull, reason: 'diapositiva ${i + 1}');
+      }
+    });
+
+    testWidgets('quien pide menos movimiento la ve compuesta y el salto es inmediato', (t) async {
+      await _montar(t, const Size(360, 640), const NovedadesGrandes(), sinAnimar: true);
       await t.pump();
-      await t.pump(const Duration(seconds: 3));
-      expect(find.text('Empezar'), findsOneWidget);
+      expect(find.text('ACTUALIZACIÓN GRANDE DE CAUDAL'), findsOneWidget);
+      await t.tap(find.byTooltip('Siguiente'));
+      await t.pump();
+      expect(find.text(diapositivas[1].titulo), findsOneWidget);
       expect(t.takeException(), isNull);
     });
 
-    testWidgets('en una pantalla ancha las tarjetas van en dos columnas', (t) async {
-      await _montar(t, const Size(1000, 800), const NovedadesGrandes());
-      await t.pump();
-      await t.pump(const Duration(seconds: 3));
-      final a = t.getRect(find.text('Perfiles de verdad'));
-      final b = t.getRect(find.text('Amigos con solicitud'));
-      expect(b.left, greaterThan(a.right), reason: 'la segunda tarjeta va al lado');
-      expect((a.top - b.top).abs(), lessThan(8));
-    });
-
-    testWidgets('en un telefono van en una sola columna, una bajo otra', (t) async {
+    testWidgets('los botones Siguiente y Anterior pasan de diapositiva', (t) async {
       await _montar(t, const Size(360, 640), const NovedadesGrandes());
-      await t.pump();
-      await t.pump(const Duration(seconds: 3));
-      final a = t.getRect(find.text('Perfiles de verdad'));
-      final b = t.getRect(find.text('Amigos con solicitud'));
-      expect(b.top, greaterThan(a.bottom));
+      await _avanza(t);
+      expect(find.byTooltip('Anterior'), findsNothing);
+      await t.tap(find.byTooltip('Siguiente'));
+      await _avanza(t);
+      expect(find.text(diapositivas[1].titulo), findsOneWidget);
+      expect(find.byTooltip('Anterior'), findsOneWidget);
+      await t.tap(find.byTooltip('Anterior'));
+      await _avanza(t);
+      expect(find.text(diapositivas[0].titulo), findsOneWidget);
     });
 
-    testWidgets('las tarjetas entran una a una', (t) async {
+    testWidgets('se pasa deslizando', (t) async {
       await _montar(t, const Size(360, 640), const NovedadesGrandes());
-      await t.pump();
-      await t.pump(const Duration(milliseconds: 500));
-      double opacidadDe(String texto) {
-        final o = find.ancestor(of: find.text(texto), matching: find.byType(Opacity)).first;
-        return t.widget<Opacity>(o).opacity;
-      }
-      final primera = opacidadDe('Perfiles de verdad');
-      final cuarta = opacidadDe('Sube tu música');
-      expect(primera, greaterThan(cuarta), reason: 'la primera sale antes que la cuarta');
-      await t.pump(const Duration(seconds: 3));
-      expect(opacidadDe('Logo nuevo'), 1);
-      expect(opacidadDe('Sube tu música'), 1);
+      await _avanza(t);
+      await t.drag(find.byType(PageView), const Offset(-300, 0));
+      await _avanza(t);
+      expect(find.text(diapositivas[1].titulo), findsOneWidget);
     });
 
-    testWidgets('quien pide menos movimiento lo ve todo ya puesto', (t) async {
-      await _montar(t, const Size(360, 640), const NovedadesGrandes(), sinAnimar: true);
-      await t.pump();
-      final o = find.ancestor(of: find.text('Logo nuevo'), matching: find.byType(Opacity)).first;
-      expect(t.widget<Opacity>(o).opacity, 1);
+    testWidgets('el teclado: flechas, espacio, Fin e Inicio', (t) async {
+      await _montar(t, const Size(1000, 700), const NovedadesGrandes());
+      await _avanza(t);
+      await t.sendKeyEvent(LogicalKeyboardKey.arrowRight);
+      await _avanza(t);
+      expect(find.text(diapositivas[1].titulo), findsOneWidget);
+      await t.sendKeyEvent(LogicalKeyboardKey.space);
+      await _avanza(t);
+      expect(find.text(diapositivas[2].titulo), findsOneWidget);
+      await t.sendKeyEvent(LogicalKeyboardKey.arrowLeft);
+      await _avanza(t);
+      expect(find.text(diapositivas[1].titulo), findsOneWidget);
+      await t.sendKeyEvent(LogicalKeyboardKey.end);
+      await _avanza(t);
+      expect(find.text('Empezar'), findsOneWidget);
+      await t.sendKeyEvent(LogicalKeyboardKey.home);
+      await _avanza(t);
+      expect(find.text(diapositivas[0].titulo), findsOneWidget);
     });
 
-    testWidgets('«Empezar» y la X cierran, cada uno avisando', (t) async {
+    testWidgets('«Saltar» y Escape la cierran, cada uno avisando', (t) async {
+      var cerrado = 0;
+      await _montar(t, const Size(360, 640), NovedadesGrandes(alCerrar: () => cerrado++));
+      await _avanza(t);
+      await t.tap(find.text('Saltar'));
+      await t.pump();
+      expect(cerrado, 1);
+      await t.sendKeyEvent(LogicalKeyboardKey.escape);
+      await t.pump();
+      expect(cerrado, 2);
+    });
+
+    testWidgets('«Saltar» sigue a la vista en la ultima diapositiva', (t) async {
+      await _montar(t, const Size(360, 640), const NovedadesGrandes(paginaInicial: 10));
+      await _avanza(t);
+      expect(find.text('Saltar'), findsOneWidget);
+    });
+
+    testWidgets('«Empezar» y Enter al final avisan a quien la monto', (t) async {
       var empezado = 0, cerrado = 0;
       await _montar(t, const Size(360, 640),
-          NovedadesGrandes(alEmpezar: () => empezado++, alCerrar: () => cerrado++));
-      await t.pump();
-      await t.pump(const Duration(seconds: 3));
+          NovedadesGrandes(paginaInicial: 10, alEmpezar: () => empezado++, alCerrar: () => cerrado++));
+      await _avanza(t);
       await t.tap(find.text('Empezar'));
       await t.pump();
       expect(empezado, 1);
-      await t.tap(find.byTooltip('Cerrar'));
+      await t.sendKeyEvent(LogicalKeyboardKey.enter);
       await t.pump();
-      expect(cerrado, 1);
+      expect(empezado, 2);
+      expect(cerrado, 0);
     });
 
-    testWidgets('abierto como ruta se cierra solo con la X y no deja nada', (t) async {
+    testWidgets('abierta como ruta, «Saltar» la cierra y no deja nada', (t) async {
       late BuildContext raiz;
       await t.pumpWidget(MaterialApp(
-        theme: temaCaudal().copyWith(splashFactory: NoSplash.splashFactory),
+        theme: temaCaudal().copyWith(splashFactory: InkRipple.splashFactory),
         home: Builder(builder: (ctx) {
           raiz = ctx;
           return const Scaffold(body: Text('la app'));
         }),
       ));
       NovedadesGrandes.mostrar(raiz);
-      await t.pump();
-      await t.pump(const Duration(seconds: 3));
-      expect(find.text('La actualización más grande de Caudal'), findsOneWidget);
-      await t.tap(find.byTooltip('Cerrar'));
+      await _avanza(t);
+      expect(find.text('ACTUALIZACIÓN GRANDE DE CAUDAL'), findsOneWidget);
+      await t.tap(find.text('Saltar'));
       await t.pump();
       await t.pump(const Duration(seconds: 1));
-      expect(find.text('La actualización más grande de Caudal'), findsNothing);
+      expect(find.text('ACTUALIZACIÓN GRANDE DE CAUDAL'), findsNothing);
       expect(find.text('la app'), findsOneWidget);
     });
 
-    testWidgets('se puede leer con lector de pantalla: titulo, tarjetas y botones', (t) async {
+    testWidgets('en vertical la ilustracion va sobre el texto; en horizontal, al lado', (t) async {
+      await _montar(t, const Size(360, 640), const NovedadesGrandes(paginaInicial: 1));
+      await _avanza(t);
+      expect(t.getRect(find.text(diapositivas[1].titulo)).top, greaterThan(300));
+      await _montar(t, const Size(1000, 600), const NovedadesGrandes(paginaInicial: 1));
+      await _avanza(t);
+      expect(t.getRect(find.text(diapositivas[1].titulo)).left, greaterThan(400));
+    });
+
+    testWidgets('se puede leer con lector de pantalla: titulo y botones', (t) async {
       final semantica = t.ensureSemantics();
       await _montar(t, const Size(360, 640), const NovedadesGrandes());
-      await t.pump();
-      await t.pump(const Duration(seconds: 3));
-      expect(find.bySemanticsLabel(RegExp('Perfiles de verdad. Foto, descripción')), findsOneWidget);
-      expect(find.bySemanticsLabel(RegExp('Mezclador. Un DJ automático')), findsOneWidget);
-      expect(t.getSemantics(find.byTooltip('Cerrar')).getSemanticsData().tooltip, 'Cerrar');
-      expect(t.getSemantics(find.byTooltip('Cerrar')).flagsCollection.isButton, isTrue);
-      expect(find.bySemanticsLabel('Empezar'), findsWidgets);
-      expect(t.getSemantics(find.text('La actualización más grande de Caudal')).flagsCollection.isHeader, isTrue);
+      await _avanza(t);
+      expect(t.getSemantics(find.text('ACTUALIZACIÓN GRANDE DE CAUDAL')).flagsCollection.isHeader, isTrue);
+      expect(find.bySemanticsLabel(RegExp('Diapositiva 1 de 11')), findsWidgets);
+      expect(t.getSemantics(find.byTooltip('Siguiente')).flagsCollection.isButton, isTrue);
+      expect(find.bySemanticsLabel('Saltar'), findsWidgets);
       semantica.dispose();
     });
   });
 
   group('el aviso previo a actualizar ([grande])', () {
     const grande = Novedad(
-      version: '2.2.0', notas: '[grande]\nTambién arreglamos los colores del reproductor.',
+      version: '2.3.0', notas: '[grande]\nTambién arreglamos los colores del reproductor.',
       apk: 'https://ejemplo/Caudal.apk', pagina: 'https://ejemplo/release', peso: 1000);
 
     setUp(() => Plataforma.forzada = TargetPlatform.android);
@@ -210,32 +264,42 @@ void main() {
     testWidgets('en iPhone no se instala desde dentro: ofrece ver cómo actualizar', (t) async {
       Plataforma.forzada = TargetPlatform.iOS;
       await _montar(t, const Size(360, 640), const NovedadesGrandes(actualizacion: grande));
-      await t.pump();
-      await t.pump(const Duration(seconds: 3));
+      await _avanza(t, 3);
       expect(find.text('Ver cómo actualizar'), findsOneWidget);
       expect(find.text('Actualizar ahora'), findsNothing);
     });
 
-    testWidgets('usa el mismo diseño con «Actualizar ahora» y las notas al final', (t) async {
+    testWidgets('usa «Actualizar ahora», las tarjetas de novedades y las notas al final', (t) async {
       await _montar(t, const Size(360, 640), const NovedadesGrandes(actualizacion: grande));
-      await t.pump();
-      await t.pump(const Duration(seconds: 3));
-      expect(find.text('La actualización más grande de Caudal'), findsOneWidget);
+      await _avanza(t, 3);
+      expect(find.text('La nueva actualización grande de Caudal'), findsOneWidget);
       expect(find.text('Actualizar ahora'), findsOneWidget);
       expect(find.text('Empezar'), findsNothing);
       expect(find.text('Más tarde'), findsOneWidget);
-      expect(find.text('Caudal 2.2.0 ya está lista'), findsOneWidget);
+      expect(find.text('Caudal 2.3.0 ya está lista'), findsOneWidget);
+      for (final it in novedadesDeEstaEdicion) {
+        expect(find.text(it.titular, skipOffstage: false), findsOneWidget, reason: it.titular);
+      }
+      expect(novedadesDeEstaEdicion.length, 9);
       expect(find.text('Y además', skipOffstage: false), findsOneWidget);
       expect(find.text('También arreglamos los colores del reproductor.', skipOffstage: false), findsOneWidget);
       expect(find.textContaining('[grande]', skipOffstage: false), findsNothing);
       expect(t.takeException(), isNull);
     });
 
+    for (final tam in const [Size(320, 568), Size(915, 412), Size(1440, 900)]) {
+      testWidgets('sin desbordes en ${tam.width.toInt()}x${tam.height.toInt()}', (t) async {
+        await _montar(t, tam, const NovedadesGrandes(actualizacion: grande));
+        await _avanza(t, 3);
+        expect(find.text('Actualizar ahora'), findsOneWidget);
+        expect(t.takeException(), isNull);
+      });
+    }
+
     testWidgets('«Más tarde» cierra', (t) async {
       var cerrado = 0;
       await _montar(t, const Size(360, 640), NovedadesGrandes(actualizacion: grande, alCerrar: () => cerrado++));
-      await t.pump();
-      await t.pump(const Duration(seconds: 3));
+      await _avanza(t, 3);
       await t.tap(find.text('Más tarde'));
       await t.pump();
       expect(cerrado, 1);

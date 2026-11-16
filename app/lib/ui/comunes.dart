@@ -42,6 +42,12 @@ class Portada extends StatelessWidget {
     Widget img;
     if (url.isEmpty) {
       img = relleno;
+    } else if (PortadasMem.esRef(url)) {
+      final b = PortadasMem.bytes(url);
+      img = b == null
+          ? relleno
+          : Image.memory(b, fit: BoxFit.cover, cacheWidth: ancho, gaplessPlayback: true,
+              errorBuilder: (_, _, _) => relleno);
     } else if (!url.startsWith('http')) {
       img = Image.file(File(url), fit: BoxFit.cover, cacheWidth: ancho, gaplessPlayback: true,
           errorBuilder: (_, _, _) => relleno);
@@ -70,9 +76,13 @@ Future<Color> colorDominante(String url, {Color defecto = const Color(0xFF2A3240
   final hecho = _colores[url];
   if (hecho != null) return hecho;
   try {
-    final ImageProvider proveedor = url.startsWith('http')
-        ? ResizeImage(CachedNetworkImageProvider(url), width: 24, height: 24)
-        : ResizeImage(FileImage(File(url)), width: 24, height: 24);
+    final mem = PortadasMem.bytes(url);
+    if (PortadasMem.esRef(url) && mem == null) return defecto;
+    final ImageProvider proveedor = mem != null
+        ? ResizeImage(MemoryImage(mem), width: 24, height: 24)
+        : url.startsWith('http')
+            ? ResizeImage(CachedNetworkImageProvider(url), width: 24, height: 24)
+            : ResizeImage(FileImage(File(url)), width: 24, height: 24);
     final completer = Completer<ImageInfo>();
     final stream = proveedor.resolve(ImageConfiguration.empty);
     late ImageStreamListener oyente;

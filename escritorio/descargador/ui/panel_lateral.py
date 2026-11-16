@@ -8,7 +8,7 @@ from PySide6.QtGui import QColor, QFont, QFontMetrics, QLinearGradient, QPainter
 from PySide6.QtWidgets import (QButtonGroup, QFrame, QHBoxLayout, QLabel, QLineEdit, QMenu,
                                QPushButton, QScrollArea, QVBoxLayout, QWidget)
 
-from . import iconos, imagenes
+from . import dialogo_portada, iconos, imagenes
 from .componentes import MIME_PISTAS, BotonIcono, _borrar_layout, fuente
 from .estilos import C
 
@@ -187,6 +187,7 @@ class PanelLateral(QWidget):
            ("directorio", "Perfiles de Caudal", "usuario"),
            ("comunidad", "Música de la comunidad", "musica"),
            ("mezclador", "Mezclador", "ecualizador"),
+           ("estudio", "Modo estudio", "graduado"),
            ("descargas", "Descargar videos", "descargar")]
 
     def __init__(self, ctx, padre=None):
@@ -473,6 +474,7 @@ class PanelLateral(QWidget):
             menu.addAction(iconos.icono("editar", 16, C["texto2"]), "Cambiar nombre y descripción",
                            lambda: self.ir.emit({"pagina": "mi_lista", "id": el["id"],
                                                  "editar": True}))
+            dialogo_portada.agregar_al_menu(menu, self.ctx, el["id"], self)
             self.ctx.menu_descargar(menu, lambda cb: self.ctx.pistas_de(el, cb))
             menu.addSeparator()
             menu.addAction(iconos.icono("papelera", 16, C["texto2"]), "Borrar la lista",

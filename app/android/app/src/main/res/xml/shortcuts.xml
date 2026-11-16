@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Atajo de la app (mantener pulsado el icono): abre el Modo estudio con el
+     perfil que usaste la última vez, mediante el enlace caudal://estudio. -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="estudio"
+        android:enabled="true"
+        android:icon="@mipmap/ic_launcher"
+        android:shortcutShortLabel="@string/atajo_estudio_corto"
+        android:shortcutLongLabel="@string/atajo_estudio_largo">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.kevinrr.caudal"
+            android:targetClass="com.kevinrr.caudal.MainActivity"
+            android:data="caudal://estudio" />
+    </shortcut>
+</shortcuts>

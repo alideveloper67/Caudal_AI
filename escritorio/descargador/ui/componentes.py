@@ -1522,14 +1522,18 @@ class Cabecera(QWidget):
 
     color_listo = Signal(object)
 
-    def __init__(self, ctx, tipo, titulo, url="", forma="cuadrada", lado=220, padre=None):
+    def __init__(self, ctx, tipo, titulo, url="", forma="cuadrada", lado=220, padre=None,
+                 editable=False):
         super().__init__(padre)
         self.ctx = ctx
         h = QHBoxLayout(self)
         h.setContentsMargins(0, 36, 0, 8)
         h.setSpacing(24)
-        self.portada = Portada(lado, lado, forma, 6 if forma != "redonda" else 0,
-                               icono={"Lista": "lista", "Artista": "usuario"}.get(tipo, "musica"))
+        clase = Portada
+        if editable:
+            from .dialogo_portada import PortadaEditable as clase
+        self.portada = clase(lado, lado, forma, 6 if forma != "redonda" else 0,
+                             icono={"Lista": "lista", "Artista": "usuario"}.get(tipo, "musica"))
         from PySide6.QtWidgets import QGraphicsDropShadowEffect
         sombra = QGraphicsDropShadowEffect(self.portada)
         sombra.setBlurRadius(48)

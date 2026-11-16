@@ -2,6 +2,8 @@ import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 
 import '../nucleo/version.dart';
+import 'novedades/diapositivas.dart';
+import 'novedades/presentacion.dart';
 import 'plataforma.dart';
 import 'tema.dart';
 
@@ -14,78 +16,91 @@ class NovedadItem {
   final Color color;
 }
 
-/// Lo que trae la gran actualizacion social (Android 2.2.0).
-const novedadesDeEstaEdicion = <NovedadItem>[
-  NovedadItem(Icons.groups_rounded, 'Perfiles de verdad',
-      'Foto, descripción, canción favorita con su carátula, color propio e insignias.', Color(0xFF8B6CFF)),
-  NovedadItem(Icons.person_add_alt_1_rounded, 'Amigos con solicitud',
-      'Nadie te escribe sin tu permiso: primero llega una solicitud.', Color(0xFF2BD576)),
-  NovedadItem(Icons.explore_rounded, 'Descubre gente',
-      'El directorio de perfiles, me gusta y la nota ARTISTA al llegar a 200.', Color(0xFF4C8DFF)),
-  NovedadItem(Icons.cloud_upload_rounded, 'Sube tu música',
-      'Con carátula y álbum. La escucha toda la comunidad.', Color(0xFFFF8A3D)),
-  NovedadItem(Icons.album_rounded, 'Mezclador',
-      'Un DJ automático y tu propia mesa para mezclar a tu gusto.', Color(0xFFFF5C8A)),
-  NovedadItem(Icons.history_rounded, 'Tu mes pasado',
-      'Una lista con lo que más escuchaste el mes pasado.', Color(0xFF22D3EE)),
-  NovedadItem(Icons.palette_rounded, 'Colores al instante',
-      'El color y el fondo cambian sin cerrar Caudal.', Color(0xFFB4A1FF)),
-  NovedadItem(Icons.star_rounded, 'Logo nuevo',
-      'Y la versión siempre a la vista, abajo a la izquierda.', Color(0xFFF5C542)),
+/// Lo que trae la segunda actualizacion grande (Android 2.3.0), una tarjeta por
+/// diapositiva (sin la portada ni el final). Es lo que muestra el aviso previo
+/// a actualizar; la presentacion usa las diapositivas completas.
+final List<NovedadItem> novedadesDeEstaEdicion = [
+  for (final d in diapositivas.sublist(1, diapositivas.length - 1)) NovedadItem(d.icono, d.titulo, d.texto, d.color),
 ];
 
-const _titulo = 'La actualización más grande de Caudal';
-const _subtitulo = 'Perfiles, amigos, tu propia música y un DJ dentro de la app';
+const _titulo = 'La nueva actualización grande de Caudal';
+const _subtitulo = 'Fondo propio, modo vinilo, modo estudio, GIF y mucho más';
 
-/// El aviso grande de novedades: una hoja a pantalla casi completa, con un
-/// degradado del color de acento, tarjetas que entran una a una y un boton
-/// grande abajo.
-///
-/// Dos usos:
-///  * sin [actualizacion]: «Empezar», al abrir por primera vez la version nueva;
-///  * con [actualizacion] (una release marcada `[grande]`): «Actualizar ahora»,
-///    que baja e instala la version (en iPhone abre su pagina).
+/// La actualizacion grande de Caudal. Dos usos:
+///  * sin [actualizacion]: la presentacion a pantalla completa
+///    ([PresentacionNovedades]), al abrir por primera vez la version nueva;
+///  * con [actualizacion] (una release marcada `[grande]`): el aviso previo con
+///    «Actualizar ahora», que baja e instala la version (en iPhone abre su pagina).
 ///
 /// No toca la musica: es solo una pantalla encima de la app.
-class NovedadesGrandes extends StatefulWidget {
+class NovedadesGrandes extends StatelessWidget {
   const NovedadesGrandes({
     super.key,
     this.actualizacion,
-    this.items = novedadesDeEstaEdicion,
+    this.items,
     this.alCerrar,
     this.alEmpezar,
+    this.paginaInicial = 0,
   });
 
   final Novedad? actualizacion;
-  final List<NovedadItem> items;
+  final List<NovedadItem>? items;
 
   /// Para las pruebas o para quien lo monte sin ruta propia: se llama al cerrar.
   final VoidCallback? alCerrar;
   final VoidCallback? alEmpezar;
 
-  /// Lo abre a pantalla casi completa, con una entrada suave. Termina cuando se cierra.
+  /// Diapositiva con la que abre la presentacion (para las pruebas).
+  final int paginaInicial;
+
+  /// Lo abre a pantalla completa, con una entrada suave. Termina cuando se cierra.
   static Future<void> mostrar(BuildContext context, {Novedad? actualizacion}) =>
       Navigator.of(context, rootNavigator: true).push(PageRouteBuilder<void>(
-        opaque: false,
+        opaque: actualizacion == null,
         barrierColor: Colors.black54,
-        transitionDuration: const Duration(milliseconds: 420),
-        reverseTransitionDuration: const Duration(milliseconds: 260),
+        transitionDuration: const Duration(milliseconds: 520),
+        reverseTransitionDuration: const Duration(milliseconds: 320),
         pageBuilder: (_, _, _) => NovedadesGrandes(actualizacion: actualizacion),
         transitionsBuilder: (_, a, _, hijo) => FadeTransition(
           opacity: CurvedAnimation(parent: a, curve: Curves.easeOut),
-          child: SlideTransition(
-            position: Tween(begin: const Offset(0, 0.06), end: Offset.zero)
-                .animate(CurvedAnimation(parent: a, curve: Curves.easeOutCubic)),
-            child: hijo,
-          ),
+          child: actualizacion == null
+              ? ScaleTransition(
+                  scale: Tween(begin: 1.04, end: 1.0).animate(CurvedAnimation(parent: a, curve: Curves.easeOutCubic)),
+                  child: hijo,
+                )
+              : SlideTransition(
+                  position: Tween(begin: const Offset(0, 0.06), end: Offset.zero)
+                      .animate(CurvedAnimation(parent: a, curve: Curves.easeOutCubic)),
+                  child: hijo,
+                ),
         ),
       ));
 
   @override
-  State<NovedadesGrandes> createState() => _NovedadesGrandesState();
+  Widget build(BuildContext context) {
+    final n = actualizacion;
+    if (n == null) {
+      return PresentacionNovedades(alCerrar: alCerrar, alEmpezar: alEmpezar, paginaInicial: paginaInicial);
+    }
+    return _AvisoActualizacion(actualizacion: n, items: items ?? novedadesDeEstaEdicion, alCerrar: alCerrar);
+  }
 }
 
-class _NovedadesGrandesState extends State<NovedadesGrandes> with TickerProviderStateMixin {
+/// El aviso previo a actualizar (release marcada `[grande]`): una hoja a
+/// pantalla casi completa con tarjetas que entran una a una y un boton grande.
+class _AvisoActualizacion extends StatefulWidget {
+  const _AvisoActualizacion({required this.actualizacion, required this.items, this.alCerrar});
+
+  final Novedad? actualizacion;
+  final List<NovedadItem> items;
+  final VoidCallback? alCerrar;
+  VoidCallback? get alEmpezar => null;
+
+  @override
+  State<_AvisoActualizacion> createState() => _NovedadesGrandesState();
+}
+
+class _NovedadesGrandesState extends State<_AvisoActualizacion> with TickerProviderStateMixin {
   late final AnimationController _entrada =
       AnimationController(vsync: this, duration: const Duration(milliseconds: 2400));
   late final AnimationController _brillo =

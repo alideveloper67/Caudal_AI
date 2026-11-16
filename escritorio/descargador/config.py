@@ -135,6 +135,8 @@ DEFECTOS = {
     "al_cerrar": "preguntar",        # preguntar | bandeja | salir (con musica sonando)
     "mini_encima": True,             # el mini reproductor queda por encima de todo
     "letras_auto": False,            # abrir las letras al reproducir
+    "vinilo_auto": False,            # abrir el modo vinilo al reproducir
+    "vinilo_pantalla": True,         # el modo vinilo mantiene la pantalla encendida
     "panel_derecho": "sonando",      # sonando | cola | letras | oculto
     "subtitulos_video": False,
     "teclas_multimedia": True,

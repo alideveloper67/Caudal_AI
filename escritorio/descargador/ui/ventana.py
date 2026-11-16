@@ -24,7 +24,7 @@ from .panel_lateral import PanelLateral
 EXT_AUDIO = {".mp3", ".m4a", ".opus", ".ogg", ".flac", ".wav", ".aac", ".wma", ".webm"}
 EXT_VIDEO = {".mp4", ".mkv", ".mov", ".avi", ".webm", ".m4v", ".wmv", ".flv", ".ts"}
 
-SINGLETONS = ("descargas", "video", "letra")
+SINGLETONS = ("descargas", "video", "letra", "vinilo")
 
 
 class _Teclas(QObject):
@@ -427,6 +427,13 @@ class Ventana(QWidget):
             from .letra_viva import PaginaLetra
             w = PaginaLetra(self.ctx)
             w.volver.connect(self.cerrar_letra)
+        elif pag == "vinilo":
+            from .vinilo import PaginaVinilo
+            w = PaginaVinilo(self.ctx)
+            w.volver.connect(self.cerrar_vinilo)
+        elif pag == "estudio":
+            from .paginas.estudio import PaginaEstudio
+            w = PaginaEstudio(self.ctx)
         elif pag == "video":
             from .video import VistaVideo
             w = VistaVideo(self.ctx)
@@ -449,6 +456,10 @@ class Ventana(QWidget):
         return w
 
     def navegar(self, destino, reemplazar=False):
+        if destino.get("pagina") != "estudio" and self._estudio_en_curso():
+            # un bloque de estudio en curso: antes de irse, se pregunta
+            self._guardia_estudio(lambda: self.navegar(destino, reemplazar))
+            return
         if self.en_completa and destino.get("pagina") != "video":
             self.alternar_completa()
         # ajustes y paginas unicas: si ya estas ahi, no se duplica
@@ -497,6 +508,9 @@ class Ventana(QWidget):
             self.historia[i] = (d, None)
 
     def _mostrar(self, destino, w):
+        est = getattr(self.ctx, "estudio", None)
+        if est is not None and destino.get("pagina") != "estudio":
+            est.salir_del_modo()        # fuera de la pantalla de estudio: todo vuelve a su sitio
         cambio = self.pila.currentWidget() is not w
         self.pila.setCurrentWidget(w)
         self._ajustar_barra(destino.get("pagina"))
@@ -518,6 +532,7 @@ class Ventana(QWidget):
         self.bt_descargas.set_activo(pag == "descargas", punto=False)
         self.bt_ajustes.set_activo(pag == "ajustes", punto=False)
         if hasattr(self, "barra") and hasattr(self, "panel_der"):
+            self.barra.bt_vinilo.set_activo(pag == "vinilo", punto=False)
             self.barra.bt_letras.set_activo(pag == "letra" or (
                 self.panel_der.isVisible() and self.panel_der.actual == "letras"))
         titulo = getattr(w, "titulo", "") or ""
@@ -556,6 +571,10 @@ class Ventana(QWidget):
             self._ir(self.indice + 1)
 
     def _ir(self, i):
+        if self._estudio_en_curso() and 0 <= i < len(self.historia) \
+                and self.historia[i][0].get("pagina") != "estudio":
+            self._guardia_estudio(lambda: self._ir(i))
+            return
         if self.en_completa:
             self.alternar_completa()
         self.indice = i
@@ -609,6 +628,8 @@ class Ventana(QWidget):
         self.barra.pidio_panel.connect(self.alternar_panel)
         self.barra.pidio_letra.connect(self.alternar_letra)
         self.barra.pidio_video.connect(self._ver_video)
+        self.barra.pidio_vinilo.connect(self.alternar_vinilo)
+        self.r.estado_cambio.connect(self._vinilo_auto)
         self.barra.pidio_mini.connect(self.alternar_mini)
         self.barra.pidio_ecualizador.connect(self.abrir_ecualizador)
         self.panel_der.cerrado.connect(lambda: self.alternar_panel(None))
@@ -651,7 +672,11 @@ class Ventana(QWidget):
         atajo("Ctrl+Shift+Q", lambda: self.alternar_panel("cola"))
         atajo("Ctrl+M", self.alternar_mini)
         atajo("F11", self.alternar_completa)
-        atajo("Escape", lambda: self.en_completa and self.alternar_completa())
+        atajo("Escape", lambda: self.en_completa and self.alternar_completa()
+              or self._escape_estudio()
+              or self._en_vinilo() and self.cerrar_vinilo())
+        atajo("Ctrl+Shift+E", self.abrir_estudio)
+        atajo("Ctrl+Shift+N", self._notas_estudio)
         # en la vista de video: F, I, M y flechas como en YouTube
         for tecla, accion in (("F", self._f_video), ("I", self.alternar_mini),
                               ("M", self.barra._silenciar),
@@ -718,6 +743,35 @@ class Ventana(QWidget):
             self.cerrar_letra()
         else:
             self.navegar({"pagina": "letra"})
+
+    def _en_vinilo(self):
+        actual = self.historia[self.indice][0] if 0 <= self.indice < len(self.historia) else {}
+        return actual.get("pagina") == "vinilo"
+
+    def alternar_vinilo(self):
+        """El modo vinilo a pantalla completa; si ya esta abierto, se vuelve."""
+        if self._en_vinilo():
+            self.cerrar_vinilo()
+        elif self.r.actual is not None:
+            self.navegar({"pagina": "vinilo"})
+
+    def cerrar_vinilo(self):
+        if self.indice > 0:
+            self.atras()
+        else:
+            self.navegar({"pagina": "inicio"})
+
+    def _vinilo_auto(self, estado):
+        """Con «Mostrar el vinilo al reproducir», se abre al empezar cada cancion."""
+        p = self.r.actual
+        if estado != "sonando" or not p or not self.ajustes["vinilo_auto"] or self.r.modo != "audio":
+            return
+        clave = p.get("clave") or p.get("video_id")
+        if clave == getattr(self, "_vinilo_clave", None):
+            return
+        self._vinilo_clave = clave
+        if not self._en_vinilo() and not self.en_completa:
+            self.navegar({"pagina": "vinilo"})
 
     def cerrar_letra(self):
         if self.indice > 0:
@@ -1078,7 +1132,59 @@ class Ventana(QWidget):
             self.aviso.move((self.width() - self.aviso.width()) // 2,
                             self.height() - self.aviso.height() - 120)
 
+    # ------------------------------------------------------------ modo estudio
+
+    def _estudio_en_curso(self):
+        est = getattr(self.ctx, "estudio", None)
+        return est is not None and est.hay_bloque()
+
+    def _guardia_estudio(self, accion):
+        """«¿Salir de tu sesión de estudio?» con un bloque en curso: «Salir» termina la
+        sesión y sigue con `accion`; «Seguir estudiando» deja todo como está."""
+        from .estudio_enfoque import confirmar_salida
+        marco = self.vista_enfoque if getattr(self, "vista_enfoque", None) is not None \
+            and self.vista_enfoque.isVisible() else self
+        confirmar_salida(marco, self.ctx.estudio, accion)
+
+    def abrir_estudio(self):
+        self.navegar({"pagina": "estudio"})
+
+    def abrir_enfoque(self):
+        """La vista «Cero distracciones» sobre toda la ventana."""
+        from .estudio_enfoque import VistaEnfoque
+        if getattr(self, "vista_enfoque", None) is None:
+            from .. import estudio
+            self.vista_enfoque = VistaEnfoque(self.ctx, self, estudio.de(self.ctx))
+        self.vista_enfoque.abrir()
+
+    def _vista_enfoque_abierta(self):
+        v = getattr(self, "vista_enfoque", None)
+        return v is not None and v.isVisible()
+
+    def _escape_estudio(self):
+        """Esc en el modo estudio. True si lo atendió."""
+        if self._vista_enfoque_abierta():
+            return self.vista_enfoque.escape()
+        c = getattr(self, "_confirma_estudio", None)
+        if c is not None and c.isVisible():
+            c.seguir.emit()
+            return True
+        return False
+
+    def _notas_estudio(self):
+        """Ctrl+Mayús+N: la «Captura de ideas», solo dentro del modo estudio."""
+        if self._vista_enfoque_abierta():
+            self.vista_enfoque.alternar_notas()
+            return
+        actual = self.historia[self.indice][1] if 0 <= self.indice < len(self.historia) else None
+        if actual is not None and hasattr(actual, "alternar_notas"):
+            actual.alternar_notas()
+
     def closeEvent(self, e):
+        if not self._saliendo and self._estudio_en_curso():
+            e.ignore()
+            self._guardia_estudio(self.close)
+            return
         if self.en_completa:
             self.alternar_completa()
             e.ignore()
@@ -1267,7 +1373,16 @@ class Ventana(QWidget):
         """La unica salida: guarda, para todo y termina el proceso de verdad."""
         if getattr(self, "_saliendo_ya", False):
             return
+        if self._estudio_en_curso():
+            self._guardia_estudio(self.salir)
+            return
         self._saliendo_ya = True
+        est = getattr(self.ctx, "estudio", None)
+        if est is not None:
+            try:
+                est.cerrar()        # guarda lo estudiado y devuelve los ajustes del reproductor
+            except Exception:
+                pass
         self._saliendo = True
         try:
             self._guardar_estado()

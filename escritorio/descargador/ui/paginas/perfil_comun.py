@@ -11,10 +11,12 @@ from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath
 from PySide6.QtWidgets import (QComboBox, QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
                                QPushButton, QSizePolicy, QVBoxLayout, QWidget)
 
+from ... import gif_perfil as G
 from ... import social as S
 from ...hilos import en_segundo_plano
 from .. import iconos, imagenes
 from ..componentes import Portada
+from ..gif_animado import GifVivo
 from ..estilos import C, _hex, _luz, _mezcla, _rgb
 
 # ------------------------------------------------------------------ colores
@@ -94,8 +96,10 @@ class FondoPerfil(QWidget):
     Sin imagen, un degradado con el color del perfil. Sigue el tema: los colores salen de C."""
 
     def __init__(self, alto=240, radio=18, solo_arriba=False, oscuridad=0.78, color=None, banner_url=None,
-                 padre=None):
+                 padre=None, animar=False):
         super().__init__(padre)
+        self.animar = animar          # un GIF se anima solo donde se pide (perfil, editor); en listas, 1.er cuadro
+        self.gif = None
         self.radio = radio
         self.solo_arriba = solo_arriba
         self.oscuridad = oscuridad
@@ -106,12 +110,38 @@ class FondoPerfil(QWidget):
         self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self.set_banner(banner_url)
 
+    def _quitar_gif(self):
+        if self.gif is not None:
+            self.gif.detener()
+            self.gif = None
+
+    def poner_gif(self, datos):
+        """Un GIF local (vista previa al elegirlo) o ya descargado: se anima."""
+        self._quitar_gif()
+        g = GifVivo(self, datos)
+        if g.valido:
+            self.gif = g
+            self.url, self.img = "local", None
+        self.update()
+
     def set_banner(self, banner_url):
         url = S.url_foto(banner_url) if banner_url else ""
-        if url == self.url and (self.img is not None or not url):
+        if url == self.url and (self.img is not None or self.gif is not None or not url):
             return
+        self._quitar_gif()
         self.url, self.img = url, None
-        if url:
+        if url and self.animar and G.url_es_gif(url):
+            yo, objetivo = self, url
+
+            def con_bytes(datos):
+                try:
+                    if yo.url == objetivo and G.es_gif(datos):
+                        yo.poner_gif(datos)
+                        yo.url = objetivo
+                except RuntimeError:
+                    pass
+            en_segundo_plano(imagenes.bytes_de, url, ok=con_bytes, error=lambda _e: None, dueno=self)
+        elif url:
             yo, objetivo = self, url
 
             def listo(img):
@@ -126,10 +156,12 @@ class FondoPerfil(QWidget):
 
     def set_imagen(self, img):
         """Una imagen local (vista previa al elegirla)."""
+        self._quitar_gif()
         self.url, self.img = "local", img
         self.update()
 
     def quitar(self):
+        self._quitar_gif()
         self.url, self.img = "", None
         self.update()
 
@@ -150,8 +182,9 @@ class FondoPerfil(QWidget):
             ruta.addRect(QRectF(0, h - r, w, r))
             ruta = ruta.simplified()
         p.setClipPath(ruta)
-        if self.img is not None and not self.img.isNull():
-            esc = self.img.scaled(w, h, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+        img = self.gif.imagen() if self.gif is not None else self.img
+        if img is not None and not img.isNull():
+            esc = img.scaled(w, h, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
             p.drawImage(0, 0, esc, (esc.width() - w) // 2, (esc.height() - h) // 2, w, h)
         else:
             g = QLinearGradient(0, 0, w, h)
@@ -196,8 +229,10 @@ def entrada(widgets, paso=70, ms=260):
 class Avatar(QWidget):
     """Foto redonda de una persona; sin foto, su inicial sobre el color del perfil."""
 
-    def __init__(self, lado=48, nombre="", color=None, foto_url=None, anillo=None, padre=None):
+    def __init__(self, lado=48, nombre="", color=None, foto_url=None, anillo=None, padre=None, animar=False):
         super().__init__(padre)
+        self.animar = animar          # un GIF se anima solo donde se pide (perfil, editor); en listas, 1.er cuadro
+        self.gif = None
         self.lado = lado
         self.nombre = nombre or ""
         self.color = color or C["acento"]
@@ -208,14 +243,41 @@ class Avatar(QWidget):
         self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self.set_foto(foto_url)
 
+    def _quitar_gif(self):
+        if self.gif is not None:
+            self.gif.detener()
+            self.gif = None
+
+    def poner_gif(self, datos):
+        """Un GIF local (vista previa al elegirlo) o ya descargado: se anima dentro del círculo."""
+        self._quitar_gif()
+        g = GifVivo(self, datos)
+        if g.valido:
+            self.gif = g
+            self.pm = None
+            self.url = "local"
+        self.update()
+
     def set_foto(self, foto_url):
         url = S.url_foto(foto_url) if foto_url else ""
-        if url == self.url and (self.pm is not None or not url):
+        if url == self.url and (self.pm is not None or self.gif is not None or not url):
             return
+        self._quitar_gif()
         self.url = url
         self.pm = None
         interior = self.lado - (6 if self.anillo else 0)
-        if url:
+        if url and self.animar and G.url_es_gif(url):
+            yo, objetivo = self, url
+
+            def con_bytes(datos):
+                try:
+                    if yo.url == objetivo and G.es_gif(datos):
+                        yo.poner_gif(datos)
+                        yo.url = objetivo
+                except RuntimeError:
+                    pass
+            en_segundo_plano(imagenes.bytes_de, url, ok=con_bytes, error=lambda _e: None, dueno=self)
+        elif url:
             yo, objetivo = self, url
 
             def listo(pm):
@@ -237,6 +299,16 @@ class Avatar(QWidget):
             p.setBrush(QColor(self.anillo))
             p.drawEllipse(QRectF(0, 0, self.lado, self.lado))
         r = QRectF(margen, margen, self.lado - 2 * margen, self.lado - 2 * margen)
+        if self.gif is not None and not self.gif.imagen().isNull():
+            lado = int(self.lado - 2 * margen)
+            p.setRenderHint(QPainter.SmoothPixmapTransform, True)
+            ruta = QPainterPath()
+            ruta.addEllipse(r)
+            p.setClipPath(ruta)
+            esc = self.gif.imagen().scaled(lado, lado, Qt.KeepAspectRatioByExpanding, Qt.SmoothTransformation)
+            p.drawImage(int(margen), int(margen), esc, (esc.width() - lado) // 2, (esc.height() - lado) // 2,
+                        lado, lado)
+            return
         if self.pm is not None:
             p.drawPixmap(int(margen), int(margen), self.pm)
             return

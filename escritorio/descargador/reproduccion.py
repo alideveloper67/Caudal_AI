@@ -1036,8 +1036,7 @@ class Reproductor(QObject):
             # sin lo que sueles saltar ni lo que ya sonó estos días
             try:
                 from . import recomendador
-                if getattr(self, "_gusto", None) is None:
-                    self._gusto = recomendador.gusto(self.coleccion)
+                self._gusto = recomendador.gusto(self.coleccion)     # al día: lo saltado hoy cuenta
                 candidatas = recomendador.limpiar_radio(candidatas, self._gusto)
             except Exception:  # noqa: BLE001
                 pass
@@ -1061,8 +1060,12 @@ class Reproductor(QObject):
             if y_seguir:
                 self.detener()
 
-        en_segundo_plano(catalogo.radio, pista.get("video_id"), ok=listo, error=fallo,
-                         dueno=self)
+        def pedir(video_id):
+            # las «siguientes» de YouTube Music + artista, parecidos, historial y gustos
+            from . import recomendador
+            return recomendador.radio_inteligente(self.coleccion, pista)
+
+        en_segundo_plano(pedir, pista.get("video_id"), ok=listo, error=fallo, dueno=self)
 
     # ------------------------------------------------------------ modo
 

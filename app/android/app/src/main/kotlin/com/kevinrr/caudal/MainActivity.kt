@@ -60,6 +60,21 @@ class MainActivity : AudioServiceActivity() {
         // CPU y wifi despiertos mientras suena (Energia.kt): musica con la pantalla apagada
         Energia.registrar(flutterEngine, applicationContext)
 
+        // pantalla encendida mientras se ve el modo vinilo (FLAG_KEEP_SCREEN_ON)
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "caudal/pantalla")
+            .setMethodCallHandler { llamada, resultado ->
+                if (llamada.method == "mantener") {
+                    val si = llamada.arguments == true
+                    runOnUiThread {
+                        if (si) window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                        else window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                    }
+                    resultado.success(null)
+                } else {
+                    resultado.notImplemented()
+                }
+            }
+
         canalPip = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "caudal/pip")
         canalPip?.setMethodCallHandler { llamada, resultado ->
             if (llamada.method == "permitir") {

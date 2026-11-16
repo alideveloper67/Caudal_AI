@@ -2,4 +2,6 @@
 <resources>
     <string name="widget_nombre">Caudal</string>
     <string name="widget_descripcion">Lo que está sonando, con play/pausa y siguiente</string>
+    <string name="atajo_estudio_corto">Estudiar</string>
+    <string name="atajo_estudio_largo">Iniciar sesión de estudio</string>
 </resources>

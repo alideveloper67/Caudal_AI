@@ -439,8 +439,9 @@ def test_las_tarjetas_aparecen_una_a_una(app):
 def test_aviso_de_actualizacion_grande_sustituye_al_normal(app, monkeypatch):
     from descargador.ui import actualizador, novedades_grandes
     llamados = []
-    monkeypatch.setattr(novedades_grandes.NovedadesGrandes, "exec",
-                        lambda self: llamados.append("grande") or 0)
+    from descargador.ui import presentacion_grande
+    for clase in (novedades_grandes.NovedadesGrandes, presentacion_grande.PresentacionGrande):
+        monkeypatch.setattr(clase, "exec", lambda self: llamados.append("grande") or 0)
     monkeypatch.setattr(actualizador.DialogoActualizacion, "exec",
                         lambda self: llamados.append("normal") or 0)
     base = {"version": "9.9.9", "notas": "x", "instalador": "u", "apk": "", "pagina": ""}
@@ -477,7 +478,9 @@ def test_version_a_la_vista_y_aviso_sin_cortar_la_musica(app, datos_aislados, mo
     monkeypatch.setattr(ctx.reproductor, "pausar", lambda: pausas.append(1))
     monkeypatch.setattr(ctx.reproductor, "detener", lambda: pausas.append(2))
     v._avisar_novedades()
-    assert isinstance(v._aviso_grande, novedades_grandes.NovedadesGrandes)
+    from descargador.ui import presentacion_grande
+    assert isinstance(v._aviso_grande, (novedades_grandes.NovedadesGrandes,
+                                        presentacion_grande.PresentacionGrande))
     assert ctx.ajustes["version_novedades_vista"] == version.VERSION
     v._aviso_grande.reject()
     app.processEvents()

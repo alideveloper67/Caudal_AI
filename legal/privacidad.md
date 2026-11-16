@@ -33,6 +33,8 @@ El responsable de tus datos es el titular de Caudal. Puedes contactarnos en {{CO
 - Si haces **público** tu perfil, otras personas mayores de 18 años de Caudal podrán ver tu usuario, tu nombre, tu foto, tu descripción, tu canción y artista favoritos, tus me gusta, tu música subida y, si lo permites, tus artistas más escuchados del mes y tus insignias. Puedes hacerlo privado cuando quieras. Las personas menores de 18 años no pueden tener el perfil público ni aparecen en el directorio.
 - La foto de perfil, la imagen de fondo del perfil, las carátulas y las canciones que subes se guardan en el almacén de archivos de Supabase y se pueden abrir con su enlace directo.
 - Las canciones que subes las escucha y revisa el equipo de Caudal (moderación) antes de publicarlas; puede ver quién la subió y los reportes que reciba.
+- Los **artistas favoritos** que eliges al crear tu cuenta (es opcional y puedes saltarlo o cambiarlos cuando quieras). Se usan solo para recomendarte música y no se muestran a otras personas.
+- Si tu cuenta es de **donador o fundador de Caudal**: tu imagen de **Fondo de Caudal** (solo la ves tú) y los **GIF animados** que pongas en tu foto de perfil o en el fondo de tu perfil (estos los ve quien vea tu perfil). Se guardan en el almacén de archivos de Supabase. Los GIF no deben contener contenido para adultos ni violento; podemos quitarlos.
 
 **Los que se generan al usar Caudal**
 - Tu biblioteca: canciones que te gustan, tus listas, lo que guardas y tus ajustes.
@@ -42,6 +44,7 @@ El responsable de tus datos es el titular de Caudal. Puedes contactarnos en {{CO
 
 **Los que se quedan solo en tu dispositivo**
 - Lo que buscas, las canciones que descargas o importas de tu teléfono y el registro de errores de la app. No se envían a ningún sitio.
+- Tus notas rápidas y tu racha del modo estudio, las portadas personalizadas de tus listas y tu preferencia del modo vinilo.
 
 **Lo que NO recogemos**
 - Tu ubicación, tus contactos, tus fotos, tu micrófono ni datos de pago.
@@ -50,7 +53,7 @@ El responsable de tus datos es el titular de Caudal. Puedes contactarnos en {{CO
 ## 3. Para qué los usamos
 
 - **Para que Caudal funcione**: entrar a tu cuenta, guardar tu biblioteca y tenerla igual en todos tus dispositivos.
-- **Para recomendarte música**: los Mixes, «Descubre para ti», «Canciones similares» y la «Máquina del tiempo» se calculan con tu historial.
+- **Para recomendarte música**: los Mixes, «Descubre para ti», «Canciones similares» y la «Máquina del tiempo» se calculan con tu historial y con los artistas favoritos que hayas elegido.
 - **Para el chat y la «Mezcla con un amigo»**: tus mensajes solo los ven las dos personas del chat. La mezcla usa lo que más escucháis los dos y solo la pueden crear las personas de ese chat.
 - **Para tu perfil, tus amigos y la comunidad**: mostrar tu perfil a quien tú decidas, enviar y recibir solicitudes de amistad, contar los me gusta y mostrar la música que subes a la comunidad.
 - **Para estadísticas anónimas**, solo si das tu permiso (punto 5).
@@ -67,6 +70,7 @@ Para funcionar, Caudal se apoya en estos servicios. Algunos están fuera del Per
 - **LRCLIB**: letras de canciones (se envía el título y el artista).
 - **Google Translate y MyMemory**: traducción de letras (se envía solo el texto de la letra).
 - **SponsorBlock**: saltar partes sin música (se envía el identificador del video).
+- **GIPHY**: la búsqueda de GIF (solo para cuentas de donador o fundador). Se envía el texto que buscas a través de nuestro servidor, con filtro de contenido apto para todo público; no se envía tu usuario ni ningún dato de tu cuenta. Los GIF son de sus autores y se muestran con la marca «Powered by GIPHY».
 - **GitHub**: para avisarte de versiones nuevas y descargarlas.
 
 Ninguno de ellos recibe tu historial completo ni tus mensajes, salvo Supabase, que los guarda por nosotros.

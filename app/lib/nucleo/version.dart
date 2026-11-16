@@ -20,7 +20,7 @@ import 'package:path_provider/path_provider.dart';
 import 'plataforma.dart';
 
 /// Version que lleva esta copia. Sube tambien la de pubspec.yaml al publicar.
-const String versionApp = '2.2.4';
+const String versionApp = '2.3.0';
 
 /// Instalada desde una tienda (variante "play" de Android): las versiones
 /// nuevas llegan por la tienda, no por la propia app.
@@ -96,9 +96,10 @@ String quitarMarcaGrande(String notas) {
   return t.substring(marcaGrande.length).trim();
 }
 
-/// Desde que version existe la pantalla de novedades grande de esta edicion.
+/// Desde que version existe la presentacion de novedades de esta edicion (la
+/// segunda actualizacion grande; la primera fue la 2.2.0).
 /// Sale una sola vez al pasar a ella (o a un parche suyo), no con cada parche.
-const String edicionNovedades = '2.2.0';
+const String edicionNovedades = '2.3.0';
 
 /// ¿Toca enseñar las novedades grandes? [vista] es la ultima version en la
 /// que ya se enseñaron (null si nunca). Solo cuando la version que corre

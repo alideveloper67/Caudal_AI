@@ -356,7 +356,7 @@ def test_con_fondo_el_texto_sigue_leyendose_en_el_peor_caso(app, ventana_sin_rui
     pag = v.pila.currentWidget()
     esq = pag.mapTo(v, pag.rect().topLeft())
     # sitios sin texto donde sí se escribe: el margen de la página y el panel de la izquierda
-    zonas = [(esq.x() + 2, esq.y() + 200, esq.x() + 18, esq.y() + 500), (12, 640, 36, 690)]
+    zonas = [(esq.x() + 2, esq.y() + 200, esq.x() + 18, esq.y() + 500), (9, 640, 15, 690)]   # franja entre el borde del panel y las portadas
     for z in zonas:
         peor = luz_maxima(img, *z)
         assert contraste(C["texto"], peor.name()) >= 4.5, (z, peor.name())

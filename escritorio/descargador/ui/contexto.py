@@ -496,6 +496,9 @@ class Contexto(QObject):
                     continue
                 sub.addAction(l["nombre"], lambda i=l["id"]: self.pistas_de(
                     el, lambda ps, i=i: self.anadir_a_lista(ps, i)))
+            if tipo == "mi_lista":
+                from . import dialogo_portada
+                dialogo_portada.agregar_al_menu(menu, self, el["id"], self.ventana)
             self.menu_descargar(menu, lambda cb: self.pistas_de(el, cb))
         elif tipo == "artista":
             menu.addAction(iconos.icono("radio", 16, C["texto2"]), "Radio del artista",

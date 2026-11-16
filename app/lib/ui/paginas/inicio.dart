@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../nucleo/recomendador.dart';
 import '../../nucleo/catalogo.dart';
 import '../../nucleo/coleccion.dart';
+import '../../nucleo/gustos.dart';
 import '../comunes.dart';
 import '../menu_comunidad.dart';
 import '../plataforma.dart';
@@ -12,6 +13,7 @@ import '../servicios.dart';
 import '../tema.dart';
 import '../tu_mes_pasado.dart';
 import 'ajustes_pagina.dart';
+import 'estudio_pagina.dart';
 import 'juntos_pagina.dart';
 import 'mensajes_pagina.dart';
 import 'resumen.dart';
@@ -84,11 +86,19 @@ class _InicioPaginaState extends State<InicioPagina> with AutomaticKeepAliveClie
           'miniatura': portadas.isEmpty ? '' : portadas.first});
       }
     }
-    final mixes = [
+    final mixes = <Json>[
       for (final a in await col.artistasFrecuentes(8))
         {'tipo': 'artista', 'id': a['id'], 'titulo': 'Mix de ${a['nombre']}',
          'subtitulo': '${a['nombre']} y artistas parecidos', 'miniatura': a['miniatura']}
     ];
+    // los artistas que elegiste al crear la cuenta (o en Ajustes) tambien tienen su mix
+    final yaEnMixes = {for (final m in mixes) '${m['id']}'};
+    for (final g in Gustos.actuales) {
+      if (mixes.length >= 16) break;
+      if (g.id.isEmpty || !yaEnMixes.add(g.id)) continue;
+      mixes.add({'tipo': 'artista', 'id': g.id, 'titulo': 'Mix de ${g.nombre}',
+        'subtitulo': 'Uno de tus artistas favoritos', 'miniatura': g.portada});
+    }
     final enTelefono = await col.descargadas();
     final tiempo = await Recomendador.maquinaDelTiempoDe(col);
     Json? mesPasado;
@@ -195,6 +205,8 @@ class _InicioPaginaState extends State<InicioPagina> with AutomaticKeepAliveClie
                     ),
                   ),
                 ),
+              // acceso al Modo estudio (música sin letra, sonidos y temporizador)
+              if (verAtajos) const SliverToBoxAdapter(child: TarjetaEstudio()),
               SliverList(
                 // otro filtro: todo vuelve a entrar en su turno
                 key: ValueKey(_filtro),

@@ -7,6 +7,7 @@ from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import (QCheckBox, QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
                                QPlainTextEdit, QPushButton, QScrollArea, QVBoxLayout, QWidget)
 
+from ... import gif_perfil as G
 from ... import legal
 from ... import social as S
 from ...hilos import en_segundo_plano
@@ -14,6 +15,7 @@ from .. import iconos
 from ..componentes import Portada
 from ..estilos import C, hoja
 from . import perfil_comun as PC
+from .perfil_gif import BotonGif
 
 
 def _dialogo_base(dialogo, titulo, ancho=560):
@@ -137,6 +139,9 @@ class DialogoEditarPerfil(QDialog):
         self.foto_ruta = None          # foto elegida en este diálogo (aún sin subir)
         self.quitar_foto = False
         self.banner_ruta = None        # imagen de fondo elegida en este diálogo (aún sin subir)
+        self.foto_gif = None           # GIF ya preparado para subir como foto (solo donadores)
+        self.banner_gif = None         # ídem, como fondo
+        self.puede_gif = bool(getattr(getattr(ctx, "fondo", None), "puede", False))   # permiso en caché
         self.quitar_banner = False
         self.color = perfil.get("color_perfil")
         self.cancion = perfil.get("cancion_fav")
@@ -168,21 +173,26 @@ class DialogoEditarPerfil(QDialog):
         fila = QHBoxLayout()
         fila.setSpacing(8)
         fila.addWidget(PC.boton("Elegir foto…", "contorno", "carpeta", al_pulsar=self._elegir_foto))
+        self.bt_gif_foto = BotonGif("Buscar GIF", "lupa", lambda: self._buscar_gif(G.RAZON_FOTO))
+        fila.addWidget(self.bt_gif_foto)
         self.bt_quitar = PC.boton("Quitar foto", "contorno", "papelera", al_pulsar=self._quitar)
         self.bt_quitar.setVisible(bool(perfil.get("foto_url")))
         fila.addWidget(self.bt_quitar)
         fila.addStretch(1)
         c.addLayout(fila)
-        c.addWidget(PC.etiqueta("La foto se recorta en cuadrado y se reduce sola para que pese poco.",
+        c.addWidget(PC.etiqueta("La foto se recorta en cuadrado y se reduce sola para que pese poco. Donadores y fundadores pueden usar un GIF animado.",
                                 f"color:{C['texto3']};font-size:11.5px;"))
 
         # ---- imagen de fondo
         c.addWidget(self._seccion("Imagen de fondo"))
-        self.fondo = PC.FondoPerfil(120, 14, False, 0.55, PC.color_de(perfil), perfil.get("banner_url"))
+        self.fondo = PC.FondoPerfil(120, 14, False, 0.55, PC.color_de(perfil), perfil.get("banner_url"),
+                                 animar=True)
         c.addWidget(self.fondo)
         fila_b = QHBoxLayout()
         fila_b.setSpacing(8)
         fila_b.addWidget(PC.boton("Elegir imagen de fondo…", "contorno", "carpeta", al_pulsar=self._elegir_banner))
+        self.bt_gif_banner = BotonGif("Buscar GIF", "lupa", lambda: self._buscar_gif(G.RAZON_FONDO))
+        fila_b.addWidget(self.bt_gif_banner)
         self.bt_quitar_banner = PC.boton("Quitar imagen", "contorno", "papelera", al_pulsar=self._quitar_fondo)
         self.bt_quitar_banner.setVisible(bool(perfil.get("banner_url")))
         fila_b.addWidget(self.bt_quitar_banner)
@@ -293,8 +303,11 @@ class DialogoEditarPerfil(QDialog):
         self.nombre.textChanged.connect(self._actualizar_vista)
         self.frase.textChanged.connect(self._actualizar_vista)
         self._actualizar_vista()
+        self._aplicar_permiso_gif(self.puede_gif)
         en_segundo_plano(legal.perfil, social.sesion, ok=self._edad, error=lambda _e: None,
                          dueno=self, urgente=True)
+        en_segundo_plano(social.puede_poner_fondo, ok=self._aplicar_permiso_gif, error=lambda _e: None,
+                         dueno=self)
 
     # ------------------------------------------------------------ piezas
     def _seccion(self, texto):
@@ -325,7 +338,8 @@ class DialogoEditarPerfil(QDialog):
         h = QHBoxLayout(self.previa)
         h.setContentsMargins(18, 16, 18, 16)
         h.setSpacing(14)
-        self.av = PC.Avatar(72, self.p.get("nombre") or "", PC.color_de(self.p), self.p.get("foto_url"))
+        self.av = PC.Avatar(72, self.p.get("nombre") or "", PC.color_de(self.p), self.p.get("foto_url"),
+                            animar=True)
         h.addWidget(self.av)
         col = QVBoxLayout()
         col.setSpacing(2)
@@ -350,30 +364,40 @@ class DialogoEditarPerfil(QDialog):
 
     # ------------------------------------------------------------ foto
     def _elegir_foto(self):
-        ruta, _f = QFileDialog.getOpenFileName(self, "Elige tu foto", "", S.FILTRO_IMAGEN)
+        ruta, _f = QFileDialog.getOpenFileName(self, "Elige tu foto", "", S.FILTRO_IMAGEN_PERFIL)
         if not ruta:
             return
+        if G.es_gif_ruta(ruta):
+            if self.puede_gif:
+                self._tomar_gif(ruta, G.RAZON_FOTO)
+                return
+            self._nota(G.MSG_EXCLUSIVO + ". Usamos el primer cuadro.")
         try:
             img = S.recortar_cuadrado(S._cargar_imagen(ruta), 256)
         except S.ErrorNube as e:
-            self.estado.setText(str(e))
+            self._nota(str(e), True)
             return
         from PySide6.QtGui import QPixmap
         self.foto_ruta = ruta
+        self.foto_gif = None
         self.quitar_foto = False
-        self.estado.setText("")
+        if not G.es_gif_ruta(ruta):
+            self.estado.setText("")
         self._foto_previa(QPixmap.fromImage(img))
         self.bt_quitar.setVisible(True)
 
     def _foto_previa(self, pm):
         from ..imagenes import formar
+        self.av._quitar_gif()
         self.av.pm = formar(pm.toImage(), 72, 72, "redonda")
         self.av.url = "local"
         self.av.update()
 
     def _quitar(self):
         self.foto_ruta = None
+        self.foto_gif = None
         self.quitar_foto = True
+        self.av._quitar_gif()
         self.av.pm = None
         self.av.url = ""
         self.av.update()
@@ -381,25 +405,76 @@ class DialogoEditarPerfil(QDialog):
 
     # ------------------------------------------------------------ imagen de fondo
     def _elegir_banner(self):
-        ruta, _f = QFileDialog.getOpenFileName(self, "Elige tu imagen de fondo", "", S.FILTRO_IMAGEN)
+        ruta, _f = QFileDialog.getOpenFileName(self, "Elige tu imagen de fondo", "", S.FILTRO_IMAGEN_PERFIL)
         if not ruta:
             return
+        if G.es_gif_ruta(ruta):
+            if self.puede_gif:
+                self._tomar_gif(ruta, G.RAZON_FONDO)
+                return
+            self._nota(G.MSG_EXCLUSIVO + ". Usamos el primer cuadro.")
         try:
             img = S.recortar_proporcion(S._cargar_imagen(ruta), 640, 240)
         except S.ErrorNube as e:
-            self.estado.setText(str(e))
+            self._nota(str(e), True)
             return
         self.banner_ruta = ruta
+        self.banner_gif = None
         self.quitar_banner = False
-        self.estado.setText("")
+        if not G.es_gif_ruta(ruta):
+            self.estado.setText("")
         self.fondo.set_imagen(img)
         self.bt_quitar_banner.setVisible(True)
 
     def _quitar_fondo(self):
         self.banner_ruta = None
+        self.banner_gif = None
         self.quitar_banner = True
         self.fondo.quitar()
         self.bt_quitar_banner.setVisible(False)
+
+    # ------------------------------------------------------------ GIF animados (donadores)
+    def _aplicar_permiso_gif(self, puede):
+        if isinstance(puede, tuple):
+            puede = puede[0]
+        self.puede_gif = bool(puede)
+        self.bt_gif_foto.setVisible(self.puede_gif)
+        self.bt_gif_banner.setVisible(self.puede_gif)
+
+    def _nota(self, texto, error=False):
+        """Mensaje en el pie: rojo si es un error, tono de aviso si solo informa."""
+        color = C["error"] if error else C["aviso"]
+        self.estado.setStyleSheet(f"color:{color};font-size:12px;")
+        self.estado.setText(texto)
+
+    cliente_gifs = None            # las pruebas ponen aquí un doble del servicio de GIF
+
+    def _buscar_gif(self, modo):
+        if not self.puede_gif:
+            self._nota(G.MSG_EXCLUSIVO)
+            return
+        from .perfil_gif import DialogoBuscarGif
+        d = DialogoBuscarGif(self.ctx, modo, self, cliente=self.cliente_gifs)
+        if d.exec() == QDialog.Accepted and d.datos:
+            self._tomar_gif(d.datos, modo)
+
+    def _tomar_gif(self, origen, modo):
+        """Deja el GIF listo (reduce si pesa mucho) sin congelar la ventana y lo muestra animado."""
+        self._nota("Preparando tu GIF…")
+        en_segundo_plano(G.preparar_gif, origen, modo, ok=lambda datos: self._gif_listo(datos, modo),
+                         error=lambda e: self._nota(str(e) or G.MSG_NO_ABRE, error=True),
+                         dueno=self, urgente=True)
+
+    def _gif_listo(self, datos, modo):
+        self.estado.setText("")
+        if modo == G.RAZON_FOTO:
+            self.foto_gif, self.foto_ruta, self.quitar_foto = datos, None, False
+            self.av.poner_gif(datos)
+            self.bt_quitar.setVisible(True)
+        else:
+            self.banner_gif, self.banner_ruta, self.quitar_banner = datos, None, False
+            self.fondo.poner_gif(datos)
+            self.bt_quitar_banner.setVisible(True)
 
     # ------------------------------------------------------------ canción favorita
     def _pintar_cancion(self):
@@ -484,7 +559,7 @@ class DialogoEditarPerfil(QDialog):
     def _guardar(self):
         nombre = self.nombre.text().strip()
         if len(nombre) < 2:
-            self.estado.setText("Escribe tu nombre (al menos 2 letras).")
+            self._nota("Escribe tu nombre (al menos 2 letras).", True)
             return
         campos = {"nombre": nombre, "frase": self.frase.text().strip(),
                   "bio": self.bio.toPlainText().strip()[:300], "artista_fav": self.artista.text().strip(),
@@ -493,6 +568,9 @@ class DialogoEditarPerfil(QDialog):
                   "mostrar_top": self.chk_top.isChecked()}
         foto, quitar = self.foto_ruta, self.quitar_foto
         banner, quitar_b = self.banner_ruta, self.quitar_banner
+        foto_gif, banner_gif = self.foto_gif, self.banner_gif
+        era_gif_foto = G.url_es_gif(self.p.get("foto_url"))
+        era_gif_banner = G.url_es_gif(self.p.get("banner_url"))
         quiere_publico = campos["perfil_publico"]
         social = self.social
         self.bt_guardar.setEnabled(False)
@@ -500,14 +578,28 @@ class DialogoEditarPerfil(QDialog):
         self.estado.setText("")
 
         def trabajo():
-            if foto:
+            if foto_gif:
+                campos["foto_url"] = social.subir_foto_gif(foto_gif)
+                social.borrar_variantes(["avatar.jpg"])
+            elif foto:
                 campos["foto_url"] = social.subir_foto(S.preparar_foto(foto))
+                if era_gif_foto:
+                    social.borrar_variantes(["avatar.gif"])
             elif quitar:
                 social.quitar_foto()
-            if banner:
+                if era_gif_foto:
+                    social.borrar_variantes(["avatar.gif"])
+            if banner_gif:
+                campos["banner_url"] = social.subir_banner_gif(banner_gif)
+                social.borrar_variantes(["banner.jpg"])
+            elif banner:
                 campos["banner_url"] = social.subir_banner(S.preparar_banner(banner))
+                if era_gif_banner:
+                    social.borrar_variantes(["banner.gif"])
             elif quitar_b:
                 social.quitar_banner()
+                if era_gif_banner:
+                    social.borrar_variantes(["banner.gif"])
             return social.guardar_perfil(campos)
 
         def listo(res):
@@ -521,5 +613,5 @@ class DialogoEditarPerfil(QDialog):
         def fallo(e):
             self.bt_guardar.setEnabled(True)
             self.bt_guardar.setText("Guardar cambios")
-            self.estado.setText(S.explicar(e, "guardar tu perfil"))
+            self._nota(S.explicar(e, "guardar tu perfil"), True)
         en_segundo_plano(trabajo, ok=listo, error=fallo, dueno=self, urgente=True)

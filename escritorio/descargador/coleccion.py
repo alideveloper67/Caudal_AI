@@ -81,7 +81,7 @@ class Coleccion:
         columnas = {f["name"] for f in c.execute("PRAGMA table_info(listas)").fetchall()}
         for col, tipo in (("descripcion", "TEXT DEFAULT ''"), ("fijada", "INTEGER DEFAULT 0"),
                           ("color", "TEXT DEFAULT ''"), ("tocada", "REAL DEFAULT 0"),
-                          ("uuid", "TEXT")):
+                          ("uuid", "TEXT"), ("portada", "TEXT")):
             if col not in columnas:
                 c.execute(f"ALTER TABLE listas ADD COLUMN {col} {tipo}")
         c.execute("""CREATE TABLE IF NOT EXISTS lista_items (
@@ -359,6 +359,7 @@ class Coleccion:
         self._anotar_lista(lista_id)
 
     def borrar_lista(self, lista_id):
+        self._borrar_archivo_portada(lista_id)
         u = self._uuid_lista(lista_id)
         if u:
             self._anotar("lista_borrar", {"uuid": u})
@@ -418,8 +419,54 @@ class Coleccion:
         return {f["lista_id"] for f in self.con.execute(
             "SELECT lista_id FROM lista_items WHERE clave = ?", (clave,))}
 
+    # ---- portada personalizada (solo local: no se sincroniza con la nube)
+
+    def carpeta_portadas(self):
+        ruta = self.archivo.parent / "portadas_listas"
+        ruta.mkdir(parents=True, exist_ok=True)
+        return ruta
+
+    def portada_personalizada(self, lista_id):
+        """Ruta de la portada elegida por la persona, o "" si no hay (o el archivo se perdio)."""
+        f = self.con.execute("SELECT portada FROM listas WHERE id = ?", (lista_id,)).fetchone()
+        ruta = (f["portada"] if f else "") or ""
+        return ruta if ruta and os.path.isfile(ruta) else ""
+
+    def _borrar_archivo_portada(self, lista_id):
+        f = self.con.execute("SELECT portada FROM listas WHERE id = ?", (lista_id,)).fetchone()
+        if f and f["portada"]:
+            try:
+                os.remove(f["portada"])
+            except OSError:
+                pass
+
+    def poner_portada_lista(self, lista_id, origen):
+        """Pone la imagen elegida (ruta o bytes): recorte cuadrado al centro, 800 px, JPEG.
+        Devuelve la ruta guardada. Lanza ValueError si la imagen no se puede abrir."""
+        if not self.lista(lista_id):
+            raise ValueError("Esa lista ya no existe.")
+        from . import social
+        try:
+            datos = social.preparar_portada(origen)
+        except Exception as e:      # ErrorNube: imagen ilegible
+            raise ValueError(str(e) or "No se pudo abrir esa imagen.") from e
+        nueva = self.carpeta_portadas() / f"{lista_id}_{int(time.time() * 1000)}.jpg"
+        nueva.write_bytes(datos)
+        self._borrar_archivo_portada(lista_id)
+        self.con.execute("UPDATE listas SET portada = ? WHERE id = ?", (str(nueva), lista_id))
+        self.con.commit()
+        return str(nueva)
+
+    def quitar_portada_lista(self, lista_id):
+        self._borrar_archivo_portada(lista_id)
+        self.con.execute("UPDATE listas SET portada = NULL WHERE id = ?", (lista_id,))
+        self.con.commit()
+
     def portadas_de_lista(self, lista_id, n=4):
-        """Hasta cuatro portadas distintas para el mosaico de la lista."""
+        """Portada personalizada (1 ruta local) si la hay; si no, hasta cuatro para el mosaico."""
+        propia = self.portada_personalizada(lista_id)
+        if propia:
+            return [propia]
         salida = []
         for p in self.pistas_de_lista(lista_id)[:40]:
             m = p.get("miniatura")

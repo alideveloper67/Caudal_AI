@@ -4,6 +4,7 @@ import '../../nucleo/recomendador.dart';
 import '../../nucleo/catalogo.dart';
 import '../../nucleo/coleccion.dart';
 import '../comunes.dart';
+import '../hoja_portada.dart';
 import '../servicios.dart';
 import '../tema.dart';
 import 'inicio.dart';
@@ -195,8 +196,23 @@ class _ColeccionPaginaState extends State<ColeccionPagina> {
                     ]),
                     child: _tipo == 'me_gusta'
                         ? PortadaMeGusta(lado: lado, radio: 4)
-                        : Portada(url: '${d['miniatura'] ?? ''}', lado: lado, radio: 4,
-                            icono: _tipo == 'descargados' ? Icons.download_for_offline_rounded : Icons.queue_music_rounded),
+                        : _tipo == 'mi_lista'
+                            ? Stack(children: [
+                                Portada(url: '${d['miniatura'] ?? ''}', lado: lado, radio: 4,
+                                    icono: Icons.queue_music_rounded),
+                                Positioned(right: 6, bottom: 6, child: Material(
+                                  color: const Color(0xB3000000),
+                                  shape: const CircleBorder(),
+                                  child: IconButton(
+                                    tooltip: 'Cambiar portada',
+                                    visualDensity: VisualDensity.compact,
+                                    icon: const Icon(Icons.photo_camera_outlined, size: 18, color: Colors.white),
+                                    onPressed: _cambiarPortada,
+                                  ),
+                                )),
+                              ])
+                            : Portada(url: '${d['miniatura'] ?? ''}', lado: lado, radio: 4,
+                                icono: _tipo == 'descargados' ? Icons.download_for_offline_rounded : Icons.queue_music_rounded),
                   ),
                 ),
               ),
@@ -383,8 +399,35 @@ class _ColeccionPaginaState extends State<ColeccionPagina> {
     }
   }
 
+  Future<void> _cambiarPortada() async {
+    final id = _idLista;
+    if (id == null) return;
+    final s = Caudal.leer(context);
+    final jpeg = await mostrarHojaPortada(context, actual: '${_datos?['miniatura'] ?? ''}');
+    if (jpeg == null) return;
+    try {
+      await s.coleccion.ponerPortadaLista(id, jpeg);
+      s.avisar('Portada actualizada');
+      if (mounted) _cargar();
+    } catch (_) {
+      s.avisar('No se pudo guardar la portada. Prueba con otra imagen.');
+    }
+  }
+
+  Future<void> _quitarPortada() async {
+    final id = _idLista;
+    if (id == null) return;
+    final s = Caudal.leer(context);
+    await s.coleccion.quitarPortadaLista(id);
+    s.avisar('Portada quitada');
+    if (mounted) _cargar();
+  }
+
   Future<void> _menu() async {
     final s = Caudal.leer(context);
+    final idPropia = _tipo == 'mi_lista' ? _idLista : null;
+    final tienePropia = idPropia != null && (await s.coleccion.portadaPersonalizada(idPropia)).isNotEmpty;
+    if (!mounted) return;
     await showModalBottomSheet<void>(
       context: context,
       useRootNavigator: true,
@@ -420,6 +463,18 @@ class _ColeccionPaginaState extends State<ColeccionPagina> {
                 Navigator.pop(ctx);
                 _editar();
               }),
+          ListTile(leading: const Icon(Icons.photo_camera_outlined, color: C.texto2), title: const Text('Cambiar portada'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _cambiarPortada();
+              }),
+          if (tienePropia)
+            ListTile(leading: const Icon(Icons.hide_image_outlined, color: C.texto2),
+                title: const Text('Quitar portada personalizada'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _quitarPortada();
+                }),
           ListTile(leading: const Icon(Icons.delete_outline_rounded, color: C.error),
               title: const Text('Borrar la lista', style: TextStyle(color: C.error)),
               onTap: () async {

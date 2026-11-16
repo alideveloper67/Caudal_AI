@@ -5,3 +5,4 @@ ytmusicapi>=1.12
 python-mpv>=1.0.8
 websocket-client>=0.56
 truststore>=0.9
+Pillow>=10.0

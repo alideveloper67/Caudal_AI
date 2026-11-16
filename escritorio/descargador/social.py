@@ -36,6 +36,7 @@ AUDIOS = {".mp3": "audio/mpeg", ".m4a": "audio/mp4", ".aac": "audio/aac", ".flac
 IMAGENES = (".jpg", ".jpeg", ".png", ".webp")
 FILTRO_AUDIO = "Música (*.mp3 *.m4a *.aac *.flac *.ogg *.wav *.webm)"
 FILTRO_IMAGEN = "Imágenes (*.jpg *.jpeg *.png *.webp)"
+FILTRO_IMAGEN_PERFIL = "Imágenes (*.jpg *.jpeg *.png *.webp *.gif)"   # foto y fondo del perfil (GIF: donadores)
 
 GENEROS_SUGERIDOS = ["Pop", "Rock", "Reguetón", "Salsa", "Cumbia", "Hip hop", "Trap", "Electrónica",
                      "Indie", "Baladas", "Jazz", "Clásica", "Metal", "K-pop", "R&B", "Folclore",
@@ -548,10 +549,10 @@ class Social:
                                   cabeceras={"Prefer": "return=representation"})
         return (filas or [{}])[0]
 
-    def _subir_imagen_perfil(self, nombre, datos_jpeg, que):
+    def _subir_imagen_perfil(self, nombre, datos_jpeg, que, tipo="image/jpeg"):
         ruta = f"{self.yo}/{nombre}"
         try:
-            self.sesion.subir_archivo(BUCKET_FOTOS, ruta, datos_jpeg, "image/jpeg", reemplazar=True)
+            self.sesion.subir_archivo(BUCKET_FOTOS, ruta, datos_jpeg, tipo, reemplazar=True)
         except SinConexion:
             raise
         except ErrorNube as e:
@@ -565,6 +566,20 @@ class Social:
 
     def subir_banner(self, datos_jpeg):
         return self._subir_imagen_perfil("banner.jpg", datos_jpeg, "tu imagen de fondo")
+
+    def subir_foto_gif(self, datos_gif):
+        """GIF animado como foto (solo donadores; el servidor descarta .gif de quien no puede)."""
+        return self._subir_imagen_perfil("avatar.gif", datos_gif, "tu foto", "image/gif")
+
+    def subir_banner_gif(self, datos_gif):
+        return self._subir_imagen_perfil("banner.gif", datos_gif, "tu imagen de fondo", "image/gif")
+
+    def borrar_variantes(self, nombres):
+        """Borra, sin quejarse, archivos viejos de mi carpeta (p. ej. avatar.jpg al pasar a avatar.gif)."""
+        try:
+            self.sesion.borrar_archivos(BUCKET_FOTOS, [f"{self.yo}/{n}" for n in nombres])
+        except ErrorNube:
+            pass
 
     def quitar_banner(self):
         self.sesion.pedir("PATCH", f"perfiles?id=eq.{self.yo}", json={"banner_url": None})

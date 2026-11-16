@@ -22,6 +22,7 @@ _INTENTO_MIXES = {}
 
 
 _INTENTO_DESCUBRE = {}
+_INTENTO_GUSTOS = {}
 
 
 def saludo():
@@ -92,12 +93,14 @@ class PaginaInicio(Pagina):
         col = ctx.coleccion
         if self.filtro in ("todo", "musica"):
             self._atajos()
+            self._tarjeta_estudio()
             recientes = [p for p in col.escuchado_hace_poco(24)
                          if self.filtro == "todo" or not p.get("es_video")]
             if recientes:
                 self.zv.addWidget(Carrusel(ctx, "Volver a escuchar", recientes,
                                            subtitulo="lo último que sonó"))
             self._mixes_diarios()
+            self._gustos_inicio()
             self._descubre()
             self._maquina_del_tiempo()
             self._banner_resumen()
@@ -282,6 +285,36 @@ class PaginaInicio(Pagina):
         en_segundo_plano(rc.descubrir, self.ctx.coleccion, ok=self._pintar_descubre,
                          error=lambda _e: None, dueno=self)
 
+    def _gustos_inicio(self):
+        """«Porque te gustan tus artistas»: sugerencias de los artistas favoritos elegidos."""
+        from PySide6.QtWidgets import QVBoxLayout
+        from ... import recomendador as rc
+        if not rc.leer_gustos(self.ctx.coleccion):
+            return
+        self.caja_gustos = QWidget()
+        self.v_gustos = QVBoxLayout(self.caja_gustos)
+        self.v_gustos.setContentsMargins(0, 0, 0, 0)
+        self.zv.addWidget(self.caja_gustos)
+        guardado = self.ctx.coleccion.estado(rc.CLAVE_PARA_TI, None) or {}
+        from ... import mixes as mx
+        if guardado.get("dia") == mx.clave_dia(datetime.now()) and guardado.get("mix"):
+            self._pintar_gustos(guardado["mix"])
+            return
+        if time.time() - _INTENTO_GUSTOS.get("t", 0) < 600:
+            return
+        _INTENTO_GUSTOS["t"] = time.time()
+        en_segundo_plano(rc.sugerencias_gustos, self.ctx.coleccion, ok=self._pintar_gustos,
+                         error=lambda _e: None, dueno=self)
+
+    def _pintar_gustos(self, mix):
+        if not mix:
+            return
+        try:
+            self._carrusel_de_mixes(self.v_gustos, "Porque te gustan tus artistas",
+                                    "música de tus favoritos y de otros parecidos", [mix])
+        except RuntimeError:
+            pass
+
     def _pintar_descubre(self, mix):
         if not mix:
             return
@@ -349,6 +382,23 @@ class PaginaInicio(Pagina):
             alto = max(alto, tj.height())
         car.area.setFixedHeight(alto + 2)
         self.v_mixes.addWidget(car)
+
+    def _tarjeta_estudio(self):
+        """La entrada calmada al Modo estudio, con lo que llevas hoy si ya estudiaste."""
+        try:
+            from ... import estudio as E
+            from .estudio import TarjetaEstudioInicio
+            est = E.Estadisticas()
+            texto = ""
+            if est.hoy() > 0:
+                texto = f"Hoy llevas {E.formato_duracion(est.hoy())} de enfoque"
+                if est.racha() > 1:
+                    texto += f"  ·  {est.racha()} días seguidos"
+            t = TarjetaEstudioInicio(texto)
+            t.clicked.connect(lambda: self.ctx.navegar({"pagina": "estudio"}))
+            self.zv.addWidget(t)
+        except Exception:  # noqa: BLE001 - una tarjeta nunca debe romper Inicio
+            pass
 
     def _banner_resumen(self):
         from ... import mixes as mx

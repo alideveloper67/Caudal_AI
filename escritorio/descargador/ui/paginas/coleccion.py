@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QHBoxLayout, QLabel, Q
 
 from ... import catalogo
 from ...hilos import en_segundo_plano
-from .. import iconos
+from .. import dialogo_portada, iconos
 from ..componentes import (BarraAcciones, BotonIcono, Cabecera, FilaPista, ListaPistas, Pagina,
                            SinResultados, _borrar_layout, formato_duracion_larga)
 from ..estilos import C
@@ -134,7 +134,11 @@ class PaginaColeccion(Pagina):
         nombre_tipo = {"album": datos.get("tipo_album") or "Álbum", "lista": "Lista",
                        "mi_lista": "Lista", "me_gusta": "Lista",
                        "disco": "En tu disco"}[self.tipo]
-        cab = Cabecera(ctx, nombre_tipo, self.titulo, "", lado=212)
+        cab = Cabecera(ctx, nombre_tipo, self.titulo, "", lado=212,
+                       editable=dialogo_portada.es_editable(self.tipo))
+        if dialogo_portada.es_editable(self.tipo):
+            cab.portada.pedir_cambio.connect(self._cambiar_portada)
+            cab.portada.imagen_soltada.connect(self._cambiar_portada)
         cab.color_listo.connect(self.set_color)
         if datos.get("especial"):
             colores = {"me_gusta": "#3F2CB8", "musica": "#0E5E73", "videos": "#7A3413"}
@@ -342,6 +346,7 @@ class PaginaColeccion(Pagina):
                            lambda: os.path.isdir(carpeta) and os.startfile(carpeta))
         if self.tipo == "mi_lista":
             menu.addSeparator()
+            dialogo_portada.agregar_al_menu(menu, ctx, self.ident, self)
             menu.addAction(iconos.icono("papelera", 16, C["texto2"]), "Borrar la lista",
                            self._borrar_lista)
         menu.exec(self.bt_mas.mapToGlobal(self.bt_mas.rect().bottomLeft()))
@@ -379,6 +384,21 @@ class PaginaColeccion(Pagina):
                 QMessageBox.warning(self, "Caudal", str(e))
                 return
             self.ctx.listas_cambio.emit()
+
+    def _cambiar_portada(self, ruta=None):
+        if self.tipo == "mi_lista":
+            dialogo_portada.cambiar_portada(self.ctx, self.ident, self, ruta or None)
+
+    def contextMenuEvent(self, e):
+        """Clic derecho sobre la portada grande: cambiar o quitar la portada."""
+        if self.tipo == "mi_lista":
+            cab = self.findChild(dialogo_portada.PortadaEditable)
+            if cab is not None and cab.rect().contains(cab.mapFromGlobal(e.globalPos())):
+                menu = QMenu(self)
+                dialogo_portada.agregar_al_menu(menu, self.ctx, self.ident, self)
+                menu.exec(e.globalPos())
+                return
+        super().contextMenuEvent(e)
 
     def _borrar_lista(self):
         r = QMessageBox.question(self, "Borrar la lista",

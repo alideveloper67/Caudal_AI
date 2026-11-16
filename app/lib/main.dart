@@ -19,6 +19,7 @@ import 'nucleo/descarga_inteligente.dart';
 import 'nucleo/diagnostico.dart';
 import 'nucleo/cuentas.dart';
 import 'nucleo/descargas.dart';
+import 'nucleo/gustos.dart';
 import 'nucleo/motor_local.dart';
 import 'nucleo/red.dart';
 import 'nucleo/sincronizacion.dart';
@@ -34,6 +35,7 @@ import 'nucleo/social.dart';
 import 'ui/fondo_capa.dart';
 import 'ui/paginas/acceso.dart';
 import 'ui/paginas/ajustes_pagina.dart';
+import 'ui/paginas/gustos_pagina.dart';
 import 'ui/servicios.dart';
 import 'ui/tema.dart';
 
@@ -147,6 +149,9 @@ class _CaudalAppState extends State<CaudalApp> {
 
   (String, Completer<void>)? _aviso;
 
+  /// Falta elegir los artistas favoritos (pantalla antes de la principal).
+  bool _gustosPendientes = false;
+
   Object? _fallo;
   Cuenta? _cuentaFallida;
 
@@ -259,9 +264,15 @@ class _CaudalAppState extends State<CaudalApp> {
       cerrarSesion: () => _cerrarSesion(s),
       mensajero: _mensajero,
     );
+    // cuenta nueva (o que aun no eligio): antes de la pantalla principal, sus artistas favoritos
+    var preguntarGustos = false;
+    try {
+      preguntarGustos = await Gustos.prepararSesion(c.sesion, c.id);
+    } catch (_) {}
     if (!mounted) return;
     setState(() {
       _s = s;
+      _gustosPendientes = preguntarGustos;
       _comprobando = false;
     });
     _alDibujar();
@@ -323,7 +334,11 @@ class _CaudalAppState extends State<CaudalApp> {
     _inteligente = null;
     await Cuentas.olvidar(s.cuenta);
     FondoApp.i.reiniciar();
-    setState(() => _s = null);
+    Gustos.actuales = [];
+    setState(() {
+      _s = null;
+      _gustosPendientes = false;
+    });
     // se libera despues de que la pantalla ya no lo use
     Future.delayed(const Duration(seconds: 1), () {
       s.reproductor.dispose();
@@ -353,7 +368,13 @@ class _CaudalAppState extends State<CaudalApp> {
         ? const _Arranque()
         : s == null
             ? AccesoPagina(alEntrar: _abrir)
-            : const Armazon();
+            : _gustosPendientes
+                ? GustosPagina(
+                    sesion: s.cuenta.sesion, cuentaId: s.cuenta.id,
+                    alTerminar: () {
+                      if (mounted) setState(() => _gustosPendientes = false);
+                    })
+                : const Armazon();
     final app = MaterialApp(
       title: 'Caudal',
       debugShowCheckedModeBanner: false,
@@ -372,7 +393,7 @@ class _CaudalAppState extends State<CaudalApp> {
       home: AnimatedSwitcher(
         duration: const Duration(milliseconds: 380),
         switchInCurve: Curves.easeOutCubic,
-        child: KeyedSubtree(key: ValueKey(aviso != null ? 'aviso' : fallo != null ? 'fallo' : s?.cuenta.id ?? (_comprobando ? 'arranque' : 'acceso')), child: inicio),
+        child: KeyedSubtree(key: ValueKey(aviso != null ? 'aviso' : fallo != null ? 'fallo' : s != null ? '${s.cuenta.id}${_gustosPendientes ? '|gustos' : ''}' : (_comprobando ? 'arranque' : 'acceso')), child: inicio),
       ),
       builder: (context, hijo) {
         // que la letra grande del sistema no rompa el diseno

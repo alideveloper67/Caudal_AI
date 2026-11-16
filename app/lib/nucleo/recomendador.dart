@@ -3,6 +3,7 @@ import 'dart:math';
 
 import 'catalogo.dart';
 import 'coleccion.dart';
+import 'gustos.dart';
 import 'mixes.dart';
 
 /// Recomendaciones que aprenden de ti: canciones parecidas a una dada,
@@ -17,7 +18,24 @@ import 'mixes.dart';
 /// La lógica de puntuar es pura (recibe un [Gusto]) para poder probarla.
 class Gusto {
   Gusto({this.artistas = const {}, this.oidas = const {}, this.recientes = const {},
-      this.saltos = const {}, this.saltosArtista = const {}});
+      this.saltos = const {}, this.saltosArtista = const {}, this.elegidos = const {},
+      this.megusta = const {}, this.ultimas = const {}, this.saltadasHoy = const {},
+      this.rasgos = const {}});
+
+  /// Artistas que la persona eligió al crear su cuenta (claves `id:` y `n:`).
+  final Set<String> elegidos;
+
+  /// Artistas de las canciones con me gusta (clave de [artistasDe]).
+  final Set<String> megusta;
+
+  /// Las últimas ~50 reproducciones (video id): no se repiten en la radio.
+  final Set<String> ultimas;
+
+  /// Lo que se saltó hoy: no vuelve a salir hoy.
+  final Set<String> saltadasHoy;
+
+  /// Cuánto de lo que escuchas es de cada escritura, idioma y época (0..1).
+  final Map<String, double> rasgos;
 
   /// Afinidad 0..1 con cada artista (clave de [artistasDe]).
   final Map<String, double> artistas;
@@ -34,12 +52,19 @@ class Gusto {
   /// Veces que saltaste canciones de cada artista.
   final Map<String, int> saltosArtista;
 
-  static Gusto desde(List<Escucha> historial, Map<String, dynamic> saltosGuardados, {DateTime? ahora}) {
+  static Gusto desde(List<Escucha> historial, Map<String, dynamic> saltosGuardados,
+      {DateTime? ahora, List<ArtistaGusto> elegidos = const [], List<Json> megusta = const []}) {
     final hoy = ahora ?? DateTime.now();
     final peso = <String, double>{};
     final oidas = <String>{};
     final recientes = <String>{};
+    final rasgos = <String, double>{};
     for (final e in historial) {
+      // una escucha (contada a los 30 s) pesa más cuanto más reciente es
+      final wr = pow(0.5, max(0.0, hoy.difference(e.fecha).inHours / 24.0) / 45).toDouble();
+      for (final r in Rasgos.de(e.pista)) {
+        rasgos[r] = (rasgos[r] ?? 0) + wr;
+      }
       final vid = e.videoId;
       if (vid.isNotEmpty) {
         oidas.add(vid);
@@ -49,6 +74,23 @@ class Gusto {
       final w = pow(0.5, edad / 30).toDouble();
       for (final (i, a) in e.artistas.indexed) {
         peso[a.clave] = (peso[a.clave] ?? 0) + (i == 0 ? w : w * 0.5);
+      }
+    }
+    final topeRasgo = rasgos.values.fold<double>(0, max);
+    if (topeRasgo > 0) {
+      for (final k in rasgos.keys.toList()) {
+        rasgos[k] = rasgos[k]! / topeRasgo;
+      }
+    }
+    final ultimas = <String>{
+      for (final e in historial.reversed.take(50))
+        if (e.videoId.isNotEmpty) e.videoId
+    };
+    final saltadasHoy = <String>{};
+    final h = saltosGuardados['hoy'];
+    if (h is Map && h['dia'] == claveDia(hoy) && h['ids'] is List) {
+      for (final v in h['ids'] as List) {
+        saltadasHoy.add('$v');
       }
     }
     final maximo = peso.values.fold<double>(0, max);
@@ -69,8 +111,35 @@ class Gusto {
         if (n > 0) saltosArtista['${e.key}'] = n;
       }
     }
+    final claves = <String>{};
+    for (final a in elegidos) {
+      claves.addAll(a.claves);
+    }
+    final gustan = <String>{
+      for (final p in megusta)
+        for (final a in artistasDe(p)) a.clave
+    };
     return Gusto(artistas: artistas, oidas: oidas, recientes: recientes, saltos: saltos,
-        saltosArtista: saltosArtista);
+        saltosArtista: saltosArtista, elegidos: claves, megusta: gustan, ultimas: ultimas,
+        saltadasHoy: saltadasHoy, rasgos: rasgos);
+  }
+
+  static String _nombreClave(String n) => 'n:${n.trim().toLowerCase()}';
+
+  /// 1 si algún artista de la pista está entre los que elegiste; si no, 0.
+  double elegida(Json p) {
+    for (final a in artistasDe(p)) {
+      if (elegidos.contains(a.clave) || elegidos.contains(_nombreClave(a.nombre))) return 1;
+    }
+    return 0;
+  }
+
+  /// 1 si algún artista de la pista tiene canciones con me gusta tuyas.
+  double conMeGusta(Json p) {
+    for (final a in artistasDe(p)) {
+      if (megusta.contains(a.clave)) return 1;
+    }
+    return 0;
   }
 
   /// ¿La quitamos? Saltada dos veces, o de un artista que saltas siempre
@@ -78,19 +147,35 @@ class Gusto {
   bool descartada(Json p) {
     final vid = '${p['video_id'] ?? ''}';
     if ((saltos[vid] ?? 0) >= 2) return true;
+    if (elegida(p) > 0) return false; // a un artista elegido se le perdona
     for (final a in artistasDe(p)) {
       if ((saltosArtista[a.clave] ?? 0) >= 4 && (artistas[a.clave] ?? 0) < 0.15) return true;
     }
     return false;
   }
 
-  /// Afinidad con el artista principal de la pista (0..1).
+  /// Afinidad con los artistas de la pista (0..1): lo que escuchas, lo que
+  /// elegiste y tus me gusta suman; los saltos restan.
   double afinidad(Json p) {
-    var m = 0.0;
+    var hist = 0.0;
+    var salto = 0;
     for (final a in artistasDe(p)) {
-      m = max(m, artistas[a.clave] ?? 0);
+      hist = max(hist, artistas[a.clave] ?? 0);
+      salto = max(salto, saltosArtista[a.clave] ?? 0);
     }
-    return m;
+    final bruta = max(hist, max(0.9 * elegida(p), 0.6 * conMeGusta(p)));
+    return (bruta - min(0.5, 0.12 * salto)).clamp(0.0, 1.0);
+  }
+
+  /// Cuánto encaja la pista con lo que sueles oír (escritura, idioma, época).
+  double encaje(Json p) {
+    final r = Rasgos.de(p);
+    if (r.isEmpty || rasgos.isEmpty) return 0;
+    var s = 0.0;
+    for (final x in r) {
+      s += rasgos[x] ?? 0;
+    }
+    return s / r.length;
   }
 }
 
@@ -111,6 +196,13 @@ class Recomendador {
     final canciones = Map<String, dynamic>.from((datos['canciones'] as Map?) ?? {});
     final artistas = Map<String, dynamic>.from((datos['artistas'] as Map?) ?? {});
     canciones[vid] = ((canciones[vid] as num?) ?? 0) + 1;
+    // lo saltado hoy no vuelve a salir hoy
+    final dia = claveDia(DateTime.now());
+    final h = datos['hoy'];
+    final idsHoy = <String>[
+      if (h is Map && h['dia'] == dia && h['ids'] is List) for (final v in h['ids'] as List) '$v'
+    ];
+    if (!idsHoy.contains(vid)) idsHoy.add(vid);
     for (final a in artistasDe(pista).take(1)) {
       artistas[a.clave] = ((artistas[a.clave] as num?) ?? 0) + 1;
     }
@@ -121,7 +213,11 @@ class Recomendador {
     while (artistas.length > 300) {
       artistas.remove(artistas.keys.first);
     }
-    await c.guardarEstado(_claveSaltos, {'canciones': canciones, 'artistas': artistas});
+    await c.guardarEstado(_claveSaltos, {
+      'canciones': canciones,
+      'artistas': artistas,
+      'hoy': {'dia': dia, 'ids': idsHoy.length > 200 ? idsHoy.sublist(idsHoy.length - 200) : idsHoy},
+    });
   }
 
   /// Si una canción saltada antes se escucha entera, se le perdona un salto.
@@ -144,7 +240,12 @@ class Recomendador {
     final historial = await Historial.leer(c,
         desde: DateTime.now().subtract(const Duration(days: 180)), limite: 8000);
     final s = await c.estado(_claveSaltos);
-    return Gusto.desde(historial, s is Map ? Map<String, dynamic>.from(s) : {});
+    var gustan = <Json>[];
+    try {
+      gustan = (await c.listaMeGusta()).take(300).toList();
+    } catch (_) {}
+    return Gusto.desde(historial, s is Map ? Map<String, dynamic>.from(s) : {},
+        elegidos: Gustos.actuales, megusta: gustan);
   }
 
   // ------------------------------------------------------------ lógica pura
@@ -218,17 +319,150 @@ class Recomendador {
     return diversificar(mezcla, porArtista: 2, largo: largo);
   }
 
-  /// Ordena candidatas parecidas a una canción: se quita la propia y lo que
-  /// saltas; lo que encaja con tu gusto sube un poco.
+  /// Ordena candidatas parecidas a una canción (ver [ordenarSimilares]).
   static List<Json> puntuarSimilares(Json semilla, List<(Json, double)> candidatas, Gusto g,
-      {int largo = 30}) {
+          {int largo = 30, Set<String> afines = const {}}) =>
+      ordenarSimilares(semilla, candidatas, g, largo: largo, afines: afines);
+
+  /// El corazón del algoritmo de «parecidas»: puro, determinista con [azar].
+  ///
+  /// [candidatas] trae (pista, puntaje base) con el puntaje que dan las
+  /// «siguientes» de YouTube Music y las demás fuentes (ver [combinar]);
+  /// [afines] son las claves de artistas relacionados con la semilla.
+  ///
+  ///  * suben: mismo artista, artistas relacionados, lo que escuchas, los
+  ///    artistas que elegiste, tus me gusta y lo que comparte escritura,
+  ///    idioma o época con la semilla;
+  ///  * bajan mucho las «ajenas» (artista sin relación con la semilla ni
+  ///    contigo): así una cumbia no trae rock;
+  ///  * se quitan la propia, lo saltado (hoy o varias veces) y lo oído en las
+  ///    últimas ~50 reproducciones (esto último vuelve, al final, solo si falta);
+  ///  * una de cada 5 (20 %) es un artista nuevo afín;
+  ///  * nunca más de [maxSeguidas] del mismo artista seguidas.
+  static List<Json> ordenarSimilares(Json semilla, List<(Json, double)> candidatas, Gusto g,
+      {int largo = 30, Set<String> afines = const {}, int azar = 7, double descubrimiento = 0.2,
+      int minimoFrescas = 8, int maxSeguidas = 2, Set<String> excluir = const {}}) {
     final propia = '${semilla['video_id'] ?? ''}';
+    final claveSemilla = {for (final a in artistasDe(semilla)) a.clave};
+    final nombresSemilla = {for (final a in artistasDe(semilla)) a.nombre.toLowerCase()};
     final lista = <(Json, double)>[
       for (final (p, base) in candidatas)
-        if ('${p['video_id']}' != propia && !g.descartada(p)) (p, base * (1 + 0.3 * g.afinidad(p))),
-    ]..sort((a, b) => b.$2.compareTo(a.$2));
-    return diversificar([for (final (p, _) in lista) p], porArtista: 2, largo: largo);
+        if ('${p['video_id']}' != propia &&
+            !excluir.contains('${p['video_id']}') &&
+            !g.saltadasHoy.contains('${p['video_id']}') &&
+            !g.descartada(p))
+          (p, base),
+    ];
+    if (lista.isEmpty) return [];
+    final tope = lista.map((e) => e.$2).fold<double>(0, max);
+    // lo que sale mucho en la radio es del mismo círculo
+    final frecuencia = <String, int>{};
+    for (final (p, _) in lista) {
+      for (final a in artistasDe(p).take(1)) {
+        frecuencia[a.clave] = (frecuencia[a.clave] ?? 0) + 1;
+      }
+    }
+    final rasgosSemilla = Rasgos.de(semilla);
+    final rnd = Random(azar);
+    final nuevoDe = <String, bool>{};
+    final ajenas = <String>{};
+    final puntuadas = <(Json, double)>[];
+    for (final (p, base) in lista) {
+      final arts = artistasDe(p);
+      final mismo = arts.any((a) => claveSemilla.contains(a.clave) || nombresSemilla.contains(a.nombre.toLowerCase()));
+      final relacionado = arts.any((a) => afines.contains(a.clave));
+      final circulo = !relacionado && (frecuencia[arts.firstOrNull?.clave] ?? 0) >= 2;
+      final hist = g.afinidad(p);
+      final elegida = g.elegida(p);
+      final like = g.conMeGusta(p);
+      final sim = Rasgos.similitud(rasgosSemilla, Rasgos.de(p));
+      final conocido = hist > 0.05 || elegida > 0 || like > 0;
+      // «ajena» solo se sabe si hay con qué comparar (artistas relacionados de la semilla)
+      final ajena = afines.isNotEmpty && !mismo && !relacionado && !circulo && !conocido;
+      var puntos = (tope > 0 ? base / tope : 1.0) *
+          (1 + 0.8 * (mismo ? 1 : 0) + 0.6 * (relacionado ? 1 : (circulo ? 0.5 : 0)) + 0.9 * hist +
+              1.0 * elegida + 0.5 * like + 0.4 * sim + 0.2 * g.encaje(p));
+      if (ajena) puntos *= 0.35;
+      // un desajuste fuerte de escritura (latina frente a asiática) con la semilla casi la descarta
+      if (sim < -0.5 && !mismo) puntos *= 0.5;
+      puntos *= 1 + (rnd.nextDouble() - 0.5) * 0.04;
+      puntuadas.add((p, max(0.01, puntos)));
+      nuevoDe['${p['video_id']}'] = !mismo && !conocido && !ajena;
+      if (ajena) ajenas.add('${p['video_id']}');
+    }
+    puntuadas.sort((a, b) {
+      final c = b.$2.compareTo(a.$2);
+      return c != 0 ? c : '${a.$1['video_id']}'.compareTo('${b.$1['video_id']}');
+    });
+    final ordenadas = [
+      for (final (p, _) in puntuadas) if (!ajenas.contains('${p['video_id']}')) p,
+    ];
+    // lo ajeno (sin relacion con la semilla ni contigo) va despues de todo lo demas
+    final ajenasOrdenadas = [
+      for (final (p, _) in puntuadas) if (ajenas.contains('${p['video_id']}') && !g.ultimas.contains('${p['video_id']}')) p,
+    ];
+    final frescas = [for (final p in ordenadas) if (!g.ultimas.contains('${p['video_id']}')) p];
+    final usadas = [for (final p in ordenadas) if (g.ultimas.contains('${p['video_id']}')) p];
+    final todas = frescas;
+
+    // descubrimiento: artistas nuevos afines repartidos entre las conocidas
+    final nuevos = [for (final p in todas) if (nuevoDe['${p['video_id']}'] == true) p];
+    final resto = [for (final p in todas) if (nuevoDe['${p['video_id']}'] != true) p];
+    final cada = descubrimiento <= 0 ? 0 : max(2, (1 / descubrimiento).round());
+    final mezcla = <Json>[];
+    var ni = 0, ri = 0;
+    while (ni < nuevos.length || ri < resto.length) {
+      final toca = cada > 0 && (mezcla.length + 1) % cada == 0;
+      if ((toca && ni < nuevos.length) || ri >= resto.length) {
+        mezcla.add(nuevos[ni++]);
+      } else {
+        mezcla.add(resto[ri++]);
+      }
+    }
+    // lo muy oido solo vuelve (al final) si no hay con que llenar
+    final conRelleno = [
+      ...mezcla,
+      if (frescas.length < minimoFrescas) ...usadas,
+    ];
+    final repartidas = diversificar(conRelleno, porArtista: 5, largo: largo + 10);
+    final salida = intercalar(repartidas, maxSeguidas: maxSeguidas, largo: largo);
+    // lo ajeno, solo si falta para llenar y siempre al final
+    for (final p in ajenasOrdenadas) {
+      if (salida.length >= largo) break;
+      salida.add(p);
+    }
+    return salida;
   }
+
+  /// Reordena sin quitar nada para que no haya más de [maxSeguidas] canciones
+  /// seguidas del mismo artista (respeta el orden de arriba en lo posible).
+  static List<Json> intercalar(List<Json> pistas, {int maxSeguidas = 2, int largo = 1000}) {
+    final pendientes = List<Json>.from(pistas);
+    final salida = <Json>[];
+    String? ultimo;
+    var racha = 0;
+    while (pendientes.isNotEmpty && salida.length < largo) {
+      var k = pendientes.indexWhere((p) {
+        final a = artistasDe(p).firstOrNull?.clave ?? '?';
+        return !(a == ultimo && racha >= maxSeguidas);
+      });
+      if (k < 0) k = 0; // no queda otro artista: no hay remedio
+      final p = pendientes.removeAt(k);
+      final a = artistasDe(p).firstOrNull?.clave ?? '?';
+      racha = a == ultimo ? racha + 1 : 1;
+      ultimo = a;
+      salida.add(p);
+    }
+    return salida;
+  }
+
+  /// La radio automática (la cola que sigue sonando) a partir de las
+  /// «siguientes» de YouTube Music: afinada con tu gusto, sin repetir lo de
+  /// las últimas ~50 reproducciones ni lo saltado, con artistas nuevos afines.
+  static List<Json> prepararRadio(Json semilla, List<Json> siguientes, Gusto g,
+          {Set<String> vistos = const {}, int largo = 40, int azar = 7, Set<String> afines = const {}}) =>
+      ordenarSimilares(semilla, combinar([siguientes]), g,
+          largo: largo, azar: azar, excluir: vistos, afines: afines);
 
   /// Las canciones de la radio automática, sin las que saltas ni las que
   /// sonaron estos días (si quedan suficientes).
@@ -275,31 +509,66 @@ class Recomendador {
     }
   }
 
-  static Future<List<Json>> _relacionados(String videoId) async {
+  /// Canciones y artistas de las secciones «relacionado» de YouTube Music.
+  static ({List<Json> pistas, Set<String> artistas}) _separarRelacionados(List<Json> elementos) => (
+        pistas: [for (final e in elementos) if (e['tipo'] == 'pista') e],
+        artistas: {
+          for (final e in elementos)
+            if (e['tipo'] == 'artista' && '${e['id'] ?? ''}'.isNotEmpty) 'id:${e['id']}'
+        },
+      );
+
+  static Future<List<Json>> _elementosRelacionados(String videoId) async {
     try {
       final secciones = await Catalogo.relacionados(videoId).timeout(const Duration(seconds: 20));
       return [
         for (final s in secciones)
           for (final e in (s['elementos'] is List ? s['elementos'] as List : const []))
-            if (e is Map && e['tipo'] == 'pista') Map<String, dynamic>.from(e)
+            if (e is Map) Map<String, dynamic>.from(e)
       ];
     } catch (_) {
       return [];
     }
   }
 
-  /// "Canciones similares" a una canción.
+  /// Otras canciones del mismo artista.
+  static Future<List<Json>> _delArtista(Json pista) async {
+    final a = artistasDe(pista).firstOrNull;
+    if (a == null) return [];
+    try {
+      final r = await Catalogo.buscar(a.nombre, filtro: 'canciones', limite: 12)
+          .timeout(const Duration(seconds: 15));
+      return [
+        for (final e in r)
+          if (e['tipo'] == 'pista' &&
+              artistasDe(e).any((x) => x.clave == a.clave || x.nombre.toLowerCase() == a.nombre.toLowerCase()))
+            e
+      ];
+    } catch (_) {
+      return [];
+    }
+  }
+
+  /// "Canciones similares" a una canción: las «siguientes» de YouTube Music,
+  /// otras del mismo artista y de artistas relacionados, afinadas con tu gusto.
   static Future<Json> similares(Coleccion c, Json pista) async {
     final vid = '${pista['video_id'] ?? ''}';
-    final resultados = await Future.wait([_radio(vid), _relacionados(vid), gusto(c)]);
+    final resultados = await Future.wait<Object>([_radio(vid), _elementosRelacionados(vid), gusto(c), _delArtista(pista)]);
     final radio = resultados[0] as List<Json>;
-    final rel = resultados[1] as List<Json>;
+    final rel = _separarRelacionados(resultados[1] as List<Json>);
     final g = resultados[2] as Gusto;
+    final delArtista = resultados[3] as List<Json>;
     // la radio de la radio: dos canciones de arriba aportan su propia lista
     final segundas = await Future.wait([
       for (final p in radio.skip(1).take(2)) _radio('${p['video_id']}'),
     ]);
-    final pistas = puntuarSimilares(pista, combinar([radio, rel, rel, ...segundas]), g);
+    final afines = {
+      ...rel.artistas,
+      for (final p in rel.pistas) for (final a in artistasDe(p).take(1)) a.clave,
+    };
+    final pistas = ordenarSimilares(
+        pista, combinar([radio, rel.pistas, rel.pistas, delArtista, ...segundas]), g,
+        afines: afines, azar: vid.hashCode);
     final titulo = '${pista['titulo'] ?? ''}';
     return {
       'tipo': 'mix',
@@ -323,7 +592,12 @@ class Recomendador {
     final historial = await Historial.leer(c, desde: hoy.subtract(const Duration(days: 180)), limite: 8000);
     if (historial.length < 5) return null;
     final s = await c.estado(_claveSaltos);
-    final g = Gusto.desde(historial, s is Map ? Map<String, dynamic>.from(s) : {}, ahora: hoy);
+    var gustan = <Json>[];
+    try {
+      gustan = (await c.listaMeGusta()).take(300).toList();
+    } catch (_) {}
+    final g = Gusto.desde(historial, s is Map ? Map<String, dynamic>.from(s) : {},
+        ahora: hoy, elegidos: Gustos.actuales, megusta: gustan);
     final sem = semillas(historial, ahora: hoy);
     if (sem.isEmpty) return null;
     final listas = await Future.wait([for (final v in sem) _radio(v)]);
@@ -485,5 +759,76 @@ class Recomendador {
         : (existente['id'] is int ? existente['id'] as int : int.parse('${existente['id']}'));
     await c.agregarALista(id, pistas);
     return id;
+  }
+}
+
+/// Rasgos baratos de una pista que se deducen de los datos que ya hay (título,
+/// artista y año): la escritura (latina, coreana, japonesa...), el idioma
+/// (español sí/no) y la década. Sirven para que una cumbia no traiga k-pop.
+class Rasgos {
+  Rasgos._();
+
+  static const _palabrasEs = {
+    'el', 'la', 'los', 'las', 'de', 'del', 'que', 'y', 'mi', 'tu', 'te', 'me', 'un', 'una', 'por', 'con',
+    'amor', 'corazon', 'corazón', 'vida', 'noche', 'baila', 'bailando', 'quiero', 'eres', 'sin', 'para',
+    'no', 'si', 'sí', 'ya', 'yo', 'tú', 'cariño', 'besos', 'fiesta', 'loca', 'loco',
+  };
+
+  static String escritura(String t) {
+    var latin = 0, cjk = 0, hangul = 0, kana = 0, cirilico = 0, arabe = 0;
+    for (final r in t.runes) {
+      if ((r >= 0xAC00 && r <= 0xD7AF) || (r >= 0x1100 && r <= 0x11FF)) {
+        hangul++;
+      } else if (r >= 0x3040 && r <= 0x30FF) {
+        kana++;
+      } else if (r >= 0x4E00 && r <= 0x9FFF) {
+        cjk++;
+      } else if (r >= 0x0400 && r <= 0x04FF) {
+        cirilico++;
+      } else if (r >= 0x0600 && r <= 0x06FF) {
+        arabe++;
+      } else if ((r >= 0x41 && r <= 0x5A) || (r >= 0x61 && r <= 0x7A) || (r >= 0xC0 && r <= 0x24F)) {
+        latin++;
+      }
+    }
+    final m = {'latina': latin, 'coreana': hangul, 'japonesa': kana, 'china': cjk, 'cirilica': cirilico, 'arabe': arabe};
+    final mejor = m.entries.reduce((a, b) => b.value > a.value ? b : a);
+    return mejor.value == 0 ? '' : mejor.key;
+  }
+
+  /// Los rasgos como etiquetas: `esc:latina`, `idioma:es`, `dec:2010`.
+  static List<String> de(Json p) {
+    final texto = '${p['titulo'] ?? ''} ${p['artista'] ?? ''}';
+    final salida = <String>[];
+    // manda el titulo; el artista solo si el titulo no dice nada
+    final esc = escritura('${p['titulo'] ?? ''}').isNotEmpty ? escritura('${p['titulo'] ?? ''}') : escritura(texto);
+    if (esc.isNotEmpty) salida.add('esc:$esc');
+    if (esc == 'latina') {
+      final minus = texto.toLowerCase();
+      final palabras = minus.split(RegExp(r'[^a-záéíóúñü]+')).where((x) => x.isNotEmpty);
+      final n = palabras.where(_palabrasEs.contains).length;
+      if (n >= 2 || (n >= 1 && RegExp('[ñ¿¡áéíóú]').hasMatch(minus)) || minus.contains('ñ')) {
+        salida.add('idioma:es');
+      }
+    }
+    final crudo = p['anio'] ?? (p['album'] is Map ? (p['album'] as Map)['anio'] : null);
+    final anio = int.tryParse('${crudo ?? ''}'.trim());
+    if (anio != null && anio > 1900 && anio < 2100) salida.add('dec:${anio ~/ 10 * 10}');
+    return salida;
+  }
+
+  /// -1..1: cuánto se parecen dos pistas por sus rasgos. Sin datos: 0.
+  static double similitud(List<String> a, List<String> b) {
+    if (a.isEmpty || b.isEmpty) return 0;
+    String? v(List<String> l, String pref) => l.where((x) => x.startsWith(pref)).firstOrNull;
+    var s = 0.0;
+    final ea = v(a, 'esc:'), eb = v(b, 'esc:');
+    if (ea != null && eb != null) s += ea == eb ? 0.5 : -0.9;
+    final ia = a.contains('idioma:es'), ib = b.contains('idioma:es');
+    if (ea == 'esc:latina' && eb == 'esc:latina') s += ia == ib ? (ia ? 0.4 : 0.1) : -0.2;
+    final da = int.tryParse((v(a, 'dec:') ?? '').replaceFirst('dec:', ''));
+    final db = int.tryParse((v(b, 'dec:') ?? '').replaceFirst('dec:', ''));
+    if (da != null && db != null) s += (da - db).abs() <= 10 ? 0.2 : -0.1;
+    return s.clamp(-1.0, 1.0);
   }
 }

@@ -99,7 +99,7 @@ class PaginaPerfil(Pagina):
         v = QVBoxLayout(cont)
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(0)
-        self.fondo = PC.FondoPerfil(alto_fondo, 20, False, 0.82, color, p.get("banner_url"))
+        self.fondo = PC.FondoPerfil(alto_fondo, 20, False, 0.82, color, p.get("banner_url"), animar=True)
         fl = QVBoxLayout(self.fondo)
         fl.setContentsMargins(186, 0, 18, 16)
         fl.addStretch(1)
@@ -135,7 +135,8 @@ class PaginaPerfil(Pagina):
         fila_acc.addLayout(self._acciones(p))
         v.addLayout(fila_acc)
         v.addStretch(1)
-        av = PC.Avatar(148, S.nombre_visible(p), color, p["foto_url"], anillo=C["panel"], padre=cont)
+        av = PC.Avatar(148, S.nombre_visible(p), color, p["foto_url"], anillo=C["panel"], padre=cont,
+                       animar=True)
         av.move(26, alto_fondo - 78)
         av.raise_()
         return cont
@@ -178,6 +179,9 @@ class PaginaPerfil(Pagina):
             fila.addWidget(PC.boton("Editar perfil", "principal", "editar", al_pulsar=self._editar))
             fila.addWidget(PC.boton("Subir música", "contorno", "compartir",
                                     al_pulsar=lambda: self.ctx.navegar({"pagina": "subir_musica"})))
+            if not p["privado"]:
+                self.bt_compartir = self._boton_compartir()
+                fila.addWidget(self.bt_compartir)
             estado = "Público" if p["publico"] else "Privado"
             ayuda = ("Cualquier persona mayor de 18 años puede verlo en Perfiles de Caudal." if p["publico"]
                      else "Solo tus amigos lo ven. Puedes hacerlo público al editar.")
@@ -192,10 +196,21 @@ class PaginaPerfil(Pagina):
                                     C["acento"] if p["di_like"] else C["texto"], "Dar o quitar me gusta",
                                     self._like)
             fila.addWidget(self.bt_like)
+            self.bt_compartir = self._boton_compartir()
+            fila.addWidget(self.bt_compartir)
         mas = PC.boton_redondo("puntos", "Más opciones", self._menu_mas)
         fila.addWidget(mas)
         fila.addStretch(1)
         return fila
+
+    def _boton_compartir(self):
+        return PC.boton("Compartir perfil", "contorno", "compartir",
+                        ayuda="Crea una imagen vertical de este perfil para un estado o una historia",
+                        al_pulsar=self._compartir)
+
+    def _compartir(self):
+        from .perfil_compartir import DialogoCompartirPerfil
+        DialogoCompartirPerfil(self.ctx, self.p, self).exec()
 
     def _etiqueta_estado(self, texto, ayuda=""):
         et = QLabel(texto)

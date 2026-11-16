@@ -92,6 +92,13 @@ def _leer(url):
     return b""
 
 
+def bytes_de(url):
+    """Bytes originales (de disco, cache o internet; bloquea: llamar en segundo plano). Sirve para los
+    GIF que se animan: `imagen()`/`pedir()` de un GIF dan SOLO el primer cuadro (para listas y
+    tarjetas pequenas), nunca se cachea una animacion como imagen estatica donde deba animarse."""
+    return _leer(url)
+
+
 class _Senales(QObject):
     listo = Signal(str, object)
 

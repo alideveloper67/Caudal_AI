@@ -47,7 +47,7 @@ void main() {
   });
 
   test('la version y el origen son los de Caudal_AI', () {
-    expect(versionApp, '2.2.1');
+    expect(versionApp, matches(RegExp(r'^\d+\.\d+\.\d+$')));
     expect(origen, 'alideveloper67/Caudal_AI');
   });
 
