@@ -106,7 +106,7 @@ class _BibliotecaPaginaState extends State<BibliotecaPagina> with AutomaticKeepA
         child: CustomScrollView(key: const PageStorageKey('biblioteca'), slivers: [
           SliverAppBar(
             pinned: true,
-            backgroundColor: C.fondo,
+            backgroundColor: C.fondoVivo,
             surfaceTintColor: Colors.transparent,
             titleSpacing: Esp.lado,
             title: Row(children: [

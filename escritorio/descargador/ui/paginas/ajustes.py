@@ -97,6 +97,15 @@ class PaginaAjustes(Pagina):
         s.v.addWidget(self.selector_aspecto)
         self.cuerpo.addWidget(s)
 
+        # ---------------- fondo de Caudal (solo Donador o Fundador de Caudal: si no, ni aparece)
+        gestor_fondo = getattr(ctx, "fondo", None)
+        self.seccion_fondo = None
+        if gestor_fondo is not None:
+            from ..fondo_ajuste import SeccionFondo
+            self.seccion_fondo = SeccionFondo(gestor_fondo, self.lienzo)
+            self.cuerpo.addWidget(self.seccion_fondo)
+            gestor_fondo.verificar_permiso()
+
         # ---------------- reproduccion
         s = Seccion("Reproducción")
         self.calidad_audio = _combo([("Máxima (Opus ~160 kbps, o 256 kbps con Premium)", "maxima"),

@@ -211,8 +211,9 @@ class _SubirMusicaPaginaState extends State<SubirMusicaPagina> {
               _campo('Álbum (opcional)', _album, Icons.album_rounded, max: 100,
                   ayuda: 'Si subes un álbum, pon el mismo nombre en todas sus canciones para agruparlas.'),
             ])),
-            Container(
-              decoration: BoxDecoration(color: C.superficie, borderRadius: BorderRadius.circular(16)),
+            Material(
+              color: C.superficie,
+              borderRadius: BorderRadius.circular(16),
               child: CheckboxListTile(
                 value: _derechos,
                 onChanged: (v) => setState(() => _derechos = v ?? false),
@@ -302,7 +303,7 @@ class _SubirMusicaPaginaState extends State<SubirMusicaPagina> {
               child: Text('$n', style: TextStyle(color: C.acentoTexto, fontWeight: FontWeight.w900, fontSize: 13)),
             ),
             const SizedBox(width: 10),
-            Text(titulo, style: estiloTituloSeccion.copyWith(fontSize: 17)),
+            Flexible(child: Text(titulo, style: estiloTituloSeccion.copyWith(fontSize: 17))),
           ]),
           const SizedBox(height: 12),
           hijo,

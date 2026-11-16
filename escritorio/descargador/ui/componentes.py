@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QPushButton, QScroll
                                QSizePolicy, QVBoxLayout, QWidget)
 
 from . import iconos, imagenes
-from .estilos import C, FUENTE_TITULO
+from .estilos import FONDO, C, FUENTE_TITULO
 
 MIME_PISTAS = "application/x-caudal-pistas"
 
@@ -1278,6 +1278,9 @@ class Lienzo(QWidget):
         grad = QLinearGradient(0, 0, 0, self.alto_degradado)
         c1 = QColor(self.color)
         c2 = QColor(C["panel"])
+        if FONDO["activo"]:                  # con «Fondo de Caudal» el degradado deja ver la imagen
+            c1.setAlpha(120)
+            c2.setAlpha(0)
         grad.setColorAt(0, c1)
         grad.setColorAt(1, c2)
         p.fillRect(QRect(0, 0, self.width(), self.alto_degradado), grad)

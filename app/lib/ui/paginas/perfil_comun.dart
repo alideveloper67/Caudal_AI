@@ -192,8 +192,12 @@ class NotaFundador extends StatelessWidget {
     return Semantics(
       label: texto,
       child: Row(mainAxisSize: MainAxisSize.min, children: [
-        Text(texto,
-            style: TextStyle(fontSize: compacta ? 10.5 : 12.5, fontWeight: FontWeight.w700, color: InsigniaArtista.dorado)),
+        Flexible(
+          child: Text(texto,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(fontSize: compacta ? 10.5 : 12.5, fontWeight: FontWeight.w700, color: InsigniaArtista.dorado)),
+        ),
         const SizedBox(width: 3),
         Icon(Icons.star_rounded, size: compacta ? 12 : 15, color: InsigniaArtista.dorado),
       ]),

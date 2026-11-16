@@ -1,7 +1,7 @@
 name: caudal
 description: "Descarga musica y videos desde su propio navegador"
 publish_to: 'none'
-version: 2.2.3+33
+version: 2.2.4+34
 
 environment:
   sdk: ^3.13.0

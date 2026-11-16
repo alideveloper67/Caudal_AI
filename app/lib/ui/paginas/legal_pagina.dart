@@ -168,8 +168,10 @@ class _CamposPerfilState extends State<CamposPerfil> {
         child: Row(children: [
           const Icon(Icons.cake_outlined, size: 18, color: C.texto3),
           const SizedBox(width: 6),
-          Text(n == null ? 'Fecha de nacimiento' : 'Fecha de nacimiento · ${d.edad} años',
-              style: const TextStyle(fontSize: 13, color: C.texto2)),
+          Flexible(
+            child: Text(n == null ? 'Fecha de nacimiento' : 'Fecha de nacimiento · ${d.edad} años',
+                style: const TextStyle(fontSize: 13, color: C.texto2)),
+          ),
         ]),
       ),
       Row(children: [

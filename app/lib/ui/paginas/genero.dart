@@ -73,7 +73,7 @@ class _GeneroPaginaState extends State<GeneroPagina> {
                     ),
                   ),
       ),
-      backgroundColor: C.fondo,
+      backgroundColor: C.fondoVivo,
     );
   }
 }

@@ -114,6 +114,12 @@ class Ventana(QWidget):
         self.setMinimumSize(1060, 660)
         self.resize(1440, 900)
         self.setAcceptDrops(True)
+        # «Fondo de Caudal»: la copia local se ve al instante (la nube la refresca después)
+        from ..fondo import GestorFondo
+        from . import estilos
+        self.fondo = GestorFondo(ctx)
+        ctx.fondo = self.fondo
+        estilos.FONDO["activo"] = self.fondo.activo
         self.setStyleSheet(hoja(iconos.flechas_qss()))
         self.historia = []          # [(destino, widget o None)]
         self.indice = -1
@@ -125,6 +131,7 @@ class Ventana(QWidget):
         self.mini = None
 
         self._construir()
+        self._montar_fondo()
         self._conectar()
         self._atajos()
         self._bandeja()
@@ -160,6 +167,7 @@ class Ventana(QWidget):
         self._aviso_grande = None
         self._novedad_pendiente = None
         QTimer.singleShot(2500, self._avisar_novedades)
+        QTimer.singleShot(1500, self.fondo.sincronizar)
         QTimer.singleShot(6000, lambda: self.buscar_version(True))
         QApplication.instance().installEventFilter(_Teclas(self))
         from . import arrastre
@@ -1007,8 +1015,65 @@ class Ventana(QWidget):
 
     # ------------------------------------------------------------ cierre
 
+    # ------------------------------------------------------------ fondo de Caudal
+
+    def _montar_fondo(self):
+        from .fondo_capa import CapaFondo
+        self._instantanea = None
+        self._velo = None
+        self.capa_fondo = CapaFondo(self.fondo, self)
+        self.capa_fondo.setGeometry(self.rect())
+        self.capa_fondo.lower()
+        self.capa_fondo.setVisible(self.fondo.activo)
+        self.fondo.antes_de_cambiar.connect(self._fondo_antes)
+        self.fondo.cambiado.connect(self._fondo_cambiado)
+
+    def _fondo_antes(self):
+        # una foto de lo que se ve ahora: se desvanece encima mientras aparece lo nuevo
+        self._instantanea = self.grab() if self.isVisible() and not self.en_completa else None
+
+    def _fondo_cambiado(self, encendido_o_apagado):
+        from . import estilos
+        if encendido_o_apagado:
+            estilos.FONDO["activo"] = self.fondo.activo
+            self.setStyleSheet(hoja(iconos.flechas_qss()))
+            self.capa_fondo.setVisible(self.fondo.activo)
+            self.capa_fondo.lower()
+        foto, self._instantanea = self._instantanea, None
+        if foto is not None:
+            self._desvanecer(foto)
+
+    def _desvanecer(self, foto, ms=300):
+        from PySide6.QtCore import QEasingCurve, QPropertyAnimation
+        from PySide6.QtWidgets import QGraphicsOpacityEffect, QLabel
+        if self._velo is not None:
+            self._velo.deleteLater()
+        velo = QLabel(self)
+        velo.setPixmap(foto)
+        velo.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        velo.setGeometry(self.rect())
+        efecto = QGraphicsOpacityEffect(velo)
+        velo.setGraphicsEffect(efecto)
+        velo.show()
+        velo.raise_()
+        self._velo = velo
+        anim = QPropertyAnimation(efecto, b"opacity", velo)
+        anim.setDuration(ms)
+        anim.setStartValue(1.0)
+        anim.setEndValue(0.0)
+        anim.setEasingCurve(QEasingCurve.InOutCubic)
+
+        def fin():
+            if self._velo is velo:
+                self._velo = None
+            velo.deleteLater()
+        anim.finished.connect(fin)
+        anim.start()
+
     def resizeEvent(self, e):
         super().resizeEvent(e)
+        if getattr(self, "capa_fondo", None) is not None:
+            self.capa_fondo.setGeometry(self.rect())
         if self.aviso.isVisible():
             self.aviso.move((self.width() - self.aviso.width()) // 2,
                             self.height() - self.aviso.height() - 120)

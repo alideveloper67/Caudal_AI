@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:audio_service/audio_service.dart';
 import 'package:audio_session/audio_session.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart' show MethodChannel;
 
 import '../nucleo/coleccion.dart';
 import '../nucleo/plataforma.dart';
@@ -157,9 +158,37 @@ class ServicioAudio extends BaseAudioHandler with SeekHandler {
         ),
       );
 
+  // ------------------------------------------------------------ pantalla apagada
+
+  static const _canalEnergia = MethodChannel('caudal/energia');
+  bool _energiaPuesta = false;
+  Timer? _soltarEnergia;
+
+  /// Mientras suena (o carga la siguiente) se mantienen despiertos el CPU y el
+  /// wifi: con la pantalla apagada, si no, la siguiente canción no se abre.
+  /// Al parar se sueltan con un pequeño retraso, para no soltar entre canciones.
+  void _energia(bool activo) {
+    if (!Plataforma.esAndroid) return;
+    if (activo) {
+      _soltarEnergia?.cancel();
+      _soltarEnergia = null;
+      if (!_energiaPuesta) {
+        _energiaPuesta = true;
+        _canalEnergia.invokeMethod('mantener', true).catchError((_) {});
+      }
+    } else if (_energiaPuesta && _soltarEnergia == null) {
+      _soltarEnergia = Timer(const Duration(seconds: 25), () {
+        _soltarEnergia = null;
+        _energiaPuesta = false;
+        _canalEnergia.invokeMethod('mantener', false).catchError((_) {});
+      });
+    }
+  }
+
   void _publicar() {
     // pedir el foco de audio al empezar a sonar (vale tambien tras cambiar de cuenta)
     final sonando = r.estado == EstadoRepro.sonando;
+    _energia(sonando || r.estado == EstadoRepro.cargando);
     if (sonando && !_activa) _sesionAudio?.setActive(true);
     _activa = sonando;
     final p = r.actual;
@@ -204,7 +233,10 @@ class ServicioAudio extends BaseAudioHandler with SeekHandler {
   }
 
   void _estado() {
-    final sonando = r.estado == EstadoRepro.sonando;
+    // cargando cuenta como "sonando" para el sistema: entre una canción y la siguiente el
+    // servicio no debe dejar de ser de primer plano, o con la pantalla apagada Android
+    // congela la red y la siguiente canción no carga hasta encender la pantalla
+    final sonando = r.estado == EstadoRepro.sonando || r.estado == EstadoRepro.cargando;
     playbackState.add(PlaybackState(
       controls: [
         MediaControl.skipToPrevious,

@@ -275,7 +275,7 @@ class _Cabecera extends StatelessWidget {
   @override
   Widget build(BuildContext context) => Container(
         decoration: BoxDecoration(
-          gradient: LinearGradient(colors: [C.cabecera, C.fondo],
+          gradient: LinearGradient(colors: [C.cabecera, C.fondoVivo],
               begin: Alignment.topCenter, end: Alignment.bottomCenter),
         ),
         padding: EdgeInsets.fromLTRB(Esp.lado, MediaQuery.paddingOf(context).top + Esp.m, Esp.lado, Esp.s),

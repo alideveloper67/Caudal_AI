@@ -203,7 +203,7 @@ class _BuscarPaginaState extends State<BuscarPagina> with AutomaticKeepAliveClie
     return Scaffold(
       body: Column(children: [
         Container(
-          color: C.fondo,
+          color: C.fondoVivo,
           padding: EdgeInsets.fromLTRB(16, arriba + 12, 16, 8),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             // el titulo se recoge con suavidad al escribir (sin que el campo salte)

@@ -123,7 +123,7 @@ class EtiquetaSolicitudes extends StatelessWidget {
   Widget build(BuildContext context) => ListenableBuilder(
         listenable: controlador,
         builder: (_, _) => Row(mainAxisSize: MainAxisSize.min, children: [
-          const Text('Solicitudes'),
+          const Flexible(child: Text('Solicitudes', maxLines: 1, overflow: TextOverflow.ellipsis)),
           if (controlador.nuevas > 0) ...[
             const SizedBox(width: 6),
             Container(

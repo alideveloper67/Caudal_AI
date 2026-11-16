@@ -43,6 +43,11 @@ class _HojaCompartirLetraState extends State<_HojaCompartirLetra> {
   final _clave = GlobalKey();
   final Set<int> _elegidas = {};
   bool _ocupado = false;
+  int _estilo = 0;   // 0 color de la carátula · 1 oscuro · 2 claro
+  int _formato = 1;  // 0 cuadrada · 1 vertical 4:5 · 2 historia 9:16
+
+  static const _estilos = ['Color', 'Oscuro', 'Claro'];
+  static const _formatos = [('Cuadrada', 1.0), ('Vertical', 0.8), ('Historia', 9 / 16)];
 
   @override
   void initState() {
@@ -124,10 +129,92 @@ class _HojaCompartirLetraState extends State<_HojaCompartirLetra> {
     }
   }
 
+  /// La tarjeta: tres estilos con la misma composición (carátula, frase grande, firma).
+  Widget _tarjeta(Color colorCaratula, String url) {
+    final claro = _estilo == 2;
+    final tinta = claro ? const Color(0xFF14161B) : Colors.white;
+    final tenue = claro ? const Color(0xFF14161B).withValues(alpha: 0.62) : Colors.white.withValues(alpha: 0.72);
+    final fondo = switch (_estilo) {
+      0 => LinearGradient(
+          begin: Alignment.topLeft, end: Alignment.bottomRight,
+          colors: [colorCaratula, Color.lerp(colorCaratula, Colors.black, 0.55)!]),
+      1 => LinearGradient(
+          begin: Alignment.topCenter, end: Alignment.bottomCenter,
+          colors: [Color.lerp(colorCaratula, const Color(0xFF0B0D12), 0.78)!, const Color(0xFF0B0D12)]),
+      _ => const LinearGradient(
+          begin: Alignment.topCenter, end: Alignment.bottomCenter,
+          colors: [Color(0xFFF8F6F0), Color(0xFFEAE5DA)]),
+    };
+    return LayoutBuilder(builder: (context, c) {
+      final lado = c.maxWidth;
+      final k = lado / 380; // todo escala con el ancho para que la imagen salga igual en cualquier pantalla
+      return Container(
+        padding: EdgeInsets.fromLTRB(26 * k, 26 * k, 26 * k, 20 * k),
+        decoration: BoxDecoration(borderRadius: BorderRadius.circular(22 * k), gradient: fondo),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Row(children: [
+            Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(10 * k),
+                boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: claro ? 0.18 : 0.45), blurRadius: 16 * k, offset: Offset(0, 6 * k))],
+              ),
+              child: Portada(url: url, lado: 58 * k, radio: 10 * k),
+            ),
+            SizedBox(width: 14 * k),
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+                Text(_titulo, maxLines: 2, overflow: TextOverflow.ellipsis,
+                    style: TextStyle(fontSize: 17 * k, fontWeight: FontWeight.w800, color: tinta, height: 1.15)),
+                if (_artista.isNotEmpty)
+                  Padding(
+                    padding: EdgeInsets.only(top: 2 * k),
+                    child: Text(_artista, maxLines: 1, overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 13.5 * k, color: tenue, fontWeight: FontWeight.w600)),
+                  ),
+              ]),
+            ),
+          ]),
+          // las líneas elegidas, grandes, ajustadas al espacio que queda
+          Expanded(
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: FittedBox(
+                fit: BoxFit.scaleDown,
+                alignment: Alignment.centerLeft,
+                child: SizedBox(
+                  width: lado - 52 * k,
+                  child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+                    if (_elegidas.isEmpty)
+                      Text('Elige las líneas que quieres compartir.',
+                          style: TextStyle(fontSize: 22 * k, fontWeight: FontWeight.w800, color: tenue, height: 1.25))
+                    else
+                      for (final l in _texto)
+                        Padding(
+                          padding: EdgeInsets.only(bottom: 8 * k),
+                          child: Text(l,
+                              style: TextStyle(fontSize: 28 * k, fontWeight: FontWeight.w900, height: 1.18,
+                                  letterSpacing: -0.4, color: tinta)),
+                        ),
+                  ]),
+                ),
+              ),
+            ),
+          ),
+          Row(children: [
+            Image.asset('assets/logo/caudal.png', width: 20 * k, height: 20 * k),
+            SizedBox(width: 7 * k),
+            Text('Caudal', style: TextStyle(fontSize: 14 * k, fontWeight: FontWeight.w900, color: tinta, letterSpacing: 0.2)),
+            const Spacer(),
+            Text('Letra', style: TextStyle(fontSize: 12 * k, fontWeight: FontWeight.w700, color: tenue, letterSpacing: 1.2)),
+          ]),
+        ]),
+      );
+    });
+  }
+
   @override
   Widget build(BuildContext context) {
     final fondo = HSVColor.fromColor(widget.color).withValue(0.62).withSaturation(0.6).toColor();
-    final abajo = Color.lerp(fondo, Colors.black, 0.35)!;
     final url = '${widget.pista['miniatura'] ?? ''}';
     return DraggableScrollableSheet(
       expand: false,
@@ -149,51 +236,37 @@ class _HojaCompartirLetraState extends State<_HojaCompartirLetra> {
             // la tarjeta que se comparte
             Center(
               child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 420),
-                child: RepaintBoundary(
-                  key: _clave,
-                  child: Container(
-                    padding: const EdgeInsets.fromLTRB(24, 24, 24, 20),
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(18),
-                      gradient: LinearGradient(begin: Alignment.topCenter, end: Alignment.bottomCenter, colors: [fondo, abajo]),
+                constraints: const BoxConstraints(maxWidth: 380),
+                child: AnimatedSize(
+                  duration: const Duration(milliseconds: 220),
+                  curve: Curves.easeOutCubic,
+                  child: RepaintBoundary(
+                    key: _clave,
+                    child: AspectRatio(
+                      aspectRatio: _formatos[_formato].$2,
+                      child: _tarjeta(fondo, url),
                     ),
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
-                      Row(children: [
-                        Portada(url: url, lado: 54, radio: 8),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                            Text(_titulo, maxLines: 2, overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800, color: Colors.white)),
-                            if (_artista.isNotEmpty)
-                              Text(_artista, maxLines: 1, overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(fontSize: 13, color: Color(0xCCFFFFFF))),
-                          ]),
-                        ),
-                      ]),
-                      const SizedBox(height: 22),
-                      if (_elegidas.isEmpty)
-                        const Text('Elige las líneas que quieres compartir.',
-                            style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700, color: Color(0xCCFFFFFF)))
-                      else
-                        for (final l in _texto)
-                          Padding(
-                            padding: const EdgeInsets.only(bottom: 6),
-                            child: Text(l,
-                                style: const TextStyle(
-                                    fontSize: 22, fontWeight: FontWeight.w900, height: 1.2, color: Colors.white)),
-                          ),
-                      const SizedBox(height: 18),
-                      Row(children: [
-                        Image.asset('assets/logo/caudal.png', width: 18, height: 18),
-                        const SizedBox(width: 6),
-                        const Text('Caudal', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w800, color: Colors.white)),
-                      ]),
-                    ]),
                   ),
                 ),
               ),
+            ),
+            const SizedBox(height: 14),
+            Center(
+              child: Wrap(spacing: 8, runSpacing: 6, alignment: WrapAlignment.center, children: [
+                for (var i = 0; i < _estilos.length; i++)
+                  ChoiceChip(
+                    label: Text(_estilos[i]),
+                    selected: _estilo == i,
+                    onSelected: (_) => setState(() => _estilo = i),
+                  ),
+                const SizedBox(width: 6),
+                for (var i = 0; i < _formatos.length; i++)
+                  ChoiceChip(
+                    label: Text(_formatos[i].$1),
+                    selected: _formato == i,
+                    onSelected: (_) => setState(() => _formato = i),
+                  ),
+              ]),
             ),
             const SizedBox(height: 16),
             Text('Toca las líneas para elegirlas (${_elegidas.length} de $_maximo)',

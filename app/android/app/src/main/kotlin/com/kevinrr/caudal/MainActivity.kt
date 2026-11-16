@@ -57,6 +57,9 @@ class MainActivity : AudioServiceActivity() {
         // widget de la pantalla de inicio (CaudalWidget.kt)
         CaudalWidget.Puente.registrar(flutterEngine, applicationContext)
 
+        // CPU y wifi despiertos mientras suena (Energia.kt): musica con la pantalla apagada
+        Energia.registrar(flutterEngine, applicationContext)
+
         canalPip = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "caudal/pip")
         canalPip?.setMethodCallHandler { llamada, resultado ->
             if (llamada.method == "permitir") {

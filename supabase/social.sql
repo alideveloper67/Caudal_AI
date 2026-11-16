@@ -784,3 +784,77 @@ revoke execute on function public.es_mayor(uuid), public.relacion_con(uuid),
 -- (por dentro solo responden sobre quien las llama)
 revoke execute on function public.son_amigos(uuid, uuid), public.hay_bloqueo(uuid, uuid) from public, anon;
 grant execute on function public.son_amigos(uuid, uuid), public.hay_bloqueo(uuid, uuid) to authenticated;
+
+
+-- ---------------------------------------------------------------- Donadores y fondo de Caudal
+-- «Donador de Caudal» lo asigna solo quien administra la base (igual que los demás títulos).
+-- Quien lo tiene, y las dos cuentas fundadoras, pueden poner una imagen de fondo en toda la app.
+alter table public.perfiles add column if not exists fondo_url text;                       -- <mi id>/fondo.jpg
+alter table public.perfiles add column if not exists fondo_visible smallint not null default 22;   -- % de imagen que se ve
+alter table public.perfiles add column if not exists fondo_desenfoque smallint not null default 0; -- 0 a 20
+
+alter table public.perfiles drop constraint if exists perfil_limites;
+alter table public.perfiles add constraint perfil_limites check (
+    length(bio) <= 300
+    and length(frase) <= 80
+    and length(artista_fav) <= 80
+    and coalesce(array_length(generos, 1), 0) <= 5
+    and (color_perfil is null or color_perfil ~ '^#[0-9A-Fa-f]{6}$')
+    and (cancion_fav is null or pg_column_size(cancion_fav) < 3000)
+    and (foto_url is null or foto_url like id::text || '/%')
+    and (banner_url is null or banner_url like id::text || '/%')
+    and (fondo_url is null or fondo_url like id::text || '/%')
+    and fondo_visible between 5 and 60
+    and fondo_desenfoque between 0 and 20
+);
+
+insert into public.titulos_especiales (user_id, titulo, nombre)
+select id, 'donador_caudal', 'Donador de Caudal' from public.perfiles
+where usuario in ('arkhux', 'ibxo', 'marieliuwu')
+on conflict do nothing;
+
+-- ¿esta persona puede tener fondo? (donadores y fundadores)
+create or replace function public.puede_tener_fondo(p_id uuid)
+returns boolean language sql stable security definer set search_path = public as $$
+    select exists (select 1 from public.titulos_especiales
+                   where user_id = p_id and titulo in ('donador_caudal', 'fundador_caudal'));
+$$;
+
+-- lo que llama la app para saber si muestra la opción (solo responde sobre quien pregunta)
+create or replace function public.puede_poner_fondo()
+returns boolean language sql stable security definer set search_path = public as $$
+    select auth.uid() is not null and public.puede_tener_fondo(auth.uid());
+$$;
+
+-- el servidor manda: sin título no se guarda ningún fondo, aunque alguien escriba la columna a mano
+create or replace function public.perfil_validar()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+    if new.perfil_publico and not (new.fecha_nacimiento is not null
+                                   and age(new.fecha_nacimiento) >= interval '18 years') then
+        new.perfil_publico := false;
+    end if;
+    if new.fondo_url is not null and not public.puede_tener_fondo(new.id) then
+        new.fondo_url := null;
+    end if;
+    return new;
+end $$;
+
+-- y el almacén: solo quien puede tener fondo sube el archivo «fondo.*» de su carpeta
+drop policy if exists "avatar: subir el mio" on storage.objects;
+create policy "avatar: subir el mio" on storage.objects for insert to authenticated
+    with check (bucket_id = 'avatares' and (storage.foldername(name))[1] = auth.uid()::text
+                and (name not like '%/fondo.%' or public.puede_tener_fondo(auth.uid())));
+drop policy if exists "avatar: cambiar el mio" on storage.objects;
+create policy "avatar: cambiar el mio" on storage.objects for update to authenticated
+    using (bucket_id = 'avatares' and (storage.foldername(name))[1] = auth.uid()::text)
+    with check (bucket_id = 'avatares' and (storage.foldername(name))[1] = auth.uid()::text
+                and (name not like '%/fondo.%' or public.puede_tener_fondo(auth.uid())));
+
+-- el fondo pesa más que una foto de perfil: el cubo admite hasta 5 MB
+update storage.buckets set file_size_limit = 5242880 where id = 'avatares';
+
+revoke execute on function public.puede_tener_fondo(uuid) from public, anon;
+grant execute on function public.puede_tener_fondo(uuid) to authenticated;
+revoke execute on function public.puede_poner_fondo() from public, anon;
+grant execute on function public.puede_poner_fondo() to authenticated;

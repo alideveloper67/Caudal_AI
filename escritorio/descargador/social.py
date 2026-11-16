@@ -573,6 +573,25 @@ class Social:
         except ErrorNube:
             pass
 
+    # ---- fondo de la aplicación (solo Donador o Fundador de Caudal)
+    def puede_poner_fondo(self):
+        return self.sesion.rpc("puede_poner_fondo") is True
+
+    def subir_fondo(self, datos_jpeg):
+        return self._subir_imagen_perfil("fondo.jpg", datos_jpeg, "tu fondo")
+
+    def leer_fondo(self):
+        filas = self.sesion.pedir(
+            "GET", f"perfiles?select=fondo_url,fondo_visible,fondo_desenfoque&id=eq.{self.yo}")
+        return (filas or [{}])[0] or {}
+
+    def quitar_fondo(self):
+        self.sesion.pedir("PATCH", f"perfiles?id=eq.{self.yo}", json={"fondo_url": None})
+        try:
+            self.sesion.borrar_archivos(BUCKET_FOTOS, [f"{self.yo}/fondo.jpg"])
+        except ErrorNube:
+            pass
+
     def quitar_foto(self):
         self.sesion.pedir("PATCH", f"perfiles?id=eq.{self.yo}", json={"foto_url": None})
         try:

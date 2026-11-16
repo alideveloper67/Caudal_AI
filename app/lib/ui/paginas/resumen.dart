@@ -358,7 +358,18 @@ class _ResumenPaginaState extends State<ResumenPagina> with TickerProviderStateM
           RepaintBoundary(child: _Aurora(colores: h.colores, tiempo: _fondo)),
           Padding(
             padding: EdgeInsets.fromLTRB(24, relleno.top + 92, 24, relleno.bottom + 96),
-            child: h.pintar(_entrada),
+            // en pantallas bajas (teléfono pequeño o en horizontal) la historia
+            // se encoge entera en vez de desbordar
+            child: LayoutBuilder(builder: (_, c) {
+              const alturaDiseno = 700.0;
+              if (!c.hasBoundedHeight || c.maxHeight >= alturaDiseno) return h.pintar(_entrada);
+              final k = c.maxHeight / alturaDiseno;
+              return FittedBox(
+                fit: BoxFit.contain,
+                alignment: Alignment.topLeft,
+                child: SizedBox(width: c.maxWidth / k, height: alturaDiseno, child: h.pintar(_entrada)),
+              );
+            }),
           ),
           Positioned(
             left: 0, right: 0, bottom: relleno.bottom + 34,
@@ -1412,9 +1423,11 @@ class _Firma extends StatelessWidget {
         child: Row(mainAxisAlignment: MainAxisAlignment.center, children: [
           Icon(Icons.graphic_eq_rounded, size: 16, color: Colors.white.withValues(alpha: 0.6)),
           const SizedBox(width: 6),
-          Text('Caudal · Tu resumen', style: TextStyle(
-              color: Colors.white.withValues(alpha: 0.6), fontSize: 12.5, fontWeight: FontWeight.w800,
-              letterSpacing: 0.4)),
+          Flexible(
+            child: Text('Caudal · Tu resumen', maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(
+                color: Colors.white.withValues(alpha: 0.6), fontSize: 12.5, fontWeight: FontWeight.w800,
+                letterSpacing: 0.4)),
+          ),
         ]),
       );
 }

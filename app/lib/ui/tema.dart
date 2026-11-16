@@ -1,6 +1,7 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
+import '../nucleo/fondo_app.dart';
 import 'plataforma.dart';
 
 /// La paleta de Caudal (la misma que el escritorio): oscuro profundo y un solo
@@ -8,6 +9,10 @@ import 'plataforma.dart';
 /// ([Aspecto.aplicar]); por eso no son constantes.
 class C {
   static Color fondo = const Color(0xFF06070A);
+
+  /// El fondo de las pantallas: transparente cuando hay una imagen de fondo detrás.
+  static Color get fondoVivo => FondoApp.i.activo ? Colors.transparent : fondo;
+
   static Color panel = const Color(0xFF101217);
   static Color superficie = const Color(0xFF14171D);
   static Color superficie2 = const Color(0xFF1B1F27);
@@ -133,7 +138,7 @@ ThemeData temaCaudal() {
     useMaterial3: true,
     brightness: Brightness.dark,
     colorScheme: esquema,
-    scaffoldBackgroundColor: C.fondo,
+    scaffoldBackgroundColor: C.fondoVivo,
     canvasColor: C.fondo,
     // en iPhone no hay ondas al tocar: solo el resaltado, como en las apps del sistema
     splashFactory: esIOS ? NoSplash.splashFactory : InkSparkle.splashFactory,

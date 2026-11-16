@@ -13,7 +13,10 @@ import '../plataforma.dart';
 import '../servicios.dart';
 import '../novedades_grandes.dart';
 import '../tema.dart';
+import '../../nucleo/fondo_app.dart';
 import 'aspecto_pagina.dart';
+import 'fondo_pagina.dart';
+import 'bateria_ajuste.dart';
 import 'mezclador_ajustes.dart';
 import 'mezclador_pagina.dart';
 import 'privacidad_pagina.dart';
@@ -236,7 +239,25 @@ class _AjustesPaginaState extends State<AjustesPagina> {
           },
         ),
 
+        ListenableBuilder(
+          listenable: FondoApp.i,
+          builder: (context, _) => !FondoApp.i.puede
+              ? const SizedBox.shrink()
+              : ListTile(
+                  leading: const Icon(Icons.wallpaper_rounded, color: Color(0xFFFFC857)),
+                  title: const Text('Fondo de Caudal'),
+                  subtitle: Text(
+                      FondoApp.i.ruta.isEmpty
+                          ? 'Pon una imagen tuya detrás de toda la app · exclusivo'
+                          : 'Tu imagen se ve al ${FondoApp.i.visible} % · exclusivo',
+                      style: estiloSecundario),
+                  trailing: const Icon(Icons.chevron_right_rounded, color: C.texto3),
+                  onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const FondoPagina())),
+                ),
+        ),
+
         _seccion('Sonido'),
+        if (!kIsWeb) const AjusteBateria(),
         if (!kIsWeb) ListTile(
           leading: const Icon(Icons.graphic_eq_rounded, color: C.texto2),
           title: const Text('Ecualizador, súper volumen y velocidad'),

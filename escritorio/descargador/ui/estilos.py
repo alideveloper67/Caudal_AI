@@ -133,6 +133,52 @@ def aplicar_aspecto(acento, fondo):
              hover=f[6], borde=f[7])
 
 
+# «Fondo de Caudal»: mientras haya una imagen de fondo, paneles y tarjetas se vuelven
+# translúcidos (cuánto, aquí). Sin fondo, la hoja de estilos no cambia nada.
+FONDO = {"activo": False}
+ALFA_PANEL = 0.34        # barra lateral, centro y panel derecho
+ALFA_BARRA = 0.66        # barra del reproductor
+ALFA_TARJETA = 0.86      # tarjetas y filas: siguen leyéndose bien
+
+
+def rgba(hexa, alfa):
+    r, g, b = _rgb(hexa) or (0, 0, 0)
+    return f"rgba({r}, {g}, {b}, {alfa})"
+
+
+def hoja_fondo():
+    """Lo que cambia en la hoja cuando hay fondo (va al final para ganar a lo anterior)."""
+    return f"""
+QFrame#panel_izq, QFrame#panel_centro, QFrame#panel_der, QFrame#panel_nav {{
+    background: {rgba(C['panel'], ALFA_PANEL)};
+}}
+QFrame#reproductor {{
+    background: {rgba(C['fondo'], ALFA_BARRA)};
+}}
+QFrame#tarjeta, QFrame#panel, QFrame#caja, QFrame#tarjeta_album, QFrame#cabecera {{
+    background: {rgba(C['superficie'], ALFA_TARJETA)};
+}}
+QFrame#tarjeta:hover {{
+    background: {rgba(C['superficie2'], 0.92)};
+}}
+QFrame#cabecera_nav {{
+    background: {rgba(C['panel'], ALFA_PANEL)};
+}}
+QLineEdit#buscador {{
+    background: {rgba(C['superficie2'], 0.78)};
+}}
+QLineEdit#buscador:hover, QLineEdit#buscador:focus {{
+    background: {rgba(C['superficie3'], 0.92)};
+}}
+QPushButton#chip, QPushButton#filtro, QPushButton#redondo {{
+    background: {rgba(C['superficie2'], 0.82)};
+}}
+QPushButton#chip:checked, QPushButton#filtro:checked {{
+    background: {C['texto']};
+}}
+"""
+
+
 FUENTE = '"Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif'
 FUENTE_TITULO = '"Segoe UI Variable Display", "Segoe UI", system-ui, sans-serif'
 
@@ -770,4 +816,4 @@ QSlider::handle:vertical {{
     margin: 0 -5px;
     border-radius: 7px;
 }}
-"""
+""" + (hoja_fondo() if FONDO["activo"] else "")

@@ -29,6 +29,9 @@ import 'reproduccion/reproductor.dart';
 import 'reproduccion/servicio_audio.dart';
 import 'ui/armazon.dart';
 import 'ui/comunes.dart';
+import 'nucleo/fondo_app.dart';
+import 'nucleo/social.dart';
+import 'ui/fondo_capa.dart';
 import 'ui/paginas/acceso.dart';
 import 'ui/paginas/ajustes_pagina.dart';
 import 'ui/servicios.dart';
@@ -81,10 +84,21 @@ class _CaudalAppState extends State<CaudalApp> {
   CapturadorOculto? _capturador;
   DescargaInteligente? _inteligente;
 
+  void _alCambiarFondo() {
+    if (mounted) setState(() {}); // el tema cambia (pantallas transparentes) cuando hay fondo
+  }
+
   @override
   void initState() {
     super.initState();
+    FondoApp.i.addListener(_alCambiarFondo);
     _arrancar();
+  }
+
+  @override
+  void dispose() {
+    FondoApp.i.removeListener(_alCambiarFondo);
+    super.dispose();
   }
 
   Future<void> _arrancar() async {
@@ -251,6 +265,10 @@ class _CaudalAppState extends State<CaudalApp> {
       _comprobando = false;
     });
     _alDibujar();
+    // «Fondo de Caudal» (donadores y fundadores): lo guardado se ve al instante; lo de la nube, después
+    unawaited(FondoApp.i
+        .iniciar(c.id, c.sesion != null && c.sesion!.acceso.isNotEmpty ? Social(c.sesion!) : null)
+        .catchError((_) {}));
     unawaited(_buscarVersion());
     unawaited(_pedirNotificaciones());
   }
@@ -304,6 +322,7 @@ class _CaudalAppState extends State<CaudalApp> {
     _inteligente?.detener();
     _inteligente = null;
     await Cuentas.olvidar(s.cuenta);
+    FondoApp.i.reiniciar();
     setState(() => _s = null);
     // se libera despues de que la pantalla ya no lo use
     Future.delayed(const Duration(seconds: 1), () {
@@ -370,6 +389,7 @@ class _CaudalAppState extends State<CaudalApp> {
         return Caudal(s: s, child: ValueListenableBuilder<bool>(
           valueListenable: Pip.enVentana,
           builder: (_, enVentana, __) => Stack(children: [
+            const CapaFondoApp(),
             contenido,
             if (enVentana && s.reproductor.pantalla != null)
               Positioned.fill(
