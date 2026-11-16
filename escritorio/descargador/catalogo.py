@@ -1031,6 +1031,14 @@ def selector_video(alto, codec="auto"):
     return f"bv*{limite}+ba/b{limite}/bv*+ba/b"
 
 
+def olvidar(objetivo):
+    """Descarta los enlaces guardados de un video (para pedir otros nuevos)."""
+    url = objetivo if "://" in str(objetivo) else f"https://www.youtube.com/watch?v={objetivo}"
+    with _cerrojo:
+        for clave in [k for k in _cache_streams if k[0] == url]:
+            _cache_streams.pop(clave, None)
+
+
 def resolver(objetivo, modo="audio", calidad="maxima", codec="auto", ajustes=None):
     """Convierte un video_id (o enlace) en direcciones que mpv puede reproducir.
 

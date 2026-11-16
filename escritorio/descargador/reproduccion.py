@@ -1139,6 +1139,7 @@ class Reproductor(QObject):
         cambio = pista is not self.actual or not mismo
         self.actual = pista
         if cambio:
+            self._reintentos = 0
             self._escucha_registrada = False
             self._segmentos = []
             self._duracion = float(pista.get("duracion") or 0)
@@ -1424,6 +1425,9 @@ class Reproductor(QObject):
             return
         self._posicion = float(valor)
         self.posicion_cambio.emit(self._posicion)
+        # si ya suena bien un rato tras un reintento, el contador vuelve a cero
+        if getattr(self, "_reintentos", 0) and self._posicion > getattr(self, "_reintento_desde", 0) + 20:
+            self._reintentos = 0
         # saltar lo que no es musica
         dj = self.ajustes["transicion_dj"] and self.modo == "audio"
         for ini, fin, cat in self._segmentos:
@@ -1527,6 +1531,27 @@ class Reproductor(QObject):
                 return
             self.siguiente(automatico=True)
         elif razon == "error":
+            # el enlace de YouTube caduca o la red parpadea: se pide otro y se sigue
+            # donde iba, hasta 3 veces, antes de rendirse con la canción
+            pista = self.actual
+            if (pista and not (self._fuente or {}).get("local")
+                    and getattr(self, "_reintentos", 0) < 3
+                    and (pista.get("video_id") or pista.get("url"))):
+                self._reintentos = getattr(self, "_reintentos", 0) + 1
+                self._reintento_desde = self._posicion
+                try:
+                    catalogo.olvidar(pista.get("video_id") or pista.get("url"))
+                except Exception:  # noqa: BLE001
+                    pass
+                gen = self._gen
+                pausado = self.estado == "pausa"
+                inicio = self._posicion
+                self._fijar_estado("cargando")
+                QTimer.singleShot(
+                    700 * self._reintentos,
+                    lambda: gen == self._gen and self._cargar(
+                        pista, inicio=inicio, pausado=pausado, mismo=True, forzar_stream=True))
+                return
             self.error.emit("No se pudo reproducir" + (f" ({detalle})" if detalle else "")
                             + ". Pasando a la siguiente.")
             self._fijar_estado("parado")

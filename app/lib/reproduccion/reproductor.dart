@@ -801,6 +801,7 @@ class Reproductor extends ChangeNotifier {
 
   /// Cuantas veces se pidio un enlace nuevo para la pista actual (ver [_alError]).
   int _reintentos = 0;
+  Duration _reintentoEn = Duration.zero;
 
   Future<void> _cargar(Json pista, {Duration inicio = Duration.zero, bool pausado = false,
       bool mismo = false, bool forzarStream = false, int intento = 0}) async {
@@ -1172,11 +1173,25 @@ class Reproductor extends ChangeNotifier {
     // YouTube a veces da un enlace que luego no abre: se pide otro, con otro
     // cliente, sin perder el punto. Si tampoco abre, se avisa y se sigue.
     final vid = '${pista['video_id'] ?? ''}';
-    if (vid.isNotEmpty && _reintentos < 2) {
+    // si sonó bien un buen rato desde el último reintento, el contador vuelve a cero
+    if (_reintentos > 0 && posicion.value > _reintentoEn + const Duration(seconds: 20)) {
+      _reintentos = 0;
+    }
+    if (vid.isNotEmpty && _reintentos < 3) {
       _reintentos++;
+      _reintentoEn = posicion.value;
       streams.olvidar(vid);
-      unawaited(_cargar(pista, inicio: posicion.value, mismo: true, forzarStream: true,
-          pausado: estado == EstadoRepro.pausa, intento: _reintentos));
+      final gen0 = _gen;
+      final inicio0 = posicion.value;
+      final pausado0 = estado == EstadoRepro.pausa;
+      final n = _reintentos;
+      _fijarEstado(EstadoRepro.cargando);
+      Timer(Duration(milliseconds: 700 * n), () {
+        if (gen0 == _gen && identical(pista, actual)) {
+          unawaited(_cargar(pista, inicio: inicio0, mismo: true, forzarStream: true,
+              pausado: pausado0, intento: n));
+        }
+      });
       return;
     }
     _fijarEstado(EstadoRepro.parado);
