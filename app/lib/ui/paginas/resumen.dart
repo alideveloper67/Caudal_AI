@@ -4,6 +4,7 @@ import 'dart:math';
 import 'dart:ui' as ui;
 
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
@@ -63,7 +64,8 @@ class _Historia {
 }
 
 class _ResumenPaginaState extends State<ResumenPagina> with TickerProviderStateMixin {
-  static const _duracion = Duration(milliseconds: 6500);
+  /// En el navegador (con ratón y pantalla grande) se lee con más calma.
+  static Duration get _duracion => Duration(milliseconds: kIsWeb ? 20000 : 6500);
 
   late PeriodoResumen _periodo = widget.periodo;
   List<Escucha>? _historial;
@@ -186,11 +188,19 @@ class _ResumenPaginaState extends State<ResumenPagina> with TickerProviderStateM
       final datos = await imagen.toByteData(format: ui.ImageByteFormat.png);
       imagen.dispose();
       if (datos == null) throw StateError('no se pudo dibujar la imagen');
-      final dir = await getTemporaryDirectory();
-      final archivo = File(p.join(dir.path, 'caudal_resumen_${DateTime.now().millisecondsSinceEpoch}.png'));
-      await archivo.writeAsBytes(datos.buffer.asUint8List(), flush: true);
+      final bytes = datos.buffer.asUint8List();
+      final nombre = 'caudal_resumen_${DateTime.now().millisecondsSinceEpoch}.png';
+      XFile adjunto;
+      if (kIsWeb) {
+        adjunto = XFile.fromData(bytes, mimeType: 'image/png', name: nombre);
+      } else {
+        final dir = await getTemporaryDirectory();
+        final archivo = File(p.join(dir.path, nombre));
+        await archivo.writeAsBytes(bytes, flush: true);
+        adjunto = XFile(archivo.path, mimeType: 'image/png');
+      }
       await SharePlus.instance.share(ShareParams(
-        files: [XFile(archivo.path, mimeType: 'image/png')],
+        files: [adjunto],
         text: 'Mi resumen de ${_periodo.rango} en Caudal',
         sharePositionOrigin: origen,
       ));
@@ -271,7 +281,25 @@ class _ResumenPaginaState extends State<ResumenPagina> with TickerProviderStateM
     final relleno = MediaQuery.paddingOf(context);
     return AnnotatedRegion<SystemUiOverlayStyle>(
       value: SystemUiOverlayStyle.light,
-      child: Scaffold(
+      child: Focus(
+        autofocus: true,
+        onKeyEvent: (_, e) {
+          if (e is! KeyDownEvent || r == null) return KeyEventResult.ignored;
+          final k = e.logicalKey;
+          if (k == LogicalKeyboardKey.arrowRight) {
+            _ir(1);
+          } else if (k == LogicalKeyboardKey.arrowLeft) {
+            _ir(-1);
+          } else if (k == LogicalKeyboardKey.space) {
+            setState(() => _pausar(!_pausado));
+          } else if (k == LogicalKeyboardKey.escape) {
+            Navigator.of(context).maybePop();
+          } else {
+            return KeyEventResult.ignored;
+          }
+          return KeyEventResult.handled;
+        },
+        child: Scaffold(
         backgroundColor: Colors.black,
         body: _error != null
             ? _Aviso(texto: 'No se pudo armar tu resumen.\n$_error', alCerrar: () => Navigator.of(context).pop())
@@ -308,6 +336,7 @@ class _ResumenPaginaState extends State<ResumenPagina> with TickerProviderStateM
                       ),
                     ),
                   ),
+        ),
       ),
     );
   }
@@ -394,6 +423,13 @@ class _ResumenPaginaState extends State<ResumenPagina> with TickerProviderStateM
           ]),
         ]),
       ),
+      // con ratón no hay "tocar el borde": flechas visibles para ir atrás y adelante
+      if (kIsWeb || MediaQuery.sizeOf(context).width >= 700) ...[
+        if (_indice > 0)
+          Positioned(left: 12, top: 0, bottom: 0, child: Center(child: _Flecha(Icons.chevron_left_rounded, 'Anterior', () => _ir(-1)))),
+        if (_indice < _historias.length - 1)
+          Positioned(right: 12, top: 0, bottom: 0, child: Center(child: _Flecha(Icons.chevron_right_rounded, 'Siguiente', () => _ir(1)))),
+      ],
       // abajo: escuchar (si es una cancion) y compartir
       Positioned(
         left: 20, right: 20, bottom: relleno.bottom + 22,
@@ -427,6 +463,21 @@ class _ResumenPaginaState extends State<ResumenPagina> with TickerProviderStateM
       ),
     ]);
   }
+}
+
+class _Flecha extends StatelessWidget {
+  const _Flecha(this.icono, this.texto, this.alPulsar);
+  final IconData icono;
+  final String texto;
+  final VoidCallback alPulsar;
+
+  @override
+  Widget build(BuildContext context) => IconButton(
+        tooltip: texto,
+        onPressed: alPulsar,
+        style: IconButton.styleFrom(backgroundColor: Colors.black38, foregroundColor: Colors.white),
+        icon: Icon(icono, size: 32),
+      );
 }
 
 String _veces(int n) => n == 1 ? 'una vez' : '$n veces';

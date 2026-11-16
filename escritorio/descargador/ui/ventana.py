@@ -162,6 +162,8 @@ class Ventana(QWidget):
         QTimer.singleShot(2500, self._avisar_novedades)
         QTimer.singleShot(6000, lambda: self.buscar_version(True))
         QApplication.instance().installEventFilter(_Teclas(self))
+        from . import arrastre
+        arrastre.instalar()        # arrastrar con el ratón para desplazar, como con el dedo
         self.teclas_multimedia = TeclasMultimedia(self)
         QApplication.instance().installNativeEventFilter(self.teclas_multimedia)
         if self.r.actual is not None and self.ajustes["teclas_multimedia"]:

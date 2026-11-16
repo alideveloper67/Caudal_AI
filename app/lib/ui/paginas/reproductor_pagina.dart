@@ -19,6 +19,7 @@ import '../reproductor/linea_karaoke.dart';
 import '../reproductor/portada_deslizable.dart';
 import '../servicios.dart';
 import '../tema.dart';
+import 'compartir_letra.dart';
 import 'mezclador_ajustes.dart';
 import 'mezclador_pagina.dart';
 import 'sonido.dart';
@@ -580,7 +581,9 @@ Future<Map<String, dynamic>> _letraDe(Json p) async {
   final hecho = _cacheLetras[clave];
   if (hecho != null) return hecho;
   final l = Map<String, dynamic>.from(await Catalogo.letras(p));
-  _cacheLetras[clave] = l;
+  final vacia = (l['lineas'] as List? ?? const []).isEmpty && '${l['texto'] ?? ''}'.isEmpty;
+  // una letra vacía puede ser un fallo de red: no se guarda, se vuelve a intentar
+  if (!vacia) _cacheLetras[clave] = l;
   return l;
 }
 
@@ -677,32 +680,125 @@ class _TarjetaLetraState extends State<_TarjetaLetra> {
   }
 }
 
-class LetraCompleta extends StatelessWidget {
+/// La letra a pantalla completa. Sigue a la canción que suena: si cambia de
+/// canción con esta pantalla abierta, pasa a la letra de la nueva.
+class LetraCompleta extends StatefulWidget {
   const LetraCompleta({super.key, required this.pista, required this.letra, required this.color});
   final Json pista;
   final Map<String, dynamic>? letra;
   final Color color;
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-        backgroundColor: color,
-        appBar: AppBar(
-          backgroundColor: color,
-          title: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-            Text('${pista['titulo']}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
-            Text('${pista['artista'] ?? ''}', style: const TextStyle(fontSize: 13, color: Color(0xCCFFFFFF))),
-          ]),
-          actions: const [BotonTraducir(), SizedBox(width: 12)],
-        ),
-        body: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 22),
-          child: _VistaLetra(letra: letra ?? const {}, compacta: false, clave: '${pista['clave']}'),
-        ),
-      );
+  State<LetraCompleta> createState() => _LetraCompletaState();
+}
+
+class _LetraCompletaState extends State<LetraCompleta> {
+  late Json _pista = widget.pista;
+  Map<String, dynamic>? _letra;
+  Reproductor? _r;
+
+  @override
+  void initState() {
+    super.initState();
+    _letra = widget.letra;
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _r ??= Caudal.leer(context).reproductor..addListener(_cambioDeCancion);
+  }
+
+  @override
+  void dispose() {
+    _r?.removeListener(_cambioDeCancion);
+    super.dispose();
+  }
+
+  void _cambioDeCancion() {
+    final nueva = _r?.actual;
+    if (nueva == null || '${nueva['clave']}' == '${_pista['clave']}') return;
+    final clave = '${nueva['clave']}';
+    setState(() {
+      _pista = nueva;
+      _letra = null; // cargando la letra de la canción nueva
+    });
+    _letraDe(nueva).then((l) {
+      if (mounted && '${_pista['clave']}' == clave) setState(() => _letra = l);
+    }).catchError((_) {
+      if (mounted && '${_pista['clave']}' == clave) setState(() => _letra = const {'texto': '', 'lineas': []});
+    });
+  }
+
+  /// Abre la hoja para elegir líneas y compartirlas como imagen (con la carátula) o como texto.
+  void _compartir() {
+    final l = _letra;
+    if (l == null) return;
+    final con = _lineas(l);
+    final lineas = con.isNotEmpty ? [for (final x in con) x.$2] : '${l['texto'] ?? ''}'.split('\n');
+    if (lineas.every((x) => x.trim().isEmpty)) return;
+    // la línea que suena ahora, para que la tarjeta empiece por ella
+    var actual = 0;
+    if (con.isNotEmpty && _r != null) {
+      final ms = _r!.posicion.value.inMilliseconds + 250;
+      for (var k = 0; k < con.length; k++) {
+        if (con[k].$1 <= ms) actual = k;
+      }
+    }
+    compartirLetra(context, pista: _pista, lineas: lineas, color: widget.color, lineaActual: actual);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l = _letra;
+    final hayLineas = l != null && (l['lineas'] as List? ?? const []).isNotEmpty;
+    final hayTexto = l != null && '${l['texto'] ?? ''}'.isNotEmpty;
+    return Scaffold(
+      backgroundColor: widget.color,
+      appBar: AppBar(
+        backgroundColor: widget.color,
+        title: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text('${_pista['titulo']}', style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800)),
+          Text('${_pista['artista'] ?? ''}', style: const TextStyle(fontSize: 13, color: Color(0xCCFFFFFF))),
+        ]),
+        actions: [
+          if (hayLineas || hayTexto)
+            IconButton(
+              tooltip: 'Compartir letra',
+              onPressed: _compartir,
+              icon: const Icon(Icons.ios_share_rounded),
+            ),
+          const BotonTraducir(),
+          const SizedBox(width: 12),
+        ],
+      ),
+      body: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 22),
+        child: l == null
+            ? const Center(child: CircularProgressIndicator(color: Colors.white))
+            : !hayLineas && !hayTexto
+                ? const Center(
+                    child: Text('No hay letra para esta canción.',
+                        style: TextStyle(fontWeight: FontWeight.w700, fontSize: 18)))
+                : Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                    if (!hayLineas)
+                      const Padding(
+                        padding: EdgeInsets.only(bottom: 8),
+                        child: Text('Esta letra no trae tiempos, por eso no avanza sola.',
+                            style: TextStyle(fontSize: 13, color: Color(0xCCFFFFFF))),
+                      ),
+                    Expanded(
+                      child: _VistaLetra(
+                          key: ValueKey('${_pista['clave']}'), letra: l, compacta: false, clave: '${_pista['clave']}'),
+                    ),
+                  ]),
+      ),
+    );
+  }
 }
 
 class _VistaLetra extends StatefulWidget {
-  const _VistaLetra({required this.letra, required this.compacta, required this.clave});
+  const _VistaLetra({super.key, required this.letra, required this.compacta, required this.clave});
   final Map<String, dynamic> letra;
   final bool compacta;
 

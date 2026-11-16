@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
@@ -338,6 +339,11 @@ class _CaudalAppState extends State<CaudalApp> {
       title: 'Caudal',
       debugShowCheckedModeBanner: false,
       theme: temaCaudal(),
+      // en el navegador y en escritorio las listas y carruseles también se arrastran con el ratón
+      scrollBehavior: const MaterialScrollBehavior().copyWith(
+        dragDevices: {PointerDeviceKind.touch, PointerDeviceKind.mouse, PointerDeviceKind.stylus,
+          PointerDeviceKind.trackpad, PointerDeviceKind.invertedStylus},
+      ),
       // calendario, menus y botones del sistema en español
       locale: const Locale('es'),
       supportedLocales: const [Locale('es'), Locale('en')],

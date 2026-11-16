@@ -173,13 +173,13 @@ class _CamposPerfilState extends State<CamposPerfil> {
         ]),
       ),
       Row(children: [
-        Expanded(flex: 3, child: _lista<int>('Día', _dia, [for (var i = 1; i <= 31; i++) (i, '$i')],
+        Expanded(flex: 4, child: _lista<int>('Día', _dia, [for (var i = 1; i <= 31; i++) (i, '$i')],
             (v) => _fecha(dia: v))),
         const SizedBox(width: 8),
-        Expanded(flex: 5, child: _lista<int>('Mes', _mes, [for (var i = 1; i <= 12; i++) (i, _meses[i - 1])],
+        Expanded(flex: 6, child: _lista<int>('Mes', _mes, [for (var i = 1; i <= 12; i++) (i, _meses[i - 1])],
             (v) => _fecha(mes: v))),
         const SizedBox(width: 8),
-        Expanded(flex: 4, child: _lista<int>('Año', _anio,
+        Expanded(flex: 5, child: _lista<int>('Año', _anio,
             [for (var a = DateTime.now().year; a >= 1920; a--) (a, '$a')], (v) => _fecha(anio: v))),
       ]),
       if (d.menor) ...[
@@ -327,7 +327,9 @@ class _AceptarTerminosPaginaState extends State<AceptarTerminosPagina> {
       canPop: false,
       child: Scaffold(
         body: SafeArea(
-          child: ListView(padding: const EdgeInsets.all(24), children: [
+          child: Center(child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 520),
+            child: ListView(padding: const EdgeInsets.all(24), children: [
             Icon(Icons.verified_user_outlined, size: 48, color: C.acento),
             const SizedBox(height: 14),
             Text(widget.perfil.version == null ? 'Antes de seguir' : 'Hemos actualizado nuestros términos',
@@ -375,6 +377,7 @@ class _AceptarTerminosPaginaState extends State<AceptarTerminosPagina> {
             const SizedBox(height: 8),
             TextButton(onPressed: _ocupado ? null : widget.alSalir, child: const Text('Cerrar sesión')),
           ]),
+          )),
         ),
       ),
     );

@@ -1921,6 +1921,22 @@ class Catalogo {
             };
           }
           if (_cadena(datos['plainLyrics']).isNotEmpty) {
+            // solo texto: antes de rendirse, ver si hay otra versión con tiempos
+            try {
+              final crudo = await _getJson(Uri.https('lrclib.net', '/api/search', {'q': '$artista $titulo'}),
+                  cabeceras: cab);
+              num durDe(Map c) => c['duration'] is num ? c['duration'] as num : 0;
+              final con = _lista(crudo).whereType<Map>().where((c) => _cadena(c['syncedLyrics']).isNotEmpty).toList();
+              if (dur > 0) con.sort((a, b) => (durDe(a) - dur).abs().compareTo((durDe(b) - dur).abs()));
+              if (con.isNotEmpty && (dur <= 0 || (durDe(con.first) - dur).abs() <= 6)) {
+                return {
+                  'sincronizada': true,
+                  'lineas': lrcALineas(_cadena(con.first['syncedLyrics'])),
+                  'texto': _cadena(con.first['plainLyrics']),
+                  'fuente': 'LRCLIB',
+                };
+              }
+            } catch (_) {}
             return {
               'sincronizada': false,
               'lineas': <List<dynamic>>[],

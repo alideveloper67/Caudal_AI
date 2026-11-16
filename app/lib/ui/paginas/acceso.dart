@@ -350,7 +350,7 @@ class _AccesoPaginaState extends State<AccesoPagina>
                       contentPadding: EdgeInsets.zero,
                       controlAffinity: ListTileControlAffinity.leading,
                       title: const Text('Mantener la sesión iniciada'),
-                      subtitle: const Text('No te volverá a pedir la contraseña en este teléfono',
+                      subtitle: const Text('No te volverá a pedir la contraseña en este dispositivo',
                           style: TextStyle(fontSize: 12, color: C.texto3)),
                     ),
                     AnimatedSwitcher(

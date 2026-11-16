@@ -900,6 +900,14 @@ class Tarjeta(QWidget):
             return
         if e.button() != Qt.LeftButton:
             return
+        self._pulso = True     # el clic se cuenta al soltar: así también se puede arrastrar desde aquí
+
+    def mouseReleaseEvent(self, e):
+        if e.button() != Qt.LeftButton or not getattr(self, "_pulso", False):
+            return
+        self._pulso = False
+        if not self.rect().contains(e.position().toPoint()):
+            return
         if not self.es_genero and self._rect_play().contains(e.position()):
             self.reproducir.emit(self.el)
         else:
@@ -1158,7 +1166,13 @@ class FilaCompacta(QWidget):
         if e.button() == Qt.RightButton:
             self.ctx.menu_pista(self.pista, e.globalPosition().toPoint())
         elif e.button() == Qt.LeftButton:
-            self.al_reproducir(self.pista)
+            self._pulso = True     # se reproduce al soltar, para poder arrastrar desde aquí
+
+    def mouseReleaseEvent(self, e):
+        if e.button() == Qt.LeftButton and getattr(self, "_pulso", False):
+            self._pulso = False
+            if self.rect().contains(e.position().toPoint()):
+                self.al_reproducir(self.pista)
 
     def paintEvent(self, _e):
         p = QPainter(self)
