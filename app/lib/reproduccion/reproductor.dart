@@ -906,7 +906,9 @@ class Reproductor extends ChangeNotifier {
     if (local != null) {
       f = Fuente.archivo(local);
     } else {
-      final vid = '${pista['video_id'] ?? ''}';
+      final original = '${pista['video_id'] ?? ''}';
+      // si YouTube dijo que ese video no se puede reproducir, suena otra subida de la misma canción
+      final vid = _videoAlterno[original] ?? original;
       if (vid.isEmpty) {
         _fijarEstado(EstadoRepro.parado);
         return _aviso('No hay de dónde reproducir esta pista.');
@@ -921,6 +923,17 @@ class Reproductor extends ChangeNotifier {
           await _terminarTraspaso(false, volverAAudio: true);
           return _aviso('No se pudo abrir el video; sigue la canción.');
         }
+        // «video no reproducible»: se busca otra subida de la misma canción antes de rendirse
+        if (!_videoAlterno.containsKey(original) &&
+            RegExp(r'unplayable|unavailable|restricted|private|ninguna pista|no dio ninguna', caseSensitive: false).hasMatch('$e')) {
+          final otro = await _buscarAlterno(pista, original);
+          if (gen != _gen) return;
+          if (otro != null) {
+            _videoAlterno[original] = otro;
+            return _cargar(pista, inicio: inicio, pausado: pausado, mismo: mismo, forzarStream: forzarStream, intento: 0);
+          }
+          _videoAlterno[original] = ''; // no hay otra: que no vuelva a buscar
+        }
         _fijarEstado(EstadoRepro.parado);
         _aviso('No se pudo reproducir: ${'$e'.split('\n').first}');
         if (proximas.isNotEmpty || pos + 1 < secuencia.length) {
@@ -933,6 +946,23 @@ class Reproductor extends ChangeNotifier {
     }
     if (gen != _gen) return;
     await _arrancar(gen, f, inicio, pausado);
+  }
+
+  /// Videos que YouTube no deja reproducir → otra subida de la misma canción.
+  final Map<String, String> _videoAlterno = {};
+
+  Future<String?> _buscarAlterno(Json pista, String malo) async {
+    try {
+      final texto = '${pista['titulo'] ?? ''} ${pista['artista'] ?? ''}'.trim();
+      if (texto.isEmpty) return null;
+      final r = await Catalogo.buscar(texto, filtro: 'canciones', limite: 8)
+          .timeout(const Duration(seconds: 12));
+      for (final x in r) {
+        final id = '${x['video_id'] ?? ''}';
+        if (x['tipo'] == 'pista' && id.isNotEmpty && id != malo) return id;
+      }
+    } catch (_) {}
+    return null;
   }
 
   Future<void> _arrancar(int gen, Fuente f, Duration inicio, bool pausado) async {

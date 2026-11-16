@@ -15,6 +15,7 @@ YouTube en la mejor calidad, sin anuncios y en segundo plano.
 
 import os
 import random
+import re
 import time
 
 from PySide6.QtCore import QObject, QTimer, Signal
@@ -1173,7 +1174,11 @@ class Reproductor(QObject):
             self._arrancar(gen, fuente, inicio, pausado)
             return
 
-        objetivo = pista.get("video_id") or pista.get("url") or ""
+        original = pista.get("video_id") or pista.get("url") or ""
+        # si YouTube dijo que ese video no se puede reproducir, suena otra subida de la misma cancion
+        if not hasattr(self, "_video_alterno"):
+            self._video_alterno = {}
+        objetivo = self._video_alterno.get(original) or original
         if not objetivo:
             if pista.get("archivo"):
                 self.error.emit("Ese archivo ya no está en el disco.")
@@ -1204,6 +1209,28 @@ class Reproductor(QObject):
                 self._terminar_traspaso(False, volver_a_audio=True)
                 self.error.emit(f"No se pudo abrir el video: {e}")
                 return
+            # «video no disponible»: se busca otra subida de la misma cancion antes de rendirse
+            if (original and original not in self._video_alterno
+                    and re.search(r"unplayable|unavailable|not available|no disponible|private|privado|restricted|sign in|confirm your age",
+                                  str(e), re.I)):
+                self._video_alterno[original] = ""      # solo se intenta una vez
+
+                def hallado(otro):
+                    if gen != self._gen:
+                        return
+                    if otro:
+                        self._video_alterno[original] = otro
+                        self._cargar(pista, inicio=inicio, pausado=pausado, mismo=mismo,
+                                     forzar_stream=forzar_stream)
+                    else:
+                        fallo_final(e)
+
+                en_segundo_plano(self._buscar_alterno, pista, original,
+                                 ok=hallado, error=lambda _e: gen == self._gen and fallo_final(e), dueno=self)
+                return
+            fallo_final(e)
+
+        def fallo_final(e):
             self._fijar_estado("parado")
             self.error.emit(str(e))
             # una pista rota no debe parar la musica
@@ -1212,6 +1239,18 @@ class Reproductor(QObject):
 
         en_segundo_plano(catalogo.resolver, objetivo, modo, calidad, codec, self.ajustes,
                          ok=listo, error=fallo, dueno=self)
+
+    @staticmethod
+    def _buscar_alterno(pista, malo):
+        """Otra subida de la misma cancion (distinta del video que falla), o ''."""
+        texto = f"{pista.get('titulo') or ''} {pista.get('artista') or ''}".strip()
+        if not texto:
+            return ""
+        for x in catalogo.buscar(texto, "canciones", 8):
+            vid = x.get("video_id") or ""
+            if x.get("tipo") == "pista" and vid and vid != malo:
+                return vid
+        return ""
 
     def _titulo_medio(self, pista):
         t = pista.get("titulo") or ""
