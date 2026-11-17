@@ -32,8 +32,25 @@ def _escribir(texto):
         pass
 
 
+_ultimo = {"clave": None, "cuando": 0.0, "repetido": 0}
+
+
 def anotar(titulo, detalle=""):
+    """Anota un fallo. El mismo fallo repetido en ráfaga (p. ej. desde una señal que se
+    dispara muchas veces seguidas) se escribe una vez y luego solo se cuenta: así una
+    ráfaga no llena el disco desde el hilo de la interfaz."""
     from .version import VERSION
+    clave = (titulo, detalle)
+    ahora = time.monotonic()
+    with _candado:
+        if clave == _ultimo["clave"] and ahora - _ultimo["cuando"] < 10:
+            _ultimo["repetido"] += 1
+            _ultimo["cuando"] = ahora
+            return
+        repetido = _ultimo["repetido"]
+        _ultimo.update(clave=clave, cuando=ahora, repetido=0)
+    if repetido:
+        _escribir(f"(el fallo anterior se repitió {repetido} veces más)\n")
     _escribir(f"\n[{time.strftime('%Y-%m-%d %H:%M:%S')}] Caudal {VERSION} · {titulo}\n"
               f"{detalle.rstrip()}\n")
 

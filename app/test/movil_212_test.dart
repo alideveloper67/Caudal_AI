@@ -132,6 +132,8 @@ void main() {
       expect(find.text('Tu color'), findsWidgets);
       await t.scrollUntilVisible(find.text('Volver al aspecto de siempre'), 200,
           scrollable: find.byType(Scrollable).first);
+      await t.ensureVisible(find.text('Volver al aspecto de siempre'));
+      await t.pumpAndSettle();
       await t.tap(find.text('Volver al aspecto de siempre'));
       await t.pumpAndSettle();
       expect(_ajustes.texto('acento'), 'cian');

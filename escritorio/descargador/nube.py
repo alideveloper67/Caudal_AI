@@ -116,6 +116,21 @@ def _por_estado(estado):
     return ErrorNube(f"El servidor de cuentas respondió un error ({estado}).")
 
 
+_POR_HILO = threading.local()
+_REQUEST_DE_SIEMPRE = requests.request
+
+
+def _sesion_del_hilo():
+    """Una requests.Session por hilo: reutiliza la conexión TLS con el servidor (antes cada
+    petición abría una nueva: DNS + TLS cada vez). Session no es segura entre hilos, de ahí una
+    por hilo."""
+    s = getattr(_POR_HILO, "sesion", None)
+    if s is None:
+        s = requests.Session()
+        _POR_HILO.sesion = s
+    return s
+
+
 def _peticion(metodo, ruta, token=None, **kw):
     cab = {"apikey": CLAVE_PUBLICA, "Content-Type": "application/json"}
     if token:
@@ -123,7 +138,9 @@ def _peticion(metodo, ruta, token=None, **kw):
     cab.update(kw.pop("cabeceras", {}))
     tiempo = kw.pop("tiempo", TIEMPO)
     try:
-        return requests.request(metodo, URL + ruta, headers=cab, timeout=tiempo, **kw)
+        if requests.request is not _REQUEST_DE_SIEMPRE:     # una prueba lo sustituyó: se respeta
+            return requests.request(metodo, URL + ruta, headers=cab, timeout=tiempo, **kw)
+        return _sesion_del_hilo().request(metodo, URL + ruta, headers=cab, timeout=tiempo, **kw)
     except requests.RequestException as e:
         raise SinConexion(_motivo_sin_conexion(e)) from e
 

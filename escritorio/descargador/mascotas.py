@@ -7,7 +7,9 @@ carpeta de la cuenta, para que aparezca al abrir Caudal sin esperar a la red.
 """
 
 import json
+import os
 import sys
+import time
 from pathlib import Path
 
 from PySide6.QtCore import QObject, Signal
@@ -25,13 +27,46 @@ ARTE = _carpeta_arte()
 _PIXMAPS = {}
 
 
+# el catálogo se lee una vez y se guarda en memoria: la barra lo consultaba en cada cuadro
+# (decenas de veces por segundo). Se vuelve a leer solo si cambia el archivo (o la carpeta ARTE).
+_CATALOGO = {"ruta": None, "huella": None, "mirado": 0.0, "lista": [], "indice": {}, "version": 0}
+MIRAR_CADA = 1.0      # segundos entre comprobaciones de la fecha del archivo
+
+
+def _catalogo_vivo():
+    ruta = ARTE / "catalogo.json"
+    c = _CATALOGO
+    ahora = time.monotonic()
+    if c["ruta"] == str(ruta) and ahora - c["mirado"] < MIRAR_CADA:
+        return c
+    try:
+        st = os.stat(ruta)
+        huella = (st.st_mtime_ns, st.st_size)
+    except OSError:
+        huella = None
+    c["mirado"] = ahora
+    if c["ruta"] == str(ruta) and huella == c["huella"]:
+        return c
+    lista = []
+    if huella is not None:
+        try:
+            datos = json.loads(ruta.read_text(encoding="utf-8"))
+            lista = [m for m in datos if isinstance(m, dict) and m.get("clave")]
+        except (OSError, ValueError, TypeError):
+            lista = []
+    c.update(ruta=str(ruta), huella=huella, lista=lista,
+             indice={m["clave"]: m for m in reversed(lista)}, version=c["version"] + 1)
+    return c
+
+
+def olvidar_catalogo():
+    """Fuerza a releer el catálogo en la próxima consulta."""
+    _CATALOGO.update(ruta=None, huella=None, mirado=0.0)
+
+
 def catalogo():
     """Las mascotas disponibles: [{clave, nombre, origen, ancho, alto, arcoiris}]."""
-    try:
-        datos = json.loads((ARTE / "catalogo.json").read_text(encoding="utf-8"))
-    except (OSError, ValueError):
-        return []
-    return [m for m in datos if isinstance(m, dict) and m.get("clave")]
+    return list(_catalogo_vivo()["lista"])
 
 
 def cuenta_id(ctx):
@@ -76,10 +111,9 @@ def catalogo_de(ctx):
 
 
 def por_clave(clave):
-    for m in catalogo():
-        if m["clave"] == clave:
-            return m
-    return None
+    if not clave:
+        return None
+    return _catalogo_vivo()["indice"].get(clave)
 
 
 def estela_hoja(clave):
@@ -189,7 +223,16 @@ class GestorMascota(QObject):
         return True
 
     def datos(self):
-        return por_clave(self.clave) if self.activa else None
+        """La mascota activa (o None). Se recuerda mientras no cambie nada de lo que la decide:
+        la barra la pide en cada cuadro."""
+        clave_cache = (self.clave, self.puede, cuenta_id(self.ctx), cuenta_usuario(self.ctx),
+                       _catalogo_vivo()["version"])
+        cache = getattr(self, "_datos_cache", None)
+        if cache is not None and cache[0] == clave_cache:
+            return cache[1]
+        valor = por_clave(self.clave) if self.activa else None
+        self._datos_cache = (clave_cache, valor)
+        return valor
 
 
 COLORES_ARCOIRIS = ("#ff0000", "#ff9900", "#ffff00", "#33ff00", "#0099ff", "#6633ff")

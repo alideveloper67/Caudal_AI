@@ -243,6 +243,18 @@ class PaginaDescargas(QWidget):
         self.reloj.timeout.connect(self._refrescar)
         self.reloj.start(250)
 
+    # la página se queda viva en el historial: su reloj solo corre mientras se ve (lo que cambie
+    # mientras tanto queda anotado en _sucias y se pinta al volver)
+    def showEvent(self, e):
+        super().showEvent(e)
+        if not self.reloj.isActive():
+            self.reloj.start(250)
+            self._refrescar()
+
+    def hideEvent(self, e):
+        super().hideEvent(e)
+        self.reloj.stop()
+
     # ------------------------------------------------------------ campo
 
     def _pegar(self):

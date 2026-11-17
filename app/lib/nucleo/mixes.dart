@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 
+import 'package:flutter/foundation.dart' show compute, visibleForTesting;
+
 import 'catalogo.dart';
 import 'coleccion.dart';
 
@@ -72,35 +74,136 @@ String claveDia(DateTime f) =>
     '${f.year}-${f.month.toString().padLeft(2, '0')}-${f.day.toString().padLeft(2, '0')}';
 
 /// Lee el historial de la coleccion como [Escucha] en orden cronologico.
+///
+/// Leer y decodificar decenas de miles de escuchas es lo mas pesado de Inicio:
+/// la base se lee una vez, la decodificacion va en otro isolate y el resultado
+/// se comparte un rato entre quien lo pida (Inicio, la radio, el resumen...).
+/// Una lectura guardada (desde D, hasta L filas) sirve para cualquier otra
+/// desde una fecha igual o posterior y con un limite igual o menor: son las
+/// mismas escuchas mas recientes, filtradas.
 class Historial {
   Historial._();
 
+  /// Cuanto se comparte una lectura (y si cambian las escuchas, nada).
+  static const vigencia = Duration(minutes: 2);
+
+  static _Lectura? _guardada;
+  static Timer? _olvidar;
+
+  /// Olvida la lectura compartida (pruebas, o al cambiar de cuenta).
+  static void olvidar() {
+    _guardada = null;
+    _olvidar?.cancel();
+  }
+
   static Future<List<Escucha>> leer(Coleccion c, {DateTime? desde, int limite = 40000}) async {
+    final d = desde ?? DateTime.fromMillisecondsSinceEpoch(0);
+    // una consulta minima dice si cambio algo (escuchas nuevas, borradas o
+    // traidas de la nube) desde la lectura guardada
+    final f = (await c.db.rawQuery('SELECT MAX(id) m, COUNT(*) n FROM reproducciones')).first;
+    final firma = '${f['m']}|${f['n']}';
+    final g = _guardada;
+    if (g != null && identical(g.coleccion, c) && g.firma == firma &&
+        DateTime.now().difference(g.cuando) < vigencia && !g.desde.isAfter(d) && g.limite >= limite) {
+      final todas = await g.escuchas;
+      return _recortar(todas, d, limite);
+    }
+    final lectura = _Lectura(c, firma, d, limite, _leerDeVerdad(c, d, limite));
+    _guardada = lectura;
+    _olvidar?.cancel();
+    _olvidar = Timer(vigencia, () {
+      if (identical(_guardada, lectura)) _guardada = null;
+    });
+    try {
+      // una copia: quien la reciba puede ordenarla o recortarla sin tocar la compartida
+      return List.of(await lectura.escuchas);
+    } catch (_) {
+      if (identical(_guardada, lectura)) _guardada = null;
+      rethrow;
+    }
+  }
+
+  /// Las de [todas] desde [desde], las [limite] mas recientes (ya en orden).
+  static List<Escucha> _recortar(List<Escucha> todas, DateTime desde, int limite) {
+    var i = 0;
+    while (i < todas.length && todas[i].fecha.isBefore(desde)) {
+      i++;
+    }
+    final desdeFecha = todas.length - i > limite ? todas.length - limite : i;
+    return todas.sublist(desdeFecha);
+  }
+
+  static Future<List<Escucha>> _leerDeVerdad(Coleccion c, DateTime desde, int limite) async {
     final filas = await c.db.rawQuery(
         'SELECT clave, fecha, contexto FROM reproducciones WHERE fecha >= ? '
         'ORDER BY fecha DESC LIMIT ?',
-        [desde == null ? 0 : desde.millisecondsSinceEpoch / 1000.0, limite]);
+        [desde.millisecondsSinceEpoch / 1000.0, limite]);
     if (filas.isEmpty) return [];
-    final claves = <String>{for (final f in filas) '${f['clave']}'}.toList();
-    final pistas = {for (final p in await c.pistas(claves)) '${p['clave']}': p};
-    final salida = <Escucha>[];
+    final claves = <String>[];
+    final fechas = <double>[];
+    final contextos = <String>[];
     for (final f in filas.reversed) {
-      final pista = pistas['${f['clave']}'];
       final segundos = f['fecha'];
-      if (pista == null || segundos is! num) continue;
+      if (segundos is! num) continue;
+      claves.add('${f['clave']}');
+      fechas.add(segundos.toDouble());
+      contextos.add('${f['contexto'] ?? ''}');
+    }
+    final crudas = await c.pistasCrudas(<String>{...claves}.toList());
+    final datos = (claves: claves, fechas: fechas, contextos: contextos, pistas: crudas.datos, locales: crudas.locales);
+    // pocas filas: no merece la pena otro isolate
+    if (claves.length < 300) return decodificar(datos);
+    return compute(decodificar, datos, debugLabel: 'historial');
+  }
+
+  /// Arma las [Escucha] desde las filas sin decodificar (puro: corre en otro
+  /// isolate). Cada pista se decodifica una sola vez aunque suene mil veces.
+  @visibleForTesting
+  static List<Escucha> decodificar(
+      ({
+        List<String> claves,
+        List<double> fechas,
+        List<String> contextos,
+        Map<String, String> pistas,
+        Map<String, Json> locales,
+      }) d) {
+    final pistas = <String, Json?>{};
+    Json? pistaDe(String clave) => pistas.putIfAbsent(clave, () {
+          final texto = d.pistas[clave];
+          if (texto == null) return d.locales[clave];
+          try {
+            return Map<String, dynamic>.from(jsonDecode(texto) as Map);
+          } catch (_) {
+            return null;
+          }
+        });
+    final salida = <Escucha>[];
+    for (var i = 0; i < d.claves.length; i++) {
+      final pista = pistaDe(d.claves[i]);
+      if (pista == null) continue;
       Json? contexto;
-      final texto = '${f['contexto'] ?? ''}';
+      final texto = d.contextos[i];
       if (texto.isNotEmpty) {
         try {
-          final d = jsonDecode(texto);
-          if (d is Map) contexto = Map<String, dynamic>.from(d);
+          final x = jsonDecode(texto);
+          if (x is Map) contexto = Map<String, dynamic>.from(x);
         } catch (_) {}
       }
-      salida.add(Escucha(pista,
-          DateTime.fromMillisecondsSinceEpoch((segundos * 1000).round()), contexto: contexto));
+      salida.add(Escucha(pista, DateTime.fromMillisecondsSinceEpoch((d.fechas[i] * 1000).round()),
+          contexto: contexto));
     }
     return salida;
   }
+}
+
+class _Lectura {
+  _Lectura(this.coleccion, this.firma, this.desde, this.limite, this.escuchas);
+  final Coleccion coleccion;
+  final String firma;
+  final DateTime desde;
+  final int limite;
+  final Future<List<Escucha>> escuchas;
+  final DateTime cuando = DateTime.now();
 }
 
 // ============================================================ mixes

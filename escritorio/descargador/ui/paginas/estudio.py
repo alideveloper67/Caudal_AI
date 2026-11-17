@@ -297,7 +297,7 @@ class PaginaEstudio(Pagina):
         self.ctrl.cambio.connect(self._refrescar)
         self.ctrl.tic.connect(self._tic)
         self.ctrl.aviso.connect(self._aviso)
-        self.ctrl.bloque_terminado.connect(lambda _e: self._refrescar())
+        self.ctrl.bloque_terminado.connect(self._al_terminar_bloque)
         self._refrescar()
 
     # ---------------------------------------------------------------- construcción
@@ -589,6 +589,9 @@ class PaginaEstudio(Pagina):
     # ---------------------------------------------------------------- repintado
     def _tic(self):
         self.banner.actualizar(self.ctrl)
+
+    def _al_terminar_bloque(self, _e=None):
+        self._refrescar()
 
     def _refrescar(self):
         ctrl, cfg = self.ctrl, self.ctrl.cfg

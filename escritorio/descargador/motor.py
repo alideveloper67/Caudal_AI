@@ -451,12 +451,24 @@ class TrabajoDescarga(QRunnable):
         if self.tarea.cancelar or self.tarea.pausar:
             raise Cancelado()
 
+    INTERVALO_PROGRESO = 0.25     # yt-dlp avisa por cada bloque: a la interfaz, 4 avisos/s como mucho
+
+    def _toca_avisar(self, completo=False):
+        """Freno del progreso: True si ya pasó el intervalo (o es el 100 %/final, que pasa siempre)."""
+        ahora = time.monotonic()
+        if completo or ahora - getattr(self, "_ultimo_aviso", 0.0) >= self.INTERVALO_PROGRESO:
+            self._ultimo_aviso = ahora
+            return True
+        return False
+
     def _hook(self, d):
         self._comprobar_corte()
         estado = d.get("status")
         if estado == "downloading":
             total = d.get("total_bytes") or d.get("total_bytes_estimate") or 0
             hecho = d.get("downloaded_bytes") or 0
+            if not self._toca_avisar(bool(total) and hecho >= total):
+                return
             self.senales.progreso.emit(self.tarea.ident, {
                 "estado": DESCARGANDO,
                 "descargado": hecho,
@@ -554,6 +566,8 @@ class TrabajoDescarga(QRunnable):
 
         def progresar(d):
             total = d["total"]
+            if not self._toca_avisar(bool(total) and d["descargado"] >= total):
+                return
             self.senales.progreso.emit(t.ident, {
                 "estado": DESCARGANDO,
                 "descargado": d["descargado"],

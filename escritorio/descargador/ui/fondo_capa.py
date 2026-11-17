@@ -70,6 +70,26 @@ class Renderizador:
     def __init__(self):
         self._pm = None
         self._clave = None
+        self._compuesto = None
+        self._clave_compuesto = None
+
+    def compuesto(self, ancho, alto, dpr, img, serie, visible, desenfoque):
+        """El fondo entero (color + imagen + velos + viñeta + acento) ya compuesto en un QPixmap.
+        Se rehace solo si cambia el tamaño, la imagen, sus ajustes o los colores: la capa de la
+        ventana se repinta cada vez que algo translúcido se mueve encima, y así cada repintado
+        es copiar un trozo de imagen en vez de seis degradados."""
+        hay = img is not None and not img.isNull()
+        clave = (int(ancho), int(alto), float(dpr), serie if hay else None, visible, desenfoque,
+                 C["fondo"], C["panel"], C["acento"])
+        if clave != self._clave_compuesto or self._compuesto is None:
+            pm = QPixmap(max(1, int(ancho * dpr)), max(1, int(alto * dpr)))
+            pm.setDevicePixelRatio(dpr)
+            pm.fill(Qt.transparent)
+            q = QPainter(pm)
+            self.pintar(q, QRectF(0, 0, ancho, alto), img, serie, visible, desenfoque)
+            q.end()
+            self._compuesto, self._clave_compuesto = pm, clave
+        return self._compuesto
 
     def _escena(self, img, serie, rect, desenfoque, estirar):
         tam = QSize(max(1, int(rect.width())), max(1, int(rect.height())))
@@ -283,7 +303,10 @@ class CapaFondo(QWidget):
         self._t.setSingleShot(True)
         self._t.setInterval(140)
         self._t.timeout.connect(self._fin_redimension)
-        gestor.cambiado.connect(lambda _a: self.update())
+        gestor.cambiado.connect(self._al_cambiar)
+
+    def _al_cambiar(self, _a=None):
+        self.update()
 
     def _fin_redimension(self):
         self._redimensionando = False
@@ -294,10 +317,17 @@ class CapaFondo(QWidget):
         self._t.start()
         super().resizeEvent(e)
 
-    def paintEvent(self, _e):
+    def paintEvent(self, e):
         g = self.gestor
         p = QPainter(self)
-        from .estilos import patron_actual
-        self.rend.pintar(p, QRectF(self.rect()), g.imagen, g.serie, g.visible, g.desenfoque,
-                         estirar=self._redimensionando, patron=pixmap_patron(patron_actual()))
+        if self._redimensionando:
+            # mientras se arrastra el borde: se pinta directo (componer en cada paso sería peor)
+            self.rend.pintar(p, QRectF(self.rect()), g.imagen, g.serie, g.visible, g.desenfoque,
+                             estirar=True)
+        else:
+            dpr = self.devicePixelRatioF()
+            pm = self.rend.compuesto(self.width(), self.height(), dpr, g.imagen, g.serie,
+                                     g.visible, g.desenfoque)
+            # el pintor ya viene recortado a la zona que se repinta: solo se copia ese trozo
+            p.drawPixmap(0, 0, pm)
         p.end()

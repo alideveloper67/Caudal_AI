@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../nucleo/vida_app.dart';
 import '../../nucleo/coleccion.dart';
 import '../../nucleo/listas_compartidas.dart';
 import '../comunes.dart';
@@ -292,10 +293,14 @@ class _ListaCompartidaPaginaState extends State<ListaCompartidaPagina> {
   String? _error;
   bool _sinAcceso = false;
   bool _trayendo = false;
-  Timer? _reloj;
 
   /// Cada cuánto se vuelve a traer mientras está abierta.
   static const cadaCuanto = Duration(seconds: 20);
+
+  /// Solo con la app a la vista y esta pantalla delante; al volver, en el acto.
+  late final Sondeo _sondeo = Sondeo(cadaCuanto, () async {
+    if (mounted) await _traer(silencioso: true);
+  });
 
   bool get _puedeAnadir => _lista.puedeAnadir;
 
@@ -304,13 +309,19 @@ class _ListaCompartidaPaginaState extends State<ListaCompartidaPagina> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _traer();
-      _reloj = Timer.periodic(cadaCuanto, (_) => _traer(silencioso: true));
+      _sondeo.iniciar();
     });
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _sondeo.seguirPantalla(context);
+  }
+
+  @override
   void dispose() {
-    _reloj?.cancel();
+    _sondeo.detener();
     super.dispose();
   }
 

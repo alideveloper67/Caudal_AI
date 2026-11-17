@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../nucleo/coleccion.dart';
 import '../../nucleo/listas_compartidas.dart';
+import '../../nucleo/vida_app.dart';
 import '../comunes.dart';
 import '../servicios.dart';
 import '../tema.dart';
@@ -29,7 +30,14 @@ class _BibliotecaPaginaState extends State<BibliotecaPagina> with AutomaticKeepA
 
   /// Las listas de otras personas donde soy miembro (se traen de la nube, aparte).
   List<ListaCompartida> _compartidas = ListasCompartidasVistas.lista.value;
-  Timer? _relojCompartidas;
+
+  /// Las compartidas se miran cada minuto, solo con la app y esta pestaña a la
+  /// vista; al volver a ellas se miran en el acto.
+  late final Sondeo _sondeo = Sondeo(const Duration(seconds: 60), _traerCompartidas);
+
+  /// Varios avisos seguidos de la colección (sincronizar, importar...) se
+  /// juntan en una sola recarga.
+  Timer? _espera;
 
   @override
   bool get wantKeepAlive => true;
@@ -38,30 +46,47 @@ class _BibliotecaPaginaState extends State<BibliotecaPagina> with AutomaticKeepA
   void didChangeDependencies() {
     super.didChangeDependencies();
     if (_col == null) {
-      _col = Caudal.leer(context).coleccion..addListener(_cargar);
+      _col = Caudal.leer(context).coleccion..addListener(_alCambiarColeccion);
       _cargar();
       _traerCompartidas();
-      _relojCompartidas = Timer.periodic(const Duration(seconds: 60), (_) => _traerCompartidas());
+      _sondeo.iniciar();
     }
+    _sondeo.seguirPantalla(context);
   }
 
   @override
   void dispose() {
-    _relojCompartidas?.cancel();
-    _col?.removeListener(_cargar);
+    _sondeo.detener();
+    _espera?.cancel();
+    _col?.removeListener(_alCambiarColeccion);
     super.dispose();
   }
 
+  void _alCambiarColeccion() {
+    _espera?.cancel();
+    _espera = Timer(const Duration(milliseconds: 250), () {
+      if (mounted) _cargar();
+    });
+  }
+
+  /// Lo que se ve de una compartida (para no recargar si no cambio nada).
+  static String _huella(List<ListaCompartida> ls) => [
+        for (final c in ls)
+          '${c.id}|${c.nombre}|${c.descripcion}|${c.rol}|${c.total}|${c.actualizada}|${c.dueno.visible}'
+      ].join('\n');
+
   /// Sin internet o sin cuenta, la sección simplemente no aparece.
   Future<void> _traerCompartidas() async {
+    if (!mounted) return;
     final base = listasDe(context);
     if (base == null) return;
     try {
       final l = await base.misListasCompartidas();
       ListasCompartidasVistas.lista.value = l;
       if (!mounted) return;
+      final cambio = _huella(l) != _huella(_compartidas);
       _compartidas = l;
-      _cargar();
+      if (cambio) _cargar();
     } catch (_) {}
   }
 

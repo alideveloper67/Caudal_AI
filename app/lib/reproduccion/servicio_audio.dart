@@ -8,6 +8,7 @@ import 'package:flutter/services.dart' show MethodChannel;
 import '../nucleo/coleccion.dart';
 import '../nucleo/plataforma.dart';
 import 'biblioteca_auto.dart';
+import 'frenos.dart';
 import 'reproductor.dart';
 import 'widget_inicio.dart';
 
@@ -46,6 +47,7 @@ class ServicioAudio extends BaseAudioHandler with SeekHandler {
     r = nuevo;
     auto.coleccion = coleccion ?? nuevo.coleccion;
     _ultimaClave = '';
+    _freno.reiniciar();
     _enganchar();
   }
 
@@ -225,6 +227,7 @@ class ServicioAudio extends BaseAudioHandler with SeekHandler {
     final s = r.posicion.value.inSeconds;
     if (s == _ultimoSegundo) return;
     _ultimoSegundo = s;
+    // el sistema avanza la barra por su cuenta: solo se le avisa si hubo un salto
     _estado();
     final item = mediaItem.value;
     if (item != null && item.duration == null && r.duracion.value > Duration.zero) {
@@ -232,11 +235,26 @@ class ServicioAudio extends BaseAudioHandler with SeekHandler {
     }
   }
 
+  /// La notificacion solo se vuelve a publicar cuando cambia algo de verdad
+  /// (estado, velocidad, cancion) o la posicion salta: antes se publicaba cada
+  /// segundo y Android rehacia la notificacion entera cada vez.
+  final _freno = FrenoNotificacion();
+
   void _estado() {
     // cargando cuenta como "sonando" para el sistema: entre una canción y la siguiente el
     // servicio no debe dejar de ser de primer plano, o con la pantalla apagada Android
     // congela la red y la siguiente canción no carga hasta encender la pantalla
     final sonando = r.estado == EstadoRepro.sonando || r.estado == EstadoRepro.cargando;
+    // mientras carga, el reloj del sistema no debe correr: se cuenta como quieto
+    final corre = r.estado == EstadoRepro.sonando;
+    if (!_freno.deja(
+      firma: '${r.estado.name}|${r.actual == null}|${r.velocidad}|$_ultimaClave',
+      posicion: r.posicion.value,
+      sonando: corre,
+      velocidad: r.velocidad,
+    )) {
+      return;
+    }
     playbackState.add(PlaybackState(
       controls: [
         MediaControl.skipToPrevious,

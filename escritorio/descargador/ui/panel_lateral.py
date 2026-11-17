@@ -332,9 +332,13 @@ class PanelLateral(QWidget):
         for senal in (ctx.listas_cambio, ctx.guardados_cambio, ctx.descargas_cambio,
                       ctx.me_gusta_cambio):
             senal.connect(self._programar)
-        ctx.reproductor.estado_cambio.connect(lambda *_: [i.update() for i in self.items])
-        ctx.reproductor.pista_cambio.connect(lambda *_: [i.update() for i in self.items])
+        ctx.reproductor.estado_cambio.connect(self._repintar_items)
+        ctx.reproductor.pista_cambio.connect(self._repintar_items)
         self.refrescar()
+
+    def _repintar_items(self, *_a):
+        for i in self.items:
+            i.update()
 
     def _programar(self, *_):
         if not self._pendiente:
@@ -414,8 +418,8 @@ class PanelLateral(QWidget):
                            "subtitulo": f"Lista • {n} {'canción' if n == 1 else 'canciones'}",
                            "fijada": True})
         if f in (None, "disco"):
-            musica = len(col.descargadas(True))
-            videos = len(col.descargadas(False))
+            cuenta = col.contar_descargadas()     # COUNT(*) en la base: sin leer cada archivo
+            musica, videos = cuenta[True], cuenta[False]
             salida.append({"tipo": "disco", "solo": True, "especial": "musica",
                            "titulo": "Música descargada",
                            "subtitulo": f"En tu disco • {musica} canciones"})

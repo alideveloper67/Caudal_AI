@@ -80,12 +80,22 @@ class Ajustes extends ChangeNotifier {
   double decimal(String clave) => _valor<double>(clave);
   bool sino(String clave) => _valor<bool>(clave);
 
+  /// Las bandas del ecualizador decodificadas, recordadas mientras su texto no
+  /// cambie (el fundido entre canciones las pide 20 veces por segundo).
+  String? _eqTexto;
+  List<int> _eqBandas = const [];
+
   List<int> get bandasEq {
-    try {
-      return (jsonDecode(texto('eq_bandas')) as List).map((e) => (e as num).toInt()).toList();
-    } catch (_) {
-      return List.filled(10, 0);
+    final t = texto('eq_bandas');
+    if (t != _eqTexto) {
+      try {
+        _eqBandas = (jsonDecode(t) as List).map((e) => (e as num).toInt()).toList();
+      } catch (_) {
+        _eqBandas = List.filled(10, 0);
+      }
+      _eqTexto = t;
     }
+    return List.of(_eqBandas); // una copia: quien la reciba puede cambiarla
   }
 
   Future<void> poner(String clave, Object valor, {bool avisar = true}) async {

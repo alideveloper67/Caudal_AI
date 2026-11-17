@@ -1,10 +1,11 @@
-import 'dart:ui' as ui;
+import 'dart:math' show min;
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show HapticFeedback;
 
 import '../nucleo/fondo_app.dart';
+import 'horneado.dart';
 import 'tema.dart';
 
 /// La imagen de fondo ya compuesta: color base, la imagen tenue (con su
@@ -27,28 +28,36 @@ class FondoImagen extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final sigma = desenfoque * 0.9;
-    final imagen = CachedNetworkImage(
-      imageUrl: url,
-      cacheKey: url,
-      fit: BoxFit.cover,
-      alignment: Alignment.center,
-      memCacheWidth: ancho,
-      fadeInDuration: const Duration(milliseconds: 420),
-      placeholder: (_, _) => const SizedBox.shrink(),
-      errorWidget: (_, _, _) => const SizedBox.shrink(),
-    );
+    final opacidad = (visible / 100).clamp(0.0, 1.0);
+    // sin desenfoque: la imagen con su opacidad en la pintura (sin capa aparte);
+    // con desenfoque: horneada una vez (desenfoque y opacidad) en una copia
+    // reducida, en vez de un ImageFiltered de pantalla completa en cada fotograma
+    final Widget imagen = sigma <= 0
+        ? CachedNetworkImage(
+            imageUrl: url,
+            cacheKey: url,
+            fit: BoxFit.cover,
+            alignment: Alignment.center,
+            memCacheWidth: ancho,
+            fadeInDuration: const Duration(milliseconds: 420),
+            color: Color.fromRGBO(255, 255, 255, opacidad),
+            colorBlendMode: BlendMode.dstIn,
+            placeholder: (_, _) => const SizedBox.shrink(),
+            errorWidget: (_, _, _) => const SizedBox.shrink(),
+          )
+        : ImagenDesenfocada(
+            key: ValueKey(url),
+            clave: url,
+            imagen: (w) => ResizeImage.resizeIfNeeded(min(w, ancho), null, CachedNetworkImageProvider(url, cacheKey: url)),
+            sigma: sigma,
+            opacidad: opacidad,
+            modo: TileMode.decal,
+            aparecer: const Duration(milliseconds: 420),
+          );
     return RepaintBoundary(
       child: Stack(fit: StackFit.expand, children: [
         ColoredBox(color: C.fondo),
-        Opacity(
-          opacity: (visible / 100).clamp(0.0, 1.0),
-          child: sigma <= 0
-              ? imagen
-              : ImageFiltered(
-                  imageFilter: ui.ImageFilter.blur(sigmaX: sigma, sigmaY: sigma, tileMode: TileMode.decal),
-                  child: imagen,
-                ),
-        ),
+        imagen,
         // un destello del color de acento arriba: une la imagen con el resto de la app
         DecoratedBox(
           decoration: BoxDecoration(

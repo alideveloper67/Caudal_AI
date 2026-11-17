@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../nucleo/vida_app.dart';
 import '../../nucleo/recomendador.dart';
 import '../../nucleo/catalogo.dart';
 import '../../nucleo/coleccion.dart';
@@ -445,27 +446,29 @@ class _BotonMensajes extends StatefulWidget {
   State<_BotonMensajes> createState() => _BotonMensajesState();
 }
 
-class _BotonMensajesState extends State<_BotonMensajes> with WidgetsBindingObserver {
+class _BotonMensajesState extends State<_BotonMensajes> {
   int _sinLeer = 0;
-  Timer? _reloj;
+
+  /// Cada minuto con Inicio a la vista; al volver a la app o a esta pestaña
+  /// (por ejemplo, tras leer los mensajes) se mira en el acto.
+  late final Sondeo _sondeo = Sondeo(const Duration(seconds: 60), _mirar);
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) => _mirar());
-    _reloj = Timer.periodic(const Duration(seconds: 60), (_) => _mirar());
+    _sondeo.iniciar();
   }
 
   @override
-  void didChangeAppLifecycleState(AppLifecycleState estado) {
-    if (estado == AppLifecycleState.resumed) _mirar();
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _sondeo.seguirPantalla(context);
   }
 
   @override
   void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    _reloj?.cancel();
+    _sondeo.detener();
     super.dispose();
   }
 

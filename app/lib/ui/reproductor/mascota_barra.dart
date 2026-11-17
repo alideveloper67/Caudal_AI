@@ -1,11 +1,14 @@
 // La mascotita que camina sobre la barra de progreso (donadores y fundadores).
 //
 // Solo existe mientras hay una elegida: sin mascota no se crea nada y la barra
-// queda como siempre. El reloj de animacion corre unicamente mientras suena.
+// queda como siempre. El reloj de animacion corre unicamente mientras suena
+// (y se ve), y solo repinta al cambiar de cuadro o de posicion.
 
+import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../nucleo/mascota_app.dart';
@@ -46,11 +49,17 @@ class _Caminante extends StatefulWidget {
   State<_Caminante> createState() => _CaminanteState();
 }
 
-class _CaminanteState extends State<_Caminante> with SingleTickerProviderStateMixin {
-  // una vuelta entera de la animación: 180 ms por cuadro (2 cuadros = 360 ms, como antes)
-  late final AnimationController _reloj =
-      AnimationController(vsync: this, duration: Duration(milliseconds: 180 * widget.mascota.cuadros));
+class _CaminanteState extends State<_Caminante> {
+  // 180 ms por cuadro (2 cuadros = 360 ms, como antes). Antes un reloj de
+  // animación pedía un fotograma entero 60 veces por segundo para cambiar de
+  // cuadro 5 veces: ahora se repinta solo al cambiar de cuadro o de posición.
+  static const _porCuadro = Duration(milliseconds: 180);
+  Timer? _reloj;
   ui.Image? _hoja, _estela;
+
+  /// Avisa de cada cuadro nuevo (lo que hace repintar a la mascota).
+  final _avisoCuadro = ValueNotifier<int>(0);
+  ValueListenable<TickerModeData>? _tickers;
 
   // sube 0.9 cada vez que cambia el cuadro de caminar (igual que en el escritorio)
   double _fase = 0;
@@ -67,33 +76,47 @@ class _CaminanteState extends State<_Caminante> with SingleTickerProviderStateMi
         if (mounted) setState(() => _estela = im);
       });
     }
-    _reloj.addListener(_alAvanzar);
     widget.r.addListener(_alCambiarEstado);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // con la pantalla tapada o la pestaña oculta tampoco camina
+    final n = TickerMode.getValuesNotifier(context);
+    if (!identical(n, _tickers)) {
+      _tickers?.removeListener(_alCambiarEstado);
+      _tickers = n..addListener(_alCambiarEstado);
+    }
     _alCambiarEstado();
   }
 
-  void _alAvanzar() {
-    final c = cuadroDeMascota(_reloj.value, widget.mascota.cuadros);
-    if (c != _cuadro) {
-      _cuadro = c;
-      _fase += 0.9;
-    }
+  void _paso() {
+    _cuadro = (_cuadro + 1) % math.max(1, widget.mascota.cuadros);
+    _fase += 0.9;
+    _avisoCuadro.value++;
   }
 
   @override
   void dispose() {
     widget.r.removeListener(_alCambiarEstado);
-    _reloj.dispose();
+    _tickers?.removeListener(_alCambiarEstado);
+    _reloj?.cancel();
+    _avisoCuadro.dispose();
     super.dispose();
   }
 
   void _alCambiarEstado() {
-    final suena = widget.r.estado == EstadoRepro.sonando;
-    if (suena && !_reloj.isAnimating) {
-      _reloj.repeat();
-    } else if (!suena && _reloj.isAnimating) {
-      _reloj.stop();
-      _reloj.value = 0; // en pausa se queda quieta, en el primer cuadro
+    final suena = widget.r.estado == EstadoRepro.sonando && (_tickers?.value.enabled ?? true);
+    if (suena && _reloj == null) {
+      _reloj = Timer.periodic(_porCuadro, (_) => _paso());
+    } else if (!suena && _reloj != null) {
+      _reloj!.cancel();
+      _reloj = null;
+      if (widget.r.estado != EstadoRepro.sonando && _cuadro != 0) {
+        _cuadro = 0; // en pausa se queda quieta, en el primer cuadro
+        _avisoCuadro.value++;
+      }
     }
   }
 
@@ -101,16 +124,18 @@ class _CaminanteState extends State<_Caminante> with SingleTickerProviderStateMi
   Widget build(BuildContext context) {
     final hoja = _hoja;
     if (hoja == null) return const SizedBox.shrink();
-    return CustomPaint(
-      painter: _PintorMascota(
-        hoja: hoja,
-        estela: _estela,
-        fase: () => _fase,
-        mascota: widget.mascota,
-        fraccion: widget.fraccion,
-        margen: widget.margen,
-        reloj: _reloj,
-        repintar: Listenable.merge([widget.cambios, _reloj]),
+    return RepaintBoundary(
+      child: CustomPaint(
+        painter: _PintorMascota(
+          hoja: hoja,
+          estela: _estela,
+          fase: () => _fase,
+          cuadro: () => _cuadro,
+          mascota: widget.mascota,
+          fraccion: widget.fraccion,
+          margen: widget.margen,
+          repintar: Listenable.merge([widget.cambios, _avisoCuadro]),
+        ),
       ),
     );
   }
@@ -127,10 +152,10 @@ class _PintorMascota extends CustomPainter {
     required this.hoja,
     required this.estela,
     required this.fase,
+    required this.cuadro,
     required this.mascota,
     required this.fraccion,
     required this.margen,
-    required this.reloj,
     required Listenable repintar,
   }) : super(repaint: repintar);
 
@@ -140,7 +165,7 @@ class _PintorMascota extends CustomPainter {
   final Mascota mascota;
   final double Function() fraccion;
   final double margen;
-  final Animation<double> reloj;
+  final int Function() cuadro;
 
   // los dibujos ya vienen a su tamaño final (48x44): se pintan 1 a 1
   static const _escala = 1.0;
@@ -153,7 +178,7 @@ class _PintorMascota extends CustomPainter {
     final y = size.height / 2;
     // los pies quedan apoyados justo encima de la barra
     final arriba = y - 2 - h;
-    final cuadro = cuadroDeMascota(reloj.value, mascota.cuadros);
+    final cuadro = math.min(mascota.cuadros - 1, math.max(0, this.cuadro()));
 
     if (mascota.arcoiris) {
       _arcoiris(canvas, x, arriba, w, h);

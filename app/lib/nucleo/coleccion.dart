@@ -356,6 +356,35 @@ class Coleccion extends ChangeNotifier {
     return pistas(claves.toList());
   }
 
+  /// Los [n] me gusta mas recientes, sin leer ni decodificar los demas.
+  Future<List<Json>> meGustaRecientes(int n) async {
+    final claves = (await db.query('me_gusta', orderBy: 'fecha DESC', limit: n)).map((f) => '${f['clave']}');
+    return pistas(claves.toList());
+  }
+
+  /// Las filas tal cual de [claves] en `pistas` (clave -> JSON sin decodificar),
+  /// para decodificarlas fuera del hilo de la pantalla. Las que no estan ahi
+  /// (descargas locales) van ya decodificadas en `locales`.
+  Future<({Map<String, String> datos, Map<String, Json> locales})> pistasCrudas(List<String> claves) async {
+    final datos = <String, String>{};
+    for (var i = 0; i < claves.length; i += 400) {
+      final trozo = claves.sublist(i, min(i + 400, claves.length));
+      final filas = await db.query('pistas',
+          columns: ['clave', 'datos'],
+          where: 'clave IN (${List.filled(trozo.length, '?').join(',')})', whereArgs: trozo);
+      for (final f in filas) {
+        datos['${f['clave']}'] = '${f['datos']}';
+      }
+    }
+    final locales = <String, Json>{};
+    for (final c in claves) {
+      if (datos.containsKey(c) || !c.startsWith('local:')) continue;
+      final pista = await _pistaDescargada(c);
+      if (pista != null) locales[c] = pista;
+    }
+    return (datos: datos, locales: locales);
+  }
+
   // ------------------------------------------------------------ listas
 
   Future<List<Json>> listas() async {
@@ -582,11 +611,30 @@ class Coleccion extends ChangeNotifier {
   Future<List<String>> portadasDeLista(int id, [int n = 4]) async {
     final propia = await _portadaActual(id);
     if (propia.isNotEmpty) return [propia];
+    // solo las primeras canciones, de 8 en 8 y decodificando solo esas: antes se
+    // leia y decodificaba la lista entera para sacar cuatro miniaturas
+    const tanda = 8, tope = 40;
     final salida = <String>[];
-    for (final pista in (await pistasDeLista(id)).take(40)) {
-      final m = '${pista['miniatura'] ?? ''}';
-      if (m.isNotEmpty && !salida.contains(m)) salida.add(m);
-      if (salida.length >= n) break;
+    for (var desde = 0; desde < tope && salida.length < n; desde += tanda) {
+      final filas = await db.rawQuery(
+          'SELECT i.clave, p.datos FROM lista_items i LEFT JOIN pistas p ON p.clave = i.clave '
+          'WHERE i.lista_id = ? ORDER BY i.orden LIMIT ? OFFSET ?',
+          [id, tanda, desde]);
+      for (final f in filas) {
+        Json? pista;
+        final datos = f['datos'];
+        if (datos != null) {
+          try {
+            pista = Map<String, dynamic>.from(jsonDecode('$datos') as Map);
+          } catch (_) {}
+        } else {
+          pista = await _pistaDescargada('${f['clave']}');
+        }
+        final m = '${pista?['miniatura'] ?? ''}';
+        if (m.isNotEmpty && !salida.contains(m)) salida.add(m);
+        if (salida.length >= n) break;
+      }
+      if (filas.length < tanda) break;
     }
     return salida;
   }
@@ -661,7 +709,8 @@ class Coleccion extends ChangeNotifier {
     final cuenta = <String, int>{};
     final nombres = <String, String>{};
     final portadas = <String, String>{};
-    final base = [...await escuchadoHacePoco(150), ...(await listaMeGusta()).take(100)];
+    // solo los 100 me gusta mas recientes (antes se decodificaban todos)
+    final base = [...await escuchadoHacePoco(150), ...await meGustaRecientes(100)];
     for (final pista in base) {
       for (final a in (pista['artistas'] as List? ?? [])) {
         final id = '${(a as Map)['id'] ?? ''}';

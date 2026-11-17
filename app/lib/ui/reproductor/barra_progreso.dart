@@ -3,6 +3,7 @@
 //
 // Se pinta con un CustomPainter que escucha la posicion directamente: avanzar
 // la cancion o arrastrar el dedo repinta solo la barra, sin reconstruir nada.
+// Los textos de tiempo van aparte y solo se rehacen al cambiar de segundo.
 
 import 'dart:async';
 import 'dart:ui' show lerpDouble;
@@ -40,15 +41,29 @@ class _BarraProgresoState extends State<BarraProgreso> with SingleTickerProvider
 
   static const _margen = 14.0; // lo que la barra deja a cada lado (como el Slider de antes)
 
+  /// Los textos de tiempo (segundo actual y duracion): solo cambian una vez
+  /// por segundo, asi la columna de debajo no se reconstruye con cada aviso.
+  late final ValueNotifier<(int, int)> _textos = ValueNotifier(_segundos());
+
+  (int, int) _segundos() {
+    final d = widget.r.duracion.value;
+    return ((_fraccion() * d.inMilliseconds).round() ~/ 1000, d.inSeconds);
+  }
+
+  void _alCambiar() => _textos.value = _segundos();
+
   @override
   void initState() {
     super.initState();
     widget.r.posicion.addListener(_alLlegar);
+    _cambios.addListener(_alCambiar);
   }
 
   @override
   void dispose() {
     widget.r.posicion.removeListener(_alLlegar);
+    _cambios.removeListener(_alCambiar);
+    _textos.dispose();
     _espera?.cancel();
     _activo.dispose();
     _dedo.dispose();
@@ -182,12 +197,12 @@ class _BarraProgresoState extends State<BarraProgreso> with SingleTickerProvider
         ),
       );
     });
-    return ListenableBuilder(
-      listenable: _cambios,
+    return ValueListenableBuilder<(int, int)>(
+      valueListenable: _textos,
       child: barra,
-      builder: (_, hijo) {
+      builder: (_, segundos, hijo) {
         final d = r.duracion.value;
-        final ahora = Duration(milliseconds: (_fraccion() * d.inMilliseconds).round());
+        final ahora = Duration(seconds: segundos.$1);
         Duration mas(int seg) => Duration(milliseconds: (ahora.inMilliseconds + seg * 1000).clamp(0, d.inMilliseconds));
         return Semantics(
           slider: true,

@@ -7,11 +7,16 @@ from PySide6.QtCore import QRect, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath
 from PySide6.QtWidgets import QGridLayout, QWidget
 
+from ...memoria import DiccionarioLimitado
 from .. import iconos, imagenes
 from ..componentes import Carrusel, RejillaRapida, fuente
 from ..estilos import C
 
-_CACHE = {}
+# respuestas del catálogo (Inicio, álbumes, listas...): las 200 últimas, y las de más de una
+# hora se tiran (ninguna página las acepta tan viejas)
+TOPE_CACHE = 200
+CADUCA_SEG = 60 * 60
+_CACHE = DiccionarioLimitado(TOPE_CACHE)
 
 
 def cache(clave, minutos=15):
@@ -22,7 +27,11 @@ def cache(clave, minutos=15):
 
 
 def guardar_cache(clave, valor):
-    _CACHE[clave] = (time.time(), valor)
+    ahora = time.time()
+    if len(_CACHE) >= TOPE_CACHE // 2:
+        for k in [k for k, (t, _v) in _CACHE.items() if ahora - t > CADUCA_SEG]:
+            _CACHE.pop(k, None)
+    _CACHE[clave] = (ahora, valor)
 
 
 def pintar_secciones(ctx, layout, secciones, desde=0):

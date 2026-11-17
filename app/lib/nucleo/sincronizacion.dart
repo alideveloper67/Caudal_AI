@@ -8,6 +8,7 @@ import 'package:sqflite/sqflite.dart';
 import 'ajustes.dart';
 import 'coleccion.dart';
 import 'nube.dart';
+import 'vida_app.dart';
 
 /// Sincroniza la biblioteca local con Supabase (el mismo protocolo que
 /// sincronizacion.py de Caudal Escritorio, para que las dos apps se entiendan).
@@ -42,12 +43,19 @@ class Sincronizador {
   /// app vuelve a primer plano.
   static const esperaAlVolver = Duration(seconds: 45);
 
+  /// Cada cuanto se baja todo con la app abierta (antes 3 min: mucha bateria
+  /// y datos para lo poco que cambia; lo propio se sube al momento igual).
+  static const cadaCuanto = Duration(minutes: 12);
+
   Database get _db => coleccion.db;
 
   void iniciar() {
     coleccion.alHaberPendientes = pronto;
-    // la descarga completa: al arrancar y cada 3 minutos
-    _reloj = Timer.periodic(const Duration(minutes: 3), (_) => ya(traer: true));
+    // la descarga completa: al arrancar, cada [cadaCuanto] con la app a la vista
+    // (en segundo plano no se baja nada: al volver ya se sincroniza, ver abajo)
+    _reloj = Timer.periodic(cadaCuanto, (_) {
+      if (VidaApp.primerPlano.value) ya(traer: true);
+    });
     Timer(const Duration(milliseconds: 800), () => ya(traer: true));
     // y al volver la app a primer plano (si ya paso un rato)
     try {
@@ -548,13 +556,28 @@ class Sincronizador {
         for (final f in await t.rawQuery('SELECT nube_id FROM reproducciones WHERE nube_id IS NOT NULL'))
           f['nube_id']
       };
-      for (final e in escuchas) {
-        if (vistas.contains(e['id'])) continue;
-        final ya = await t.rawQuery(
-            'SELECT id FROM reproducciones WHERE clave = ? AND nube_id = -1 AND ABS(fecha - ?) < 5',
-            [e['clave'], _epoch(e['fecha'])]);
-        if (ya.isNotEmpty) {
-          await t.update('reproducciones', {'nube_id': e['id']}, where: 'id = ?', whereArgs: [ya.first['id']]);
+      // las locales que esperan su id de la nube, de una vez (antes, una consulta
+      // por cada una de las 300 escuchas)
+      final nuevas = [for (final e in escuchas) if (!vistas.contains(e['id'])) e];
+      final esperando = <String, List<(Object?, double)>>{};
+      final clavesNuevas = {for (final e in nuevas) '${e['clave']}'}.toList();
+      for (var i = 0; i < clavesNuevas.length; i += 400) {
+        final trozo = clavesNuevas.sublist(i, i + 400 > clavesNuevas.length ? clavesNuevas.length : i + 400);
+        final filas = await t.rawQuery(
+            'SELECT id, clave, fecha FROM reproducciones WHERE nube_id = -1 AND clave IN '
+            '(${List.filled(trozo.length, '?').join(',')}) ORDER BY id',
+            trozo);
+        for (final f in filas) {
+          (esperando['${f['clave']}'] ??= []).add((f['id'], (f['fecha'] as num?)?.toDouble() ?? 0));
+        }
+      }
+      for (final e in nuevas) {
+        final fecha = _epoch(e['fecha']);
+        final locales = esperando['${e['clave']}'];
+        final i = locales == null ? -1 : locales.indexWhere((l) => (l.$2 - fecha).abs() < 5);
+        if (i >= 0) {
+          final local = locales!.removeAt(i);
+          await t.update('reproducciones', {'nube_id': e['id']}, where: 'id = ?', whereArgs: [local.$1]);
           continue;
         }
         final clave = '${e['clave']}';

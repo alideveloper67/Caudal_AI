@@ -10,6 +10,7 @@ import '../../nucleo/catalogo.dart';
 import '../../nucleo/coleccion.dart';
 import '../../nucleo/pantalla.dart';
 import '../../nucleo/traductor.dart';
+import '../../reproduccion/frenos.dart';
 import '../../reproduccion/jugador.dart';
 import '../../reproduccion/reproductor.dart';
 import '../comunes.dart';
@@ -47,8 +48,11 @@ class _ReproductorPaginaState extends State<ReproductorPagina> {
   int _direccion = 1;
   String _claveVista = '';
 
-  // modo vinilo: la portada es el disco de un tocadiscos y la pantalla se queda encendida
+  // modo vinilo: la portada es el disco de un tocadiscos y la pantalla se queda
+  // encendida mientras suena (en pausa el sistema puede apagarla como siempre)
   bool _vinilo = false;
+  Reproductor? _rPantalla;
+  bool? _pantallaPedida;
 
   @override
   void initState() {
@@ -56,14 +60,24 @@ class _ReproductorPaginaState extends State<ReproductorPagina> {
     SharedPreferences.getInstance().then((p) {
       if (mounted && p.getBool('modo_vinilo') == true) {
         setState(() => _vinilo = true);
-        PantallaEncendida.mantener(true);
+        _revisarPantalla();
       }
     }).catchError((_) {});
   }
 
+  /// Pantalla encendida solo con el vinilo puesto y la musica sonando (o
+  /// cargando la siguiente, para no soltarla entre canciones).
+  void _revisarPantalla() {
+    final e = _rPantalla?.estado;
+    final quiere = _vinilo && (e == EstadoRepro.sonando || e == EstadoRepro.cargando);
+    if (quiere == _pantallaPedida) return;
+    _pantallaPedida = quiere;
+    PantallaEncendida.mantener(quiere);
+  }
+
   void _alternarVinilo() {
     setState(() => _vinilo = !_vinilo);
-    PantallaEncendida.mantener(_vinilo);
+    _revisarPantalla();
     SharedPreferences.getInstance().then((p) => p.setBool('modo_vinilo', _vinilo)).catchError((_) => false);
   }
 
@@ -74,6 +88,12 @@ class _ReproductorPaginaState extends State<ReproductorPagina> {
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    final r = Caudal.of(context).reproductor;
+    if (!identical(r, _rPantalla)) {
+      _rPantalla?.removeListener(_revisarPantalla);
+      _rPantalla = r..addListener(_revisarPantalla);
+      _revisarPantalla();
+    }
     final ruta = ModalRoute.of(context)?.animation;
     if (ruta != null && !identical(ruta, _ruta)) {
       _ruta = ruta;
@@ -83,6 +103,7 @@ class _ReproductorPaginaState extends State<ReproductorPagina> {
 
   @override
   void dispose() {
+    _rPantalla?.removeListener(_revisarPantalla);
     PantallaEncendida.mantener(false); // al salir de la pantalla del reproductor, el sistema vuelve a apagarla
     _arrastre.dispose();
     super.dispose();
@@ -945,7 +966,9 @@ class _VistaLetraState extends State<_VistaLetra> {
 
   void _alAvanzar() {
     if (_ls.isEmpty) return;
-    final ms = _r!.posicion.value.inMilliseconds + 250;
+    // la posicion llega cada ~200 ms: medio paso mas de adelanto para que la
+    // linea cambie, de media, en el mismo instante que antes
+    final ms = _r!.posicion.value.inMilliseconds + 250 + pasoPosicion.inMilliseconds ~/ 2;
     var i = -1;
     for (var k = 0; k < _ls.length; k++) {
       if (_ls[k].$1 <= ms) {

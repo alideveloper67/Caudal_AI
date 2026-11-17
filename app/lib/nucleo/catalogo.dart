@@ -28,8 +28,9 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io' show SocketException, HttpException;
 
-import 'package:flutter/foundation.dart' show kIsWeb;
+import 'package:flutter/foundation.dart' show kIsWeb, visibleForTesting;
 import 'package:http/http.dart' as http;
+import 'json_aparte.dart';
 
 /// Error del catalogo, con un texto en espanol listo para ensenar al usuario.
 class CatalogoError implements Exception {
@@ -380,7 +381,8 @@ class Catalogo {
     }
     Map<String, dynamic> json;
     try {
-      json = _mapa(jsonDecode(utf8.decode(r.bodyBytes)));
+      // las paginas de YouTube Music pesan cientos de KB: se decodifican aparte
+      json = _mapa(await jsonDecodeBytesAparte(r.bodyBytes));
     } catch (_) {
       throw CatalogoError(
           'YouTube Music devolvió una respuesta que no se entiende (código ${r.statusCode}).');
@@ -400,7 +402,7 @@ class Catalogo {
   static Future<dynamic> _getJson(Uri uri, {Map<String, String>? cabeceras}) async {
     final r = await _http.get(uri, headers: cabeceras).timeout(_espera);
     if (r.statusCode != 200) return null;
-    return jsonDecode(utf8.decode(r.bodyBytes));
+    return jsonDecodeBytesAparte(r.bodyBytes);
   }
 
   // ------------------------------------------------------------ utilidades
@@ -1400,33 +1402,131 @@ class Catalogo {
     return {'titulo': 'Explorar', 'secciones': salida};
   }
 
+  /// Donde se guardan las portadas de genero entre sesiones (la app pone aqui
+  /// su colección al abrir la cuenta). Sin esto solo se guardan en memoria.
+  static Future<dynamic> Function()? _leerPortadas;
+  static Future<void> Function(Map<String, dynamic>)? _guardarPortadas;
+  static Future<void>? _portadasLeidas;
+  static Timer? _guardarPronto;
+
+  static void guardarPortadasGeneroEn({
+    required Future<dynamic> Function() leer,
+    required Future<void> Function(Map<String, dynamic>) guardar,
+  }) {
+    _leerPortadas = leer;
+    _guardarPortadas = guardar;
+    _portadasLeidas = null;
+  }
+
+  static Future<void> _leerPortadasDeDisco() => _portadasLeidas ??= () async {
+        final leer = _leerPortadas;
+        if (leer == null) return;
+        try {
+          final d = await leer();
+          if (d is! Map) return;
+          for (final e in d.entries) {
+            final v = e.value;
+            if (v is! List || v.length < 2 || v[1] is! num) continue;
+            _portadasGenero.putIfAbsent('${e.key}',
+                () => ['${v[0]}', DateTime.fromMillisecondsSinceEpoch((v[1] as num).toInt())]);
+          }
+        } catch (_) {}
+      }();
+
+  static void _guardarPortadasEnDisco() {
+    final guardar = _guardarPortadas;
+    if (guardar == null) return;
+    _guardarPronto?.cancel();
+    // se juntan las de toda la pantalla en una sola escritura
+    _guardarPronto = Timer(const Duration(seconds: 2), () {
+      final m = <String, dynamic>{
+        for (final e in _portadasGenero.entries)
+          e.key: [e.value[0], (e.value[1] as DateTime).millisecondsSinceEpoch]
+      };
+      guardar(m).catchError((_) {});
+    });
+  }
+
+  /// Cuantas paginas de genero se piden a la vez (cada tarjeta pedia la suya
+  /// a la vez que todas las demas).
+  static const maxPortadasALaVez = 3;
+  static int _portadasEnVuelo = 0;
+  static final List<Completer<void>> _portadasEnCola = [];
+  static final Map<String, Future<String>> _portadasPidiendo = {};
+
+  static Future<void> _turnoPortada() async {
+    if (_portadasEnVuelo < maxPortadasALaVez) {
+      _portadasEnVuelo++;
+      return;
+    }
+    final c = Completer<void>();
+    _portadasEnCola.add(c);
+    await c.future; // el sitio lo pasa quien termina
+  }
+
+  static void _soltarPortada() {
+    if (_portadasEnCola.isNotEmpty) {
+      _portadasEnCola.removeAt(0).complete();
+    } else {
+      _portadasEnVuelo--;
+    }
+  }
+
   /// La portada de la primera lista de un genero, para ilustrar su tarjeta.
-  /// Se guarda una semana en memoria (la app la persiste aparte si quiere).
-  static Future<String> portadaGenero(String browseId, String? params) async {
+  /// Se guarda una semana, en memoria y en el disco (ver [guardarPortadasGeneroEn]).
+  static Future<String> portadaGenero(String browseId, String? params,
+      {Future<Map<String, dynamic>> Function(String browseId, String? params)? pedirPagina}) async {
     final clave = '$browseId|$params';
+    await _leerPortadasDeDisco();
     final dato = _portadasGenero[clave];
     if (dato != null &&
         DateTime.now().difference(dato[1] as DateTime) < const Duration(days: 7)) {
       return dato[0] as String;
     }
-    var url = '';
-    try {
-      final datos = await pagina(browseId, params: params, continuar: 0);
-      for (final sec in _lista(datos['secciones'])) {
-        for (final el in _lista(sec['elementos'])) {
-          final m = _cadena(el['miniatura']);
-          if (m.isNotEmpty) {
-            url = agrandarMiniatura(m, 300);
-            break;
+    final enCurso = _portadasPidiendo[clave];
+    if (enCurso != null) return enCurso;
+    final f = () async {
+      await _turnoPortada();
+      var url = '';
+      try {
+        final datos = await (pedirPagina?.call(browseId, params) ??
+            pagina(browseId, params: params, continuar: 0));
+        for (final sec in _lista(datos['secciones'])) {
+          for (final el in _lista(sec['elementos'])) {
+            final m = _cadena(el['miniatura']);
+            if (m.isNotEmpty) {
+              url = agrandarMiniatura(m, 300);
+              break;
+            }
           }
+          if (url.isNotEmpty) break;
         }
-        if (url.isNotEmpty) break;
+      } catch (_) {
+        return '';
+      } finally {
+        _soltarPortada();
       }
-    } catch (_) {
-      return '';
+      _portadasGenero[clave] = [url, DateTime.now()];
+      _guardarPortadasEnDisco();
+      return url;
+    }();
+    _portadasPidiendo[clave] = f;
+    try {
+      return await f;
+    } finally {
+      _portadasPidiendo.remove(clave);
     }
-    _portadasGenero[clave] = [url, DateTime.now()];
-    return url;
+  }
+
+  /// Para las pruebas: olvida las portadas de genero y su disco.
+  @visibleForTesting
+  static void olvidarPortadasGenero() {
+    _portadasGenero.clear();
+    _portadasPidiendo.clear();
+    _leerPortadas = null;
+    _guardarPortadas = null;
+    _portadasLeidas = null;
+    _guardarPronto?.cancel();
   }
 
   /// Ficha de un artista: foto, oyentes, radio y sus secciones.

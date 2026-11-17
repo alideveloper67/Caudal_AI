@@ -21,7 +21,8 @@ from PySide6.QtCore import QObject, QTimer, Signal
 from .hilos import en_segundo_plano
 from .nube import ErrorNube, SinConexion
 
-CADA = 3 * 60 * 1000          # traer cambios de otros dispositivos cada 3 minutos
+CADA = 10 * 60 * 1000         # traer cambios de otros dispositivos cada 10 minutos
+AL_VOLVER = 60                # y al volver a la ventana, si la última vez fue hace más de 1 min
 
 # Ajustes que valen igual en todos los dispositivos de la cuenta (misma lista
 # que Ajustes.compartidos de la app movil: si se toca una, tocar la otra).
@@ -81,6 +82,7 @@ class Sincronizador(QObject):
         self._cerrojo = threading.Lock()
         self._envio = threading.RLock()     # un solo envío de pendientes a la vez
         self.ultimo_estado = ""
+        self._ultima_completa = 0.0
         self._reloj = QTimer(self)
         self._reloj.setInterval(CADA)
         self._reloj.timeout.connect(self.completa)
@@ -104,8 +106,19 @@ class Sincronizador(QObject):
         self.ya(False)
 
     def completa(self):
-        """Envía y además baja los cambios de otros dispositivos (arranque, cada 3 minutos, refrescar)."""
+        """Envía y además baja los cambios de otros dispositivos (arranque, cada 10 minutos,
+        al volver a la ventana, refrescar)."""
+        self._ultima_completa = time.monotonic()
         self.ya(True)
+
+    def al_volver(self):
+        """La ventana vuelve a primer plano: si hace más de un minuto de la última vez, se trae
+        lo cambiado en otros dispositivos (así el intervalo fijo puede ser largo)."""
+        if not self.sesion or not self._reloj.isActive():
+            return
+        if time.monotonic() - getattr(self, "_ultima_completa", 0.0) > AL_VOLVER:
+            self.completa()
+            self._reloj.start()       # el siguiente aviso fijo cuenta desde ahora
 
     def ya(self, completo=True):
         if not self.sesion:
@@ -222,6 +235,7 @@ class Sincronizador(QObject):
             u = l["uuid"] or nuevo_uuid()
             if not l["uuid"]:
                 con.execute("UPDATE listas SET uuid = ? WHERE id = ?", (u, l["id"]))
+                con.commit()          # no se espera a la red con la base bloqueada
             fila_lista = {"id": u, "nombre": l["nombre"],
                           "descripcion": l["descripcion"] or "",
                           "fijada": bool(l["fijada"])}
@@ -362,37 +376,65 @@ class Sincronizador(QObject):
     def _traer(self, con):
         """Lo de la nube manda (salvo lo que aun espera para subir). Devuelve si
         algo cambio en la biblioteca local. Solo se escribe lo que de verdad cambió:
-        con 20 listas de 300 canciones, una descarga sin novedades no toca la base."""
-        s = self.sesion
+        con 20 listas de 300 canciones, una descarga sin novedades no toca la base.
+
+        Primero se pide TODO a la red y después se escribe en una transacción corta: así la base
+        no queda bloqueada mientras se espera a internet (la interfaz guardaba la sesión, un «me
+        gusta» o una escucha y se quedaba esperando hasta 5 s)."""
         if con.execute("SELECT COUNT(*) n FROM pendientes").fetchone()["n"]:
             return False
+        remoto = self._pedir_remoto()
+        # mientras se esperaba a la red pudo cambiar algo aquí: eso se sube antes de bajar nada
+        if con.execute("SELECT COUNT(*) n FROM pendientes").fetchone()["n"]:
+            return False
+        try:
+            cambio = self._escribir_remoto(con, remoto)
+            con.commit()
+        except BaseException:
+            con.rollback()
+            raise
+        return cambio
+
+    def _pedir_remoto(self):
+        """Solo red, sin tocar la base: todo lo que hace falta para `_escribir_remoto`."""
+        s = self.sesion
+        gustan = s.pedir("GET", "me_gusta?select=clave,datos,fecha&order=fecha.desc&limit=5000") or []
+        try:
+            listas = s.pedir("GET", "listas?select=id,nombre,descripcion,fijada,creada,publica,en_perfil"
+                                    "&order=creada")
+        except ErrorNube:             # la nube aún no conoce publica / en_perfil
+            listas = s.pedir("GET", "listas?select=id,nombre,descripcion,fijada,creada&order=creada")
+        # las canciones de TODAS las listas en una sola consulta paginada
+        items = self._paginado("lista_items?select=lista_id,clave,datos,orden&order=lista_id,orden,clave")
+        guardados = s.pedir("GET", "guardados?select=tipo,id,datos,fecha") or []
+        escuchas = s.pedir("GET", "escuchas?select=id,clave,datos,contexto,fecha"
+                                  "&order=fecha.desc&limit=300") or []
+        return {"me_gusta": gustan, "listas": listas or [], "items": items,
+                "guardados": guardados, "escuchas": escuchas}
+
+    def _escribir_remoto(self, con, remoto):
+        """Solo base, sin red: aplica lo traído. Devuelve si algo cambió (no confirma)."""
         cambio = False
         pistas = _pistas_conocidas(con)
 
         # me gusta
-        remoto = s.pedir("GET", "me_gusta?select=clave,datos,fecha&order=fecha.desc&limit=5000") or []
+        gustan = remoto["me_gusta"]
         locales = {f["clave"] for f in con.execute("SELECT clave FROM me_gusta WHERE clave LIKE 'yt:%'")}
-        nube = {f["clave"] for f in remoto}
+        nube = {f["clave"] for f in gustan}
         for clave in locales - nube:
             con.execute("DELETE FROM me_gusta WHERE clave = ?", (clave,))
             cambio = True
-        for f in remoto:
+        for f in gustan:
             _recordar(con, f["clave"], f["datos"], pistas)
             if f["clave"] not in locales:
                 con.execute("INSERT OR REPLACE INTO me_gusta (clave, fecha) VALUES (?,?)",
                             (f["clave"], _epoch(f["fecha"])))
                 cambio = True
 
-        # listas y sus canciones (las canciones de TODAS las listas en una sola consulta paginada)
-        try:
-            listas = s.pedir("GET", "listas?select=id,nombre,descripcion,fijada,creada,publica,en_perfil"
-                                    "&order=creada")
-        except ErrorNube:             # la nube aún no conoce publica / en_perfil
-            listas = s.pedir("GET", "listas?select=id,nombre,descripcion,fijada,creada&order=creada")
-        listas = listas or []
-        items = self._paginado("lista_items?select=lista_id,clave,datos,orden&order=lista_id,orden,clave")
+        # listas y sus canciones
+        listas = remoto["listas"]
         por_lista = {}
-        for i in items:
+        for i in remoto["items"]:
             por_lista.setdefault(i["lista_id"], []).append(i)
         uuids = {l["id"] for l in listas}
         for l in listas:
@@ -437,7 +479,7 @@ class Sincronizador(QObject):
                 cambio = True
 
         # guardados
-        guardados = s.pedir("GET", "guardados?select=tipo,id,datos,fecha") or []
+        guardados = remoto["guardados"]
         locales_g = {(f["tipo"], f["id"]): f["datos"] for f in con.execute("SELECT tipo, id, datos FROM guardados")}
         nube_g = {(g["tipo"], g["id"]): g for g in guardados}
         if set(locales_g) != set(nube_g) or any(
@@ -450,9 +492,7 @@ class Sincronizador(QObject):
             cambio = True
 
         # escuchas de otros dispositivos
-        escuchas = s.pedir("GET", "escuchas?select=id,clave,datos,contexto,fecha"
-                                  "&order=fecha.desc&limit=300") or []
-        for e in escuchas:
+        for e in remoto["escuchas"]:
             if con.execute("SELECT 1 FROM reproducciones WHERE nube_id = ?", (e["id"],)).fetchone():
                 continue
             # la que se envio desde aqui ya existe con nube_id -1: se empareja por fecha
@@ -467,7 +507,6 @@ class Sincronizador(QObject):
                          json.dumps(e["contexto"], ensure_ascii=False) if e["contexto"] else "",
                          e["id"]))
             cambio = True
-        con.commit()
         return cambio
 
     def _traer_una(self, lista_uuid):

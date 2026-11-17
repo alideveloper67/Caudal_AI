@@ -25,6 +25,16 @@ _INTENTO_DESCUBRE = {}
 _INTENTO_GUSTOS = {}
 
 
+def _con_copia(col, funcion):
+    """Corre `funcion(col)` en un hilo con una conexión propia a la base (la de la interfaz no se
+    comparte entre hilos); las colecciones de prueba sin copia se usan tal cual."""
+    copiar = getattr(col, "copia_de_lectura", None)
+    if copiar is None:
+        return funcion(col)
+    with copiar() as c:
+        return funcion(c)
+
+
 def saludo():
     h = time.localtime().tm_hour
     if 5 <= h < 12:
@@ -94,11 +104,12 @@ class PaginaInicio(Pagina):
         if self.filtro in ("todo", "musica"):
             self._atajos()
             self._tarjeta_estudio()
-            recientes = [p for p in col.escuchado_hace_poco(24)
-                         if self.filtro == "todo" or not p.get("es_video")]
-            if recientes:
-                self.zv.addWidget(Carrusel(ctx, "Volver a escuchar", recientes,
-                                           subtitulo="lo último que sonó"))
+            from PySide6.QtWidgets import QVBoxLayout
+            self.caja_recientes = QWidget()
+            self.v_recientes = QVBoxLayout(self.caja_recientes)
+            self.v_recientes.setContentsMargins(0, 0, 0, 0)
+            self.zv.addWidget(self.caja_recientes)
+            self._pintar_recientes()
             self._mixes_diarios()
             self._gustos_inicio()
             self._descubre()
@@ -137,6 +148,29 @@ class PaginaInicio(Pagina):
             self.et_cargando = Esqueleto("tarjetas")
             self.zv.addWidget(self.et_cargando)
             en_segundo_plano(catalogo.inicio, ok=self._llego, error=self._sin_red, dueno=self)
+
+    def _pintar_recientes(self):
+        from ..componentes import _borrar_layout
+        _borrar_layout(self.v_recientes)
+        recientes = [p for p in self.ctx.coleccion.escuchado_hace_poco(24)
+                     if self.filtro == "todo" or not p.get("es_video")]
+        self.caja_recientes.setVisible(bool(recientes))
+        if recientes:
+            self.v_recientes.addWidget(Carrusel(self.ctx, "Volver a escuchar", recientes,
+                                                subtitulo="lo último que sonó"))
+
+    def refrescar_recientes(self):
+        """Pulsar «Inicio» estando en Inicio: se pone al día «Volver a escuchar» y se sube arriba,
+        sin rehacer toda la página (antes se rehacía entera: mixes, máquina del tiempo...)."""
+        caja = getattr(self, "caja_recientes", None)
+        if self.filtro not in ("todo", "musica") or caja is None:
+            self._pintar()
+        else:
+            try:
+                self._pintar_recientes()
+            except RuntimeError:
+                self._pintar()
+        self.verticalScrollBar().setValue(0)
 
     def _llego(self, datos):
         guardar_cache("inicio", datos)
@@ -282,7 +316,7 @@ class PaginaInicio(Pagina):
         if time.time() - _INTENTO_DESCUBRE.get("t", 0) < 600:
             return
         _INTENTO_DESCUBRE["t"] = time.time()
-        en_segundo_plano(rc.descubrir, self.ctx.coleccion, ok=self._pintar_descubre,
+        en_segundo_plano(_con_copia, self.ctx.coleccion, rc.descubrir, ok=self._pintar_descubre,
                          error=lambda _e: None, dueno=self)
 
     def _gustos_inicio(self):
@@ -303,8 +337,8 @@ class PaginaInicio(Pagina):
         if time.time() - _INTENTO_GUSTOS.get("t", 0) < 600:
             return
         _INTENTO_GUSTOS["t"] = time.time()
-        en_segundo_plano(rc.sugerencias_gustos, self.ctx.coleccion, ok=self._pintar_gustos,
-                         error=lambda _e: None, dueno=self)
+        en_segundo_plano(_con_copia, self.ctx.coleccion, rc.sugerencias_gustos,
+                         ok=self._pintar_gustos, error=lambda _e: None, dueno=self)
 
     def _pintar_gustos(self, mix):
         if not mix:
@@ -325,17 +359,41 @@ class PaginaInicio(Pagina):
             pass
 
     def _maquina_del_tiempo(self):
+        """Lee hasta un año de escuchas: si hoy ya se calculó sale al momento; si no, se calcula
+        en segundo plano (con su propia conexión a la base) y aparece en su sitio al terminar."""
         from ... import recomendador as rc
-        lista = rc.maquina_del_tiempo_de(self.ctx.coleccion)
-        if not lista:
-            return
         from PySide6.QtWidgets import QVBoxLayout
+        col = self.ctx.coleccion
         caja = QWidget()
         v = QVBoxLayout(caja)
         v.setContentsMargins(0, 0, 0, 0)
         self.zv.addWidget(caja)
-        self._carrusel_de_mixes(v, "Vuelve en el tiempo",
-                                "tu mes pasado y lo que escuchabas antes", lista)
+        self.caja_tiempo, self.v_tiempo = caja, v
+        lista = rc.maquina_del_tiempo_en_memoria(col)
+        if lista is not None:
+            self._pintar_maquina(lista)
+            return
+        caja.hide()
+        copiar = getattr(col, "copia_de_lectura", None)
+        if copiar is None:                       # colecciones de prueba: como antes
+            self._pintar_maquina(rc.maquina_del_tiempo_de(col))
+            return
+
+        def calcular():
+            with copiar() as c:
+                return rc.maquina_del_tiempo_de(c)
+        en_segundo_plano(calcular, ok=self._pintar_maquina, error=lambda _e: None, dueno=self)
+
+    def _pintar_maquina(self, lista):
+        try:
+            if not lista:
+                self.caja_tiempo.hide()
+                return
+            self.caja_tiempo.show()
+            self._carrusel_de_mixes(self.v_tiempo, "Vuelve en el tiempo",
+                                    "tu mes pasado y lo que escuchabas antes", lista)
+        except RuntimeError:
+            pass
 
     def _carrusel_de_mixes(self, v, titulo, subtitulo, lista):
         from ..componentes import _borrar_layout
@@ -413,7 +471,7 @@ class PaginaInicio(Pagina):
     def _mixes(self):
         col = self.ctx.coleccion
         salida = []
-        historial = col.escuchado_hace_poco(150) + col.lista_me_gusta()[:100]
+        historial = col.escuchado_hace_poco(150) + col.lista_me_gusta(limite=100)
         for a in col.artistas_frecuentes(8):
             portada = next((p.get("miniatura") for p in historial
                             if any(x.get("id") == a["id"] for x in p.get("artistas") or [])), "")

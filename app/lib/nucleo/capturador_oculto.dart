@@ -17,6 +17,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:ui' show Size;
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
 import 'package:flutter_inappwebview/flutter_inappwebview.dart';
 
 import 'captura.dart';
@@ -46,21 +47,41 @@ class CapturaOculta {
 /// Solo trabaja de una en una: abrir varias paginas a la vez gasta memoria y
 /// no acelera nada.
 class CapturadorOculto {
+  CapturadorOculto({this.soltarTras = const Duration(seconds: 90)});
+
+  /// Cuanto se deja vivo el navegador oculto sin usarse antes de cerrarlo: no
+  /// se monta al arrancar la app (gasta memoria y bateria aunque nadie lo use),
+  /// sino en la primera captura, y se suelta pasado este rato sin trabajo.
+  final Duration soltarTras;
+
   HeadlessInAppWebView? _navegador;
   Completer<CapturaOculta>? _enCurso;
   final List<MedioCapturado> _vistos = [];
   final Set<String> _yaVistas = <String>{};
   Timer? _insistir;
+  Timer? _soltar;
   bool _paraAudio = false;
   String _urlActual = '';
 
+  /// La cola: cada captura espera a que acabe la anterior (sin sondear).
+  Future<void> _turno = Future<void>.value();
+  int _enCola = 0;
+
   bool get trabajando => _enCurso != null && !_enCurso!.isCompleted;
 
-  /// Deja el navegador oculto en marcha.
-  ///
-  /// Se llama al arrancar la app: montarlo cuesta un instante y es preferible
-  /// pagarlo antes que en mitad de una descarga.
+  /// ¿Esta montado el navegador oculto ahora mismo?
+  bool get abierto => _navegador != null;
+
+  /// Monta el navegador oculto si aun no lo esta (lo hace [capturar] solo).
   Future<void> preparar() async {
+    _soltar?.cancel();
+    _soltar = null;
+    await abrirNavegador();
+  }
+
+  /// Crea el navegador. Las pruebas lo cambian para no abrir uno de verdad.
+  @visibleForTesting
+  Future<void> abrirNavegador() async {
     if (_navegador != null) return;
     _navegador = HeadlessInAppWebView(
       initialSize: const Size(412, 915),
@@ -107,10 +128,34 @@ class CapturadorOculto {
     Duration espera = const Duration(seconds: 22),
   }) async {
     // si ya hay una en marcha, esperamos a que acabe antes de pisar nada
-    while (trabajando) {
-      await Future<void>.delayed(const Duration(milliseconds: 300));
+    final anterior = _turno;
+    final mio = Completer<void>();
+    _turno = mio.future;
+    _enCola++;
+    _soltar?.cancel();
+    _soltar = null;
+    try {
+      await anterior;
+      return await _capturarYa(url, paraAudio: paraAudio, espera: espera);
+    } finally {
+      _enCola--;
+      mio.complete();
+      _programarSoltar();
     }
+  }
 
+  /// Sin capturas en cola, el navegador se cierra pasado [soltarTras].
+  void _programarSoltar() {
+    _soltar?.cancel();
+    _soltar = null;
+    if (_enCola > 0) return;
+    _soltar = Timer(soltarTras, () {
+      _soltar = null;
+      if (_enCola == 0 && !trabajando) unawaited(cerrar());
+    });
+  }
+
+  Future<CapturaOculta> _capturarYa(String url, {required bool paraAudio, required Duration espera}) async {
     _vistos.clear();
     _yaVistas.clear();
     _paraAudio = paraAudio;
@@ -118,7 +163,12 @@ class CapturadorOculto {
     final fin = Completer<CapturaOculta>();
     _enCurso = fin;
 
-    await preparar();
+    try {
+      await abrirNavegador();
+    } catch (_) {
+      _enCurso = null;
+      return const CapturaOculta();
+    }
     final controlador = _navegador?.webViewController;
     if (controlador == null) {
       _enCurso = null;
@@ -228,8 +278,17 @@ class CapturadorOculto {
     }
   }
 
+  /// Cierra el navegador oculto (la proxima captura lo vuelve a montar).
   Future<void> cerrar() async {
     _insistir?.cancel();
+    _soltar?.cancel();
+    _soltar = null;
+    await cerrarNavegador();
+  }
+
+  /// Libera el navegador. Las pruebas lo cambian para no tocar uno de verdad.
+  @visibleForTesting
+  Future<void> cerrarNavegador() async {
     try {
       await _navegador?.dispose();
     } catch (_) {

@@ -11,7 +11,9 @@ import threading
 
 import requests
 
-_CACHE = {}
+from .memoria import DiccionarioLimitado
+
+_CACHE = DiccionarioLimitado(300)       # las traducciones de las 300 últimas letras
 _CANDADO = threading.Lock()
 MISMO_IDIOMA = "mismo"
 

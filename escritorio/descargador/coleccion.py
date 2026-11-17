@@ -237,8 +237,43 @@ class Coleccion:
         filas = self.con.execute(
             f"SELECT * FROM descargas WHERE {' AND '.join(donde)} ORDER BY fecha DESC",
             args).fetchall()
+        # con la memoria de 20 s de _existe: repintar no vuelve a tocar el disco por cada archivo
         return [pista_de_descarga(dict(f)) for f in filas
-                if f["archivo"] and os.path.exists(f["archivo"])]
+                if f["archivo"] and self._existe(f["archivo"])]
+
+    def contar_descargadas(self):
+        """{True: canciones, False: videos} completadas, contadas en la base (sin abrir el disco
+        por cada archivo): es lo que muestra el panel de la biblioteca."""
+        cuenta = {True: 0, False: 0}
+        for f in self.con.execute(
+                "SELECT es_audio, COUNT(*) n FROM descargas WHERE estado = 'completada' "
+                "AND archivo IS NOT NULL AND archivo != '' GROUP BY es_audio"):
+            cuenta[bool(f["es_audio"])] += f["n"]
+        return cuenta
+
+    def copia_de_lectura(self):
+        """Otra Coleccion sobre la misma base con su PROPIA conexión, para leer desde otro hilo
+        (la conexión principal es de la interfaz). Hay que cerrarla con `.con.close()`;
+        sirve como `with col.copia_de_lectura() as c: ...`."""
+        otra = Coleccion.__new__(Coleccion)
+        otra.archivo = self.archivo
+        otra.con = sqlite3.connect(str(self.archivo), timeout=15, check_same_thread=False)
+        otra.con.row_factory = sqlite3.Row
+        otra._indice_local = None
+        otra._existe_cache = {}
+        otra._gustan = None
+        otra.sincronizador = None       # una copia no anota nada para la nube
+        return otra
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_a):
+        try:
+            self.con.close()
+        except Exception:  # noqa: BLE001
+            pass
+        return False
 
     def invalidar_indice(self):
         self._indice_local = None
@@ -315,9 +350,15 @@ class Coleccion:
             self._anotar("me_gusta_poner", {"clave": clave, "datos": para_nube(pista)})
         return True
 
-    def lista_me_gusta(self, filtro=""):
-        claves = [f["clave"] for f in self.con.execute(
-            "SELECT clave FROM me_gusta ORDER BY fecha DESC, rowid DESC").fetchall()]
+    def lista_me_gusta(self, filtro="", limite=None):
+        """Tus me gusta, del más nuevo al más viejo. Con `limite` (y sin filtro) solo se leen esos
+        (Inicio y el gusto solo miran los primeros, no hace falta leer los miles)."""
+        sql = "SELECT clave FROM me_gusta ORDER BY fecha DESC, rowid DESC"
+        args = ()
+        if limite is not None and not (filtro or "").strip():
+            sql += " LIMIT ?"
+            args = (int(limite),)
+        claves = [f["clave"] for f in self.con.execute(sql, args).fetchall()]
         pistas = self.pistas(claves)
         return _filtrar(pistas, filtro)
 
@@ -607,7 +648,7 @@ class Coleccion:
     def artistas_frecuentes(self, n=10):
         """Artistas que mas escuchas, a partir de tus reproducciones y me gusta."""
         cuenta = {}
-        for p in self.mas_escuchadas(80, 120) + self.lista_me_gusta()[:80]:
+        for p in self.mas_escuchadas(80, 120) + self.lista_me_gusta(limite=80):
             for a in p.get("artistas") or []:
                 if a.get("id"):
                     clave = (a["id"], a["nombre"])

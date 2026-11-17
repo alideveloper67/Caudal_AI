@@ -144,9 +144,31 @@ class PaginaColeccion(Pagina):
                 "duracion": sum(p.get("duracion") or 0 for p in pistas)}
 
     def _recargar_local(self, *_):
+        # una página que no se ve (otra encima, en el historial) no se rehace con cada «me gusta»
+        # o descarga: se marca pendiente y se rehace al volver a verse
+        if not self.isVisible() and self.window() is not self:
+            self._pendiente_recargar = True
+            return
+        self._pendiente_recargar = False
         barra = self.verticalScrollBar().value()
         self._pintar(self._datos_locales())
-        QTimer.singleShot(0, lambda: self.verticalScrollBar().setValue(barra))
+
+        def volver_al_sitio():
+            try:
+                self.verticalScrollBar().setValue(barra)
+            except RuntimeError:          # la página ya se cerró
+                pass
+        QTimer.singleShot(0, volver_al_sitio)
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        if getattr(self, "_pendiente_recargar", False):
+            def recargar():
+                try:
+                    self._recargar_local()
+                except RuntimeError:      # la página se cerró antes
+                    pass
+            QTimer.singleShot(0, recargar)
 
     def contexto(self):
         tipo = {"album": "album", "lista": "lista", "mi_lista": "mi_lista",

@@ -85,7 +85,10 @@ class VistaPreviaFondo(QWidget):
         sp.setHeightForWidth(True)
         self.setSizePolicy(sp)
         self.setAccessibleName("Vista previa del fondo")
-        gestor.cambiado.connect(lambda _a: self.update())
+        gestor.cambiado.connect(self._al_cambiar)
+
+    def _al_cambiar(self, _a=None):
+        self.update()
 
     def hasHeightForWidth(self):
         return True
@@ -239,7 +242,10 @@ class SeccionFondo(QFrame):
         v.addWidget(self.estado)
 
         gestor.cambiado.connect(self._refrescar)
-        gestor.permiso_cambiado.connect(lambda _p: self._refrescar())
+        gestor.permiso_cambiado.connect(self._al_permiso)
+        self._refrescar()
+
+    def _al_permiso(self, _p=None):
         self._refrescar()
 
     def _deslizador(self, v, titulo, ayuda, minimo, maximo, valor, formato):

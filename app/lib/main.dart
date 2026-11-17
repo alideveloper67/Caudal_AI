@@ -25,6 +25,7 @@ import 'nucleo/red.dart';
 import 'nucleo/sincronizacion.dart';
 import 'nucleo/streams.dart';
 import 'nucleo/version.dart';
+import 'nucleo/vida_app.dart';
 import 'reproduccion/pip.dart';
 import 'reproduccion/reproductor.dart';
 import 'reproduccion/servicio_audio.dart';
@@ -52,6 +53,8 @@ Future<void> main() async {
     return true;
   };
   MediaKit.ensureInitialized();
+  // primer plano / segundo plano: los sondeos y la posicion se frenan al salir
+  VidaApp.iniciar();
   SystemChrome.setSystemUIOverlayStyle(SystemUiOverlayStyle(
     statusBarColor: Colors.transparent,
     statusBarIconBrightness: Brightness.light,
@@ -208,6 +211,11 @@ class _CaudalAppState extends State<CaudalApp> {
     });
     Diagnostico.marcar('biblioteca');
     final coleccion = await _paso('biblioteca', Coleccion.abrir(c.id));
+    // las portadas de las tarjetas de género se recuerdan entre sesiones
+    Catalogo.guardarPortadasGeneroEn(
+      leer: () => coleccion.estado('portadas_genero'),
+      guardar: (m) => coleccion.guardarEstado('portadas_genero', m),
+    );
     Diagnostico.marcar('reproductor');
     final streams = Streams(MotorLocal());
     final reproductor = Reproductor(ajustes, coleccion, streams);
@@ -226,12 +234,9 @@ class _CaudalAppState extends State<CaudalApp> {
       Pip.iniciar(reproductor);
     }
     Diagnostico.marcar('descargas');
+    // el navegador oculto ya no se monta al arrancar: se crea en la primera
+    // captura y se cierra solo tras un rato sin usarse (memoria y bateria)
     _capturador ??= CapturadorOculto();
-    if (!seguro) {
-      final cap = _capturador!;
-      // despues de que se vea la pantalla: el navegador frena el telefono unos segundos
-      unawaited(Future<void>.delayed(const Duration(seconds: 10), cap.preparar).catchError((_) {}));
-    }
     final descargas = GestorDescargas(coleccion: coleccion, ajustes: ajustes, capturador: _capturador!);
     // con wifi baja sola tus favoritas (si el ajuste esta activo)
     _inteligente?.detener();

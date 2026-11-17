@@ -479,7 +479,15 @@ class Ventana(QWidget):
         if actual and actual == destino and not destino.get("editar"):
             w = self.historia[self.indice][1]
             if destino.get("pagina") in ("inicio",) and w is not None:
-                # volver a Inicio refresca lo reciente
+                # volver a Inicio refresca lo reciente (solo eso: el resto de Inicio no cambió)
+                refrescar = getattr(w, "refrescar_recientes", None)
+                if refrescar is not None:
+                    try:
+                        refrescar()
+                        self._mostrar(destino, w)
+                        return
+                    except RuntimeError:
+                        pass
                 reemplazar = True
             else:
                 return
@@ -654,9 +662,15 @@ class Ventana(QWidget):
         self.r.modo_cambio.connect(self._al_cambiar_modo)
         g = self.ctx.gestor
         g.tarea_finalizada.connect(self._descarga_terminada)
-        g.tarea_agregada.connect(lambda _i: self._contar_descargas())
-        g.cola_cambio.connect(self._contar_descargas)
-        g.tarea_cambio.connect(lambda _i: self._contar_descargas())
+        # el progreso de cada descarga avisa varias veces por segundo: el conteo del botón se
+        # agrupa (un recuento cada 250 ms como mucho)
+        self._t_contar = QTimer(self)
+        self._t_contar.setSingleShot(True)
+        self._t_contar.setInterval(250)
+        self._t_contar.timeout.connect(self._contar_descargas)
+        g.tarea_agregada.connect(self._programar_conteo)
+        g.cola_cambio.connect(self._programar_conteo)
+        g.tarea_cambio.connect(self._programar_conteo)
         QGuiApplication.clipboard().dataChanged.connect(self._portapapeles)
 
     def _atajos(self):
@@ -881,6 +895,10 @@ class Ventana(QWidget):
         DialogoEcualizador(self.ctx, self).exec()
 
     # ------------------------------------------------------------ descargas
+
+    def _programar_conteo(self, *_a):
+        if not self._t_contar.isActive():
+            self._t_contar.start()
 
     def _contar_descargas(self):
         activas = sum(1 for t in self.ctx.gestor.lista() if t.activa or t.estado == "en_cola")

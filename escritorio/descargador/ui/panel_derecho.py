@@ -116,7 +116,7 @@ class VistaSonando(QScrollArea):
         r.pista_cambio.connect(self._pista)
         r.calidad_cambio.connect(self._calidad)
         r.cola_cambio.connect(self._siguiente)
-        ctx.me_gusta_cambio.connect(lambda *_: self._pintar_gusta())
+        ctx.me_gusta_cambio.connect(self._al_cambiar_gusta)
         self._pista(r.actual)
 
     def resizeEvent(self, e):
@@ -145,6 +145,9 @@ class VistaSonando(QScrollArea):
         else:
             self.caja_artista.hide()
         self._siguiente()
+
+    def _al_cambiar_gusta(self, *_a):
+        self._pintar_gusta()
 
     def _pintar_gusta(self):
         p = self.ctx.reproductor.actual

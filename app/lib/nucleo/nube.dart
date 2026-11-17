@@ -5,6 +5,7 @@ import 'dart:math';
 
 import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
+import 'json_aparte.dart';
 
 /// Conexion con Supabase: las cuentas y la biblioteca compartidas con Caudal
 /// para Windows (misma base de datos y mismas reglas que nube.py).
@@ -260,7 +261,8 @@ class Sesion {
     final r = await Nube._peticion(metodo, '/rest/v1/$ruta',
         token: await token(), cuerpo: cuerpo, cabeceras: cabeceras);
     if (r.statusCode >= 300) throw Nube._traducir(r);
-    return r.body.trim().isEmpty ? null : jsonDecode(r.body);
+    // las descargas completas al sincronizar pesan: se decodifican aparte
+    return r.body.trim().isEmpty ? null : jsonDecodeAparte(r.body);
   }
 
   /// Llama a una función de la base (`/rest/v1/rpc/<nombre>`).

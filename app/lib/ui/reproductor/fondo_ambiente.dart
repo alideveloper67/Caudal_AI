@@ -4,18 +4,18 @@
 // Pensado para no gastar GPU:
 //  - la imagen se decodifica diminuta (64 px de ancho): el desenfoque la
 //    estira sin que se note y apenas ocupa memoria;
-//  - hay un solo ImageFiltered, y queda DENTRO de un RepaintBoundary: lo que
-//    se anima es la transformacion de esa capa, no su contenido, asi que el
-//    cuadro desenfocado no se vuelve a pintar a cada fotograma;
+//  - el desenfoque se hornea una vez por portada en una imagen pequena
+//    (ver ImagenDesenfocada): lo que se anima es la transformacion de esa
+//    capa, no su contenido, y la GPU no recalcula ningun desenfoque;
 //  - con la musica en pausa (o con "reducir movimiento") se queda quieto.
 
 import 'dart:io';
 import 'dart:math';
-import 'dart:ui' as ui;
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 
+import '../horneado.dart';
 import '../tema.dart';
 
 class FondoAmbiente extends StatefulWidget {
@@ -68,32 +68,29 @@ class _FondoAmbienteState extends State<FondoAmbiente> with SingleTickerProvider
     final url = widget.url;
     if (url.isEmpty) return SizedBox.expand(key: const ValueKey(''), child: ColoredBox(color: widget.color));
     final ImageProvider base = url.startsWith('http') ? CachedNetworkImageProvider(url) : FileImage(File(url));
-    return Image(
+    // desenfocada una sola vez, en una copia diminuta (ver [ImagenDesenfocada]):
+    // el mismo sigma 38 de antes, sin recalcularlo en cada fotograma
+    return ImagenDesenfocada(
       key: ValueKey(url),
-      image: ResizeImage(base, width: 64, policy: ResizeImagePolicy.fit),
-      fit: BoxFit.cover,
-      width: double.infinity,
-      height: double.infinity,
-      filterQuality: FilterQuality.low,
-      gaplessPlayback: true,
-      errorBuilder: (_, _, _) => ColoredBox(color: widget.color),
+      clave: url,
+      imagen: (_) => ResizeImage(base, width: 64, policy: ResizeImagePolicy.fit),
+      sigma: 38,
+      modo: TileMode.clamp,
+      alFallar: ColoredBox(color: widget.color),
     );
   }
 
   @override
   Widget build(BuildContext context) {
     final color = widget.color;
-    // la capa desenfocada: se pinta una vez por portada y luego solo se mueve
+    // la capa desenfocada: se hornea una vez por portada y luego solo se mueve
     final capa = RepaintBoundary(
-      child: ImageFiltered(
-        imageFilter: ui.ImageFilter.blur(sigmaX: 38, sigmaY: 38, tileMode: TileMode.clamp),
-        child: AnimatedSwitcher(
-          duration: const Duration(milliseconds: 700),
-          switchInCurve: Curves.easeOut,
-          layoutBuilder: (actual, previos) =>
-              Stack(fit: StackFit.expand, children: [...previos, ?actual]),
-          child: _imagen(),
-        ),
+      child: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 700),
+        switchInCurve: Curves.easeOut,
+        layoutBuilder: (actual, previos) =>
+            Stack(fit: StackFit.expand, children: [...previos, ?actual]),
+        child: _imagen(),
       ),
     );
     return RepaintBoundary(

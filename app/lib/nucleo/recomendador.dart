@@ -126,6 +126,23 @@ class Gusto {
 
   static String _nombreClave(String n) => 'n:${n.trim().toLowerCase()}';
 
+  /// El mismo gusto con un salto mas de [pista], como lo deja
+  /// [Recomendador.anotarSalto] en la base: asi no hay que releer todo el
+  /// historial cada vez que se salta una canción.
+  Gusto conSalto(Json pista) {
+    final vid = '${pista['video_id'] ?? ''}';
+    if (vid.isEmpty) return this;
+    final s = Map<String, int>.of(saltos);
+    s[vid] = (s[vid] ?? 0) + 1;
+    final sa = Map<String, int>.of(saltosArtista);
+    for (final a in artistasDe(pista).take(1)) {
+      sa[a.clave] = (sa[a.clave] ?? 0) + 1;
+    }
+    return Gusto(artistas: artistas, oidas: oidas, recientes: recientes, saltos: s, saltosArtista: sa,
+        elegidos: elegidos, megusta: megusta, ultimas: ultimas, saltadasHoy: {...saltadasHoy, vid},
+        rasgos: rasgos);
+  }
+
   /// 1 si algún artista de la pista está entre los que elegiste; si no, 0.
   double elegida(Json p) {
     for (final a in artistasDe(p)) {
@@ -242,7 +259,7 @@ class Recomendador {
     final s = await c.estado(_claveSaltos);
     var gustan = <Json>[];
     try {
-      gustan = (await c.listaMeGusta()).take(300).toList();
+      gustan = await c.meGustaRecientes(300);
     } catch (_) {}
     return Gusto.desde(historial, s is Map ? Map<String, dynamic>.from(s) : {},
         elegidos: Gustos.actuales, megusta: gustan);
@@ -594,7 +611,7 @@ class Recomendador {
     final s = await c.estado(_claveSaltos);
     var gustan = <Json>[];
     try {
-      gustan = (await c.listaMeGusta()).take(300).toList();
+      gustan = await c.meGustaRecientes(300);
     } catch (_) {}
     final g = Gusto.desde(historial, s is Map ? Map<String, dynamic>.from(s) : {},
         ahora: hoy, elegidos: Gustos.actuales, megusta: gustan);
@@ -654,10 +671,29 @@ class Recomendador {
     return salida;
   }
 
+  static const _claveMaquina = 'maquina_tiempo_dia';
+
+  /// Se arma una vez al dia (sus ventanas acaban hace mas de 3 semanas: lo de
+  /// hoy no la cambia). Se rehace si cambia el dia o llegan escuchas viejas
+  /// (de otro dispositivo, o si se borran).
   static Future<List<Json>> maquinaDelTiempoDe(Coleccion c) async {
+    final hoy = DateTime.now();
+    final corte = hoy.subtract(const Duration(days: 22)).millisecondsSinceEpoch / 1000.0;
+    final f = (await c.db.rawQuery('SELECT COUNT(*) n FROM reproducciones WHERE fecha < ?', [corte])).first;
+    final firma = '${claveDia(hoy)}|${f['n']}';
+    try {
+      final g = await c.estado(_claveMaquina);
+      if (g is Map && g['firma'] == firma && g['mixes'] is List) {
+        return [for (final m in g['mixes'] as List) if (m is Map) Map<String, dynamic>.from(m)];
+      }
+    } catch (_) {}
     final historial = await Historial.leer(c,
-        desde: DateTime.now().subtract(const Duration(days: 380)), limite: 40000);
-    return maquinaDelTiempo(historial);
+        desde: hoy.subtract(const Duration(days: 380)), limite: 40000);
+    final mixes = maquinaDelTiempo(historial, ahora: hoy);
+    try {
+      await c.guardarEstado(_claveMaquina, {'firma': firma, 'mixes': mixes});
+    } catch (_) {}
+    return mixes;
   }
 
   // ------------------------------------------------------------ tu mes pasado

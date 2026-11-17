@@ -14,6 +14,8 @@ import '../nucleo/ritmo.dart';
 import '../nucleo/red.dart';
 import '../nucleo/streams.dart';
 import '../nucleo/transiciones.dart';
+import '../nucleo/vida_app.dart';
+import 'frenos.dart';
 import 'jugador.dart';
 
 const frecuenciasEq = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
@@ -85,7 +87,7 @@ class _Motor {
       'cache': 'yes',
       'cache-secs': '60',
       'demuxer-readahead-secs': '30',
-      'demuxer-max-bytes': '64MiB',
+      // demuxer-max-bytes va segun lo que se abra (ver [_ajustarLectura])
       'demuxer-max-back-bytes': '16MiB',
       'cache-pause-initial': 'no',
       'cache-pause-wait': '1',
@@ -103,9 +105,22 @@ class _Motor {
 
   Fuente? fuente;
 
+  /// Lo que se lee por adelantado segun lo que suena: con solo audio, 16 MiB
+  /// son ya varios minutos de cancion; con video hacen falta los 64 MiB.
+  bool? _lecturaVideo;
+
+  Future<void> _ajustarLectura(bool video) async {
+    if (_lecturaVideo == video) return;
+    _lecturaVideo = video;
+    try {
+      await player.setProperty('demuxer-max-bytes', video ? '64MiB' : '16MiB');
+    } catch (_) {}
+  }
+
   Future<void> abrir(Fuente f, {Duration inicio = Duration.zero, bool pausado = false,
-      double volumen = 100, double velocidad = 1}) async {
+      double volumen = 100, double velocidad = 1, bool video = true}) async {
     fuente = f;
+    await _ajustarLectura(video || f.alto > 0 || f.audioUrl != null);
     await player.setVolume(volumen);
     await player.setRate(velocidad);
     await player.open(f, inicio: inicio > const Duration(seconds: 1) ? inicio : null, play: !pausado);
@@ -142,7 +157,6 @@ class Reproductor extends ChangeNotifier {
     velocidad = ajustes.decimal('velocidad');
     aleatorio = ajustes.sino('aleatorio');
     repetir = ajustes.texto('repetir');
-    _relojApagado = Timer.periodic(const Duration(milliseconds: 500), (_) => _ticApagado());
     aplicarSonido();
   }
 
@@ -729,7 +743,8 @@ class Reproductor extends ChangeNotifier {
     if (!automatico && !_escuchaContada && posicion.value < const Duration(seconds: 30) &&
         '${actual!['video_id'] ?? ''}'.isNotEmpty && fuente?.local != true) {
       unawaited(Recomendador.anotarSalto(coleccion, actual!).catchError((_) {}));
-      _gusto = null;
+      // el salto se aplica tambien al gusto en memoria (sin releer el historial)
+      _gusto = _gusto?.conSalto(actual!);
     }
     if (automatico && repetir == 'una') {
       await _cargar(actual!);
@@ -979,7 +994,8 @@ class Reproductor extends ChangeNotifier {
       t['objetivo'] = objetivo;
       t['listo'] = false;
       t['desde'] = DateTime.now();
-      await entrante.abrir(f, inicio: objetivo, pausado: true, volumen: 0, velocidad: velocidad);
+      await entrante.abrir(f, inicio: objetivo, pausado: true, volumen: 0, velocidad: velocidad,
+          video: modo == 'video');
     } else {
       await _apagar(_otro);
       _eq3.remove(_otro);
@@ -989,7 +1005,8 @@ class Reproductor extends ChangeNotifier {
         _eq3[_activo] = eq;
         await _ponerAf(_activo, '');
       }
-      await _activo.abrir(f, inicio: inicio, pausado: pausado, volumen: _salida, velocidad: velocidad);
+      await _activo.abrir(f, inicio: inicio, pausado: pausado, volumen: _salida, velocidad: velocidad,
+          video: modo == 'video');
     }
     notifyListeners();
     _prepararExtras(gen);
@@ -1098,11 +1115,18 @@ class Reproductor extends ChangeNotifier {
 
   bool _esActual(_Motor m) => identical(m, _activo);
 
+  /// Publica la posicion solo si avanzo un paso (ver [publicarPosicion]):
+  /// libmpv avisa muchas veces por segundo y cada aviso reconstruia la barra,
+  /// la letra, el mini reproductor y la notificacion.
+  void _ponerPosicion(Duration p) {
+    if (publicarPosicion(p, posicion.value, fondo: !VidaApp.primerPlano.value)) posicion.value = p;
+  }
+
   void _alPosicion(_Motor m, Duration p) {
     final t = _traspaso;
     if (t != null) {
       if (identical(m, t['saliente'])) {
-        posicion.value = p;
+        _ponerPosicion(p);
         final obj = t['objetivo'] as Duration?;
         if (obj == null) return;
         if (t['listo'] == true && p >= obj - const Duration(milliseconds: 40)) {
@@ -1120,7 +1144,9 @@ class Reproductor extends ChangeNotifier {
     } else if (!_esActual(m)) {
       return;
     }
-    posicion.value = p;
+    // la logica (saltos, fundidos, escucha contada) mira cada aviso; la
+    // pantalla solo se entera cada ~200 ms (1 s en segundo plano)
+    _ponerPosicion(p);
     final seg = p.inMilliseconds / 1000.0;
     for (final s in _segmentos) {
       if (seg >= s.$1 && seg < s.$2 - 0.5) {
@@ -1174,7 +1200,7 @@ class Reproductor extends ChangeNotifier {
         _empezarFundido();
       }
     }
-    if (DateTime.now().difference(_ultimoGuardado) > const Duration(seconds: 15)) {
+    if (DateTime.now().difference(_ultimoGuardado) > const Duration(seconds: 20)) {
       guardarSesion();
     }
   }
@@ -1191,6 +1217,11 @@ class Reproductor extends ChangeNotifier {
     }
     if (!_esActual(m) && !(_fundido != null && identical(m, _fundido!['entrante']))) return;
     if (estado == EstadoRepro.parado && !sonando) return;
+    // en pausa la barra queda donde de verdad se paro (la posicion va frenada)
+    if (!sonando && estado == EstadoRepro.sonando) {
+      final exacta = m.player.state.position;
+      if (exacta > Duration.zero) posicion.value = exacta;
+    }
     _fijarEstado(sonando ? EstadoRepro.sonando : EstadoRepro.pausa);
   }
 
@@ -1399,7 +1430,7 @@ class Reproductor extends ChangeNotifier {
       await _ponerAf(entrante, '');
     }
     await entrante.abrir(f, volumen: 0, velocidad: velocidad * razon,
-        inicio: Duration(milliseconds: (inicio * 1000).round()));
+        inicio: Duration(milliseconds: (inicio * 1000).round()), video: modo == 'video');
     fuente = f;
     actual = objetivoPista;
     _escuchaContada = false;
@@ -1498,6 +1529,13 @@ class Reproductor extends ChangeNotifier {
     _apagarAlFinal = alTerminar;
     _apagarEn = minutos == null ? null : DateTime.now().add(Duration(minutes: minutos));
     _ponerFactorDormir(1);
+    // el reloj del temporizador solo corre mientras hay uno puesto
+    if (_apagarEn != null || _apagarAlFinal) {
+      _relojApagado ??= Timer.periodic(const Duration(milliseconds: 500), (_) => _ticApagado());
+    } else {
+      _relojApagado?.cancel();
+      _relojApagado = null;
+    }
     if (minutos != null) {
       _aviso('La música se detendrá en $minutos min');
     } else if (alTerminar) {
@@ -1537,6 +1575,11 @@ class Reproductor extends ChangeNotifier {
 
   void _ticApagado() {
     if (_pausandoParaDormir) return;
+    if (_apagarEn == null && !_apagarAlFinal && _factorDormir == 1) {
+      _relojApagado?.cancel();
+      _relojApagado = null;
+      return;
+    }
     // los ultimos 30 s el volumen baja poco a poco en vez de cortar de golpe
     _ponerFactorDormir(ajustes.sino('apagado_suave') ? factorApagado(_faltaParaDormir) : 1);
     if (_apagarEn != null && DateTime.now().isAfter(_apagarEn!)) {
@@ -1554,11 +1597,28 @@ class Reproductor extends ChangeNotifier {
 
   // ------------------------------------------------------------ sesion
 
+  /// Huella de la cola guardada la ultima vez: si no cambio, solo se guarda la
+  /// posicion (antes se reescribia la cola entera cada 15 s).
+  int? _colaGuardada;
+
   Future<void> guardarSesion() async {
     _ultimoGuardado = DateTime.now();
     if (actual == null) return;
+    final cola = Object.hashAll([
+      pos, '${contexto?['tipo']}|${contexto?['id']}', '${actual!['clave']}',
+      for (final p in secuencia) '${p['clave']}|${p['_auto'] == true}',
+      '|',
+      for (final p in proximas) p['clave'],
+    ]);
+    if (cola == _colaGuardada) {
+      await coleccion.guardarEstado('sesion_posicion',
+          {'clave': '${actual!['clave']}', 'posicion': posicion.value.inMilliseconds});
+      return;
+    }
+    _colaGuardada = cola;
     Json limpia(Json p) => {for (final e in p.entries) if (!e.key.startsWith('_') || e.key == '_auto') e.key: e.value};
     final ini = max(0, pos - 30);
+    await coleccion.guardarEstado('sesion_posicion', null);
     await coleccion.guardarEstado('sesion', {
       'secuencia': [for (final p in secuencia.sublist(ini, min(secuencia.length, pos + 120))) limpia(p)],
       'pos': pos - ini,
@@ -1577,7 +1637,15 @@ class Reproductor extends ChangeNotifier {
     proximas = [for (final p in (d['proximas'] as List? ?? [])) Map<String, dynamic>.from(p as Map)];
     contexto = d['contexto'] == null ? null : Map<String, dynamic>.from(d['contexto'] as Map);
     actual = secuencia[pos];
-    posicion.value = Duration(milliseconds: (d['posicion'] as num?)?.toInt() ?? 0);
+    var ms = (d['posicion'] as num?)?.toInt() ?? 0;
+    // la posicion guardada aparte (cuando la cola no habia cambiado)
+    try {
+      final suelta = await coleccion.estado('sesion_posicion');
+      if (suelta is Map && suelta['clave'] == '${actual!['clave']}' && suelta['posicion'] is num) {
+        ms = (suelta['posicion'] as num).toInt();
+      }
+    } catch (_) {}
+    posicion.value = Duration(milliseconds: ms);
     duracion.value = Duration(seconds: (actual!['duracion'] as num?)?.toInt() ?? 0);
     estado = EstadoRepro.parado;
     notifyListeners();

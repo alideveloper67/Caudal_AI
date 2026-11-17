@@ -29,6 +29,18 @@ def _familia_titulo():
     return _FAMILIA_TITULO
 
 
+def a_la_vista(widget):
+    """True si el widget se ve de verdad: visible y con su ventana ni oculta ni minimizada.
+    Las animaciones lo consultan para no gastar procesador en algo que nadie mira."""
+    try:
+        if widget is None or not widget.isVisible():
+            return False
+        ventana = widget.window()
+        return ventana.isVisible() and not ventana.isMinimized()
+    except RuntimeError:          # ya destruido
+        return False
+
+
 def fuente(px, peso=QFont.Normal, titulo=False):
     f = QFont(_familia_titulo() if titulo else "Segoe UI")
     f.setPixelSize(int(px))
@@ -288,12 +300,15 @@ class Deslizador(QWidget):
         self._reproductor = reproductor
         self._reloj = QTimer(self)
         self._reloj.setInterval(170)
-        self._reloj.timeout.connect(self._paso_mascota)
+        self._reloj.timeout.connect(self._tic_mascota)
         gestor.cambiada.connect(self._mascota_cambio)
-        reproductor.estado_cambio.connect(lambda _e: self._mascota_cambio())
+        reproductor.estado_cambio.connect(self._al_estado_mascota)
         self._mascota_cambio()
 
-    def _mascota_cambio(self):
+    def _al_estado_mascota(self, _e=None):
+        self._mascota_cambio()
+
+    def _mascota_cambio(self, *_a):
         datos = self._mascota.datos() if self._mascota else None
         if datos:
             self.setFixedHeight(self._alto_base + int(datos["alto"] * self.ESCALA_MASCOTA) - 8)
@@ -313,6 +328,17 @@ class Deslizador(QWidget):
     def alto_cambiado(self):
         """Gancho para que quien contiene la barra se ajuste (la barra crece con la mascota)."""
 
+    def _tic_mascota(self):
+        # con la ventana oculta (en la bandeja) o minimizada nadie la ve: el reloj solo mira,
+        # una vez por segundo, si ya vuelve a verse
+        if not a_la_vista(self):
+            if self._reloj.interval() != 1000:
+                self._reloj.setInterval(1000)
+            return
+        if self._reloj.interval() != 170:
+            self._reloj.setInterval(170)
+        self._paso_mascota()
+
     def _paso_mascota(self):
         from .. import mascotas
         datos = self._mascota.datos() if self._mascota else None
@@ -320,11 +346,19 @@ class Deslizador(QWidget):
         self._fase += 0.9
         self.update()
 
+    def _pixel(self, valor):
+        return int(round((self.width() - 12) * valor * 2))     # medio píxel: el borde es suave
+
     def set_valor(self, v):
         if self.arrastrando:
             return
-        self.valor = max(0.0, min(1.0, float(v or 0)))
-        self.update()
+        nuevo = max(0.0, min(1.0, float(v or 0)))
+        antes = self._pixel(self.valor)
+        self.valor = nuevo
+        # solo se repinta si la barra se mueve de verdad en pantalla (la mascota, si la hay,
+        # se repinta con su propio reloj)
+        if self._pixel(nuevo) != antes:
+            self.update()
 
     def set_buffer(self, v):
         self.buffer = max(0.0, min(1.0, float(v or 0)))
@@ -1205,7 +1239,12 @@ class FilaCompacta(QWidget):
                 pass
         if url:
             self._pm = imagenes.pedir(url, 48, 48, "cuadrada", 4, listo)
-        ctx.reproductor.pista_cambio.connect(lambda *_: self.update())
+        # método ligado: PySide suelta la conexión sola al destruir la fila (una lambda quedaba
+        # colgada del reproductor y fallaba con «already deleted» en cada canción)
+        ctx.reproductor.pista_cambio.connect(self._al_cambiar_pista)
+
+    def _al_cambiar_pista(self, *_a):
+        self.update()
 
     def enterEvent(self, e):
         self._encima = True
@@ -1385,9 +1424,19 @@ class Esqueleto(QWidget):
         self._t = QTimer(self)
         self._t.setInterval(33)
         self._t.timeout.connect(self._paso)
+
+    # el brillo solo corre mientras el esqueleto se ve (antes seguía aunque la página se ocultara)
+    def showEvent(self, e):
+        super().showEvent(e)
         self._t.start()
 
+    def hideEvent(self, e):
+        super().hideEvent(e)
+        self._t.stop()
+
     def _paso(self):
+        if not a_la_vista(self):
+            return                # minimizada: no se pinta (al volver sigue sola)
         self.fase = (self.fase + 0.025) % 1.6
         self.update()
 

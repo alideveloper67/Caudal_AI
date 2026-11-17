@@ -17,8 +17,9 @@ from PySide6.QtGui import (QColor, QFont, QFontMetrics, QImage, QLinearGradient,
 from PySide6.QtWidgets import QFileDialog, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget
 
 from ... import mixes as mx
+from ...hilos import en_segundo_plano
 from .. import iconos, imagenes
-from ..componentes import BotonIcono, Chip, Pagina, SinResultados, fuente
+from ..componentes import BotonIcono, Chip, Pagina, SinResultados, a_la_vista, fuente
 from ..estilos import C
 
 ANCHO, ALTO = 420, 560          # tamano logico de una tarjeta (3:4)
@@ -484,7 +485,23 @@ class Escenario(QWidget):
         self.timer = QTimer(self)
         self.timer.setTimerType(Qt.PreciseTimer)
         self.timer.setInterval(16)
-        self.timer.timeout.connect(self.update)
+        self.timer.timeout.connect(self._tic)
+
+    # 60 cuadros/s solo mientras entra una tarjeta o se pasa a otra; quieta, las manchas de luz
+    # flotan tan despacio que 20 cuadros/s se ven igual; con la ventana minimizada, nada
+    FLUIDO_MS, TRANQUILO_MS, DORMIDO_MS = 16, 50, 500
+
+    def _ritmo(self, ms):
+        if self.timer.interval() != ms:
+            self.timer.setInterval(ms)
+
+    def _tic(self):
+        if not a_la_vista(self):
+            self._ritmo(self.DORMIDO_MS)
+            return
+        entrada, paso, _r = self.progreso()
+        self._ritmo(self.FLUIDO_MS if (entrada < 1.0 or paso < 1.0) else self.TRANQUILO_MS)
+        self.update()
 
     def set_resumen(self, r):
         self.r = r
@@ -502,6 +519,7 @@ class Escenario(QWidget):
         self.anterior = None
         self.t_entrada = self.reloj.elapsed()
         self.t_paso = -10_000
+        self._ritmo(self.FLUIDO_MS)
         self.update()
 
     def _color_mes(self, url):
@@ -529,6 +547,7 @@ class Escenario(QWidget):
         ahora = self.reloj.elapsed()
         self.t_paso = ahora
         self.t_entrada = ahora
+        self._ritmo(self.FLUIDO_MS)
         self.cambio.emit(i)
         self.update()
 
@@ -655,8 +674,38 @@ class PaginaResumen(Pagina):
         self.titulo = "Tu resumen"
         self.set_color("#2A1D5A")
         self.periodo = "semana"
-        self.historial = mx.leer_historial(ctx.coleccion)
+        self.historial = []
+        self._resumenes = {}
+        # todo el historial (pueden ser decenas de miles de escuchas) se lee y se resume en segundo
+        # plano, con su propia conexión a la base: la página aparece al momento con un esqueleto
+        copiar = getattr(ctx.coleccion, "copia_de_lectura", None)
+        self._cargando = copiar is not None
+        if not self._cargando:
+            self.historial = mx.leer_historial(ctx.coleccion)
         self._construir()
+        if self._cargando:
+            def leer():
+                with copiar() as c:
+                    h = mx.leer_historial(c)
+                return h, {k: mx.calcular_resumen(h, k) for k in mx.PERIODOS}
+            en_segundo_plano(leer, ok=self._llego_historial, error=self._fallo_historial, dueno=self)
+
+    def _llego_historial(self, datos):
+        self.historial, self._resumenes = datos
+        self._fin_carga()
+
+    def _fallo_historial(self, _e):
+        self.historial, self._resumenes = mx.leer_historial(self.ctx.coleccion), {}
+        self._fin_carga()
+
+    def _fin_carga(self):
+        self._cargando = False
+        try:
+            self.esqueleto.hide()
+            self.esqueleto.deleteLater()
+        except (AttributeError, RuntimeError):
+            pass
+        self.elegir(self.periodo)
 
     def _construir(self):
         cab = QHBoxLayout()
@@ -728,6 +777,10 @@ class PaginaResumen(Pagina):
             "Escucha música un rato y aquí verás tus minutos, tus canciones y artistas "
             "favoritos, tus horas y tu racha.")
         self.cuerpo.addWidget(self.vacio)
+        if self._cargando:
+            from ..componentes import Esqueleto
+            self.esqueleto = Esqueleto("tarjetas")
+            self.cuerpo.addWidget(self.esqueleto)
         self.cuerpo.addStretch(1)
         self.elegir(self.periodo)
 
@@ -735,7 +788,13 @@ class PaginaResumen(Pagina):
         self.periodo = periodo
         for k, c in self.chips.items():
             c.setChecked(k == periodo)
-        self.r = mx.calcular_resumen(self.historial, periodo)
+        if self._cargando:
+            self.zona.setVisible(False)
+            self.vacio.setVisible(False)
+            return
+        # el de la primera carga ya viene hecho del segundo plano (solo vale la primera vez:
+        # después se recalcula, por si sonó algo mientras tanto)
+        self.r = self._resumenes.pop(periodo, None) or mx.calcular_resumen(self.historial, periodo)
         d = self.r["desde"]
         self.et_rango.setText(f"{self.r['rango'].capitalize()} · desde el {d.day} de "
                               f"{mx.MESES[d.month - 1]}")

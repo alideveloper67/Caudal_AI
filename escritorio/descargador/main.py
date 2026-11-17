@@ -119,21 +119,32 @@ def main():
             QProcess.startDetached(sys.executable, [os.path.abspath(sys.argv[0])])
         app.quit()
 
-    def iniciar(cuenta):
+    def revisar_terminos(cuenta, ventana):
+        """Cuentas de antes de los términos (o sin los datos básicos): se piden una vez.
+        La consulta va en segundo plano para que la ventana salga sin esperar a la red; si hace
+        falta aceptar, el cuadro se abre encima en cuanto llega la respuesta."""
         sesion = cuenta.get("sesion")
-        if sesion is not None and getattr(sesion, "access", ""):
-            # cuentas de antes de los términos (o sin los datos básicos): se piden una vez
-            from descargador import legal
-            try:
-                perfil = legal.perfil(sesion)
-            except Exception:  # noqa: BLE001
-                perfil = None           # sin red: se pregunta la próxima vez
-            if perfil is not None and not (legal.aceptado(perfil) and legal.completo(perfil)):
-                from descargador.ui.legal_ui import DialogoAceptar
-                if DialogoAceptar(sesion, perfil).exec() != DialogoAceptar.Accepted:
-                    Cuentas().olvidar(cuenta)
-                    reiniciar()
-                    return
+        if sesion is None or not getattr(sesion, "access", ""):
+            return
+        from descargador import legal
+        from descargador.hilos import en_segundo_plano
+
+        def llego(perfil):
+            if perfil is None or (legal.aceptado(perfil) and legal.completo(perfil)):
+                return
+            from descargador.ui.legal_ui import DialogoAceptar
+            if DialogoAceptar(sesion, perfil, ventana).exec() != DialogoAceptar.Accepted:
+                try:
+                    ventana.hide()
+                    ventana.r.cerrar()
+                except Exception:  # noqa: BLE001
+                    pass
+                Cuentas().olvidar(cuenta)
+                reiniciar()
+        # sin red: se pregunta la próxima vez (como antes)
+        en_segundo_plano(legal.perfil, sesion, ok=llego, error=lambda _e: None, dueno=ventana)
+
+    def iniciar(cuenta):
         activar(cuenta)
         ajustes = Ajustes()
         # el color y el fondo elegidos, antes de construir la ventana
@@ -190,9 +201,15 @@ def main():
                     sinc.pronto()
             ajustes.guardar = guardar_y_subir
             sinc.iniciar()
+
+            def al_cambiar_estado_app(estado_app):
+                if estado_app == Qt.ApplicationActive:
+                    sinc.al_volver()
+            app.applicationStateChanged.connect(al_cambiar_estado_app)
         ventana = Ventana(ctx)
         estado["ventana"] = ventana
         ventana.show()
+        revisar_terminos(cuenta, ventana)
         if estado["acceso"] is not None:
             estado["acceso"].close()
             estado["acceso"] = None

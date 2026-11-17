@@ -14,8 +14,8 @@ import threading
 from collections import OrderedDict
 
 import requests
-from PySide6.QtCore import QObject, QRectF, QRunnable, QThreadPool, Qt, Signal
-from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath, QPixmap
+from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QObject, QRectF, QRunnable, QThreadPool, Qt, Signal
+from PySide6.QtGui import QColor, QImage, QImageReader, QPainter, QPainterPath, QPixmap
 
 from ..config import carpeta_datos
 
@@ -23,12 +23,24 @@ _POOL = QThreadPool()
 _POOL.setMaxThreadCount(6)
 _MEMORIA = OrderedDict()          # (url, w, h, forma, radio) -> QPixmap
 _IMAGENES = OrderedDict()         # url -> QImage original
-_COLORES = {}
+_COLORES = OrderedDict()           # cacheKey de la imagen -> color (con tope, ver color_dominante)
+TOPE_COLORES = 600
 _esperando = {}                   # url -> [callbacks]
 _cerrojo = threading.Lock()
-_sesion = requests.Session()
-_sesion.headers["User-Agent"] = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                                 "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36")
+_AGENTE = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+           "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130 Safari/537.36")
+_por_hilo = threading.local()
+
+
+def _sesion_del_hilo():
+    """Una requests.Session por hilo de bajada (Session no es segura entre hilos; así cada
+    hilo reutiliza su conexión con el servidor de portadas)."""
+    s = getattr(_por_hilo, "sesion", None)
+    if s is None:
+        s = requests.Session()
+        s.headers["User-Agent"] = _AGENTE
+        _por_hilo.sesion = s
+    return s
 
 
 def carpeta_cache():
@@ -80,7 +92,7 @@ def _leer(url):
         except OSError:
             pass
     try:
-        r = _sesion.get(url, timeout=15)
+        r = _sesion_del_hilo().get(url, timeout=15)
         if r.status_code == 200 and r.content and len(r.content) < 12_000_000:
             try:
                 ruta.write_bytes(r.content)
@@ -100,10 +112,39 @@ def bytes_de(url):
 
 
 class _Senales(QObject):
-    listo = Signal(str, object)
+    listo = Signal(str, object, object)      # url, QImage original, {spec: QImage recortada}
 
 
 _senales = _Senales()
+
+# lado máximo al que se decodifica una original: más que cualquier portada en pantalla
+# (la más grande, el vinilo, ronda 400 px × 2 de densidad) y que las tarjetas para compartir.
+# Una carátula local de 3000x3000 (36 MB en memoria) queda en 1280x1280 (6,5 MB).
+LADO_MAXIMO = 1280
+
+
+def decodificar(datos):
+    """QImage de unos bytes, reducida al decodificar si es enorme (sirve en cualquier hilo)."""
+    img = QImage()
+    if not datos:
+        return img
+    # el arreglo de bytes y el búfer tienen que vivir mientras el lector los usa
+    arreglo = QByteArray(datos)
+    bufer = QBuffer(arreglo)
+    bufer.open(QIODevice.ReadOnly)
+    try:
+        lector = QImageReader(bufer)
+        tam = lector.size()
+        if tam.isValid() and max(tam.width(), tam.height()) > LADO_MAXIMO:
+            lector.setScaledSize(tam.scaled(LADO_MAXIMO, LADO_MAXIMO, Qt.KeepAspectRatio))
+        img = lector.read()
+        del lector
+    finally:
+        bufer.close()
+    if img.isNull():                 # formatos raros: como antes
+        img = QImage()
+        img.loadFromData(datos)
+    return img
 
 
 class _Bajada(QRunnable):
@@ -113,23 +154,33 @@ class _Bajada(QRunnable):
 
     def run(self):
         datos = _leer(self.url)
-        img = QImage()
-        if datos:
-            img.loadFromData(datos)
+        img = decodificar(datos)
         # las miniaturas de YouTube vienen con franjas negras (4:3 con un 16:9
         # dentro): se recortan para que no parezcan marcos
         if not img.isNull() and "i.ytimg.com" in self.url and img.height() > 0:
             if abs(img.width() / img.height() - 4 / 3) < 0.05:
                 alto = int(img.width() * 9 / 16)
                 img = img.copy(0, (img.height() - alto) // 2, img.width(), alto)
-        _senales.listo.emit(self.url, img)
+        # los recortes que ya se pidieron se hacen aquí, fuera del hilo de la interfaz
+        # (escalar una original de 1280 px costaba milisegundos por portada al pintar listas)
+        with _cerrojo:
+            specs = set(_recortes_pedidos.get(self.url, ()))
+        hechos = {}
+        if not img.isNull():
+            for spec in specs:
+                try:
+                    hechos[spec] = formar_imagen(img, *spec)
+                except Exception:  # noqa: BLE001 - se hará en el hilo principal
+                    pass
+        _senales.listo.emit(self.url, img, hechos)
 
 
 # las originales se guardan por peso, no por cantidad: una miniatura de
-# YouTube a 1280x720 ocupa ~3,7 MB en memoria, y 260 de ellas eran casi 1 GB.
-# Las que salen se vuelven a leer del disco (no de internet) si hacen falta.
-TOPE_ORIGINALES = 160 * 1024 * 1024
+# YouTube a 1280x720 ocupa ~3,7 MB en memoria. Las que salen se vuelven a leer
+# del disco (no de internet) si hacen falta.
+TOPE_ORIGINALES = 64 * 1024 * 1024
 _peso = {"total": 0}
+_recortes_pedidos = {}           # url -> {(w_px, h_px, forma, radio_px)} pendientes de bajar
 
 
 def _guardar_original(url, img):
@@ -143,18 +194,24 @@ def _guardar_original(url, img):
         _peso["total"] -= sale.sizeInBytes()
 
 
-def _al_bajar(url, img):
+def _al_bajar(url, img, hechos=None):
     if not img.isNull():
         _guardar_original(url, img)
     with _cerrojo:
         callbacks = _esperando.pop(url, [])
-    for cb in callbacks:
-        try:
-            cb(img)
-        except RuntimeError:
-            pass
+        _recortes_pedidos.pop(url, None)
+    _hechos_ahora.update({"url": url, "hechos": hechos or {}})
+    try:
+        for cb in callbacks:
+            try:
+                cb(img)
+            except RuntimeError:
+                pass
+    finally:
+        _hechos_ahora.update({"url": None, "hechos": {}})
 
 
+_hechos_ahora = {"url": None, "hechos": {}}     # recortes hechos en el hilo de bajada, mientras se reparten
 _senales.listo.connect(_al_bajar)
 
 
@@ -164,6 +221,7 @@ def imagen(url, callback):
         callback(QImage())
         return
     if url in _IMAGENES:
+        _IMAGENES.move_to_end(url)
         callback(_IMAGENES[url])
         return
     with _cerrojo:
@@ -174,18 +232,26 @@ def imagen(url, callback):
     _POOL.start(_Bajada(url))
 
 
-def formar(img, ancho, alto, forma="cuadrada", radio=6):
-    """Recorta la imagen para llenar el hueco (como object-fit: cover)."""
+def _escala_pantalla():
     from PySide6.QtWidgets import QApplication
-    escala = 1.0
     app = QApplication.instance()
     if app is not None:
         try:
-            escala = app.devicePixelRatio()
+            return app.devicePixelRatio()
         except Exception:
-            escala = 1.0
-    w, h = int(ancho * escala), int(alto * escala)
-    destino = QPixmap(max(1, w), max(1, h))
+            return 1.0
+    return 1.0
+
+
+def _spec(ancho, alto, forma, radio, escala):
+    """Lo que hace falta para recortar: el tamaño en píxeles reales (nítido con la densidad
+    de la pantalla, nunca menor que lo que se pinta)."""
+    return (max(1, int(ancho * escala)), max(1, int(alto * escala)), forma, float(radio) * escala)
+
+
+def formar_imagen(img, w, h, forma="cuadrada", radio_px=6.0):
+    """El recorte (como object-fit: cover) en una QImage de w×h píxeles. Vale en cualquier hilo."""
+    destino = QImage(max(1, w), max(1, h), QImage.Format_ARGB32_Premultiplied)
     destino.fill(Qt.transparent)
     p = QPainter(destino)
     p.setRenderHint(QPainter.Antialiasing, True)
@@ -194,7 +260,7 @@ def formar(img, ancho, alto, forma="cuadrada", radio=6):
     if forma == "redonda":
         ruta.addEllipse(QRectF(0, 0, w, h))
     else:
-        ruta.addRoundedRect(QRectF(0, 0, w, h), radio * escala, radio * escala)
+        ruta.addRoundedRect(QRectF(0, 0, w, h), radio_px, radio_px)
     p.setClipPath(ruta)
     if img is None or img.isNull():
         p.fillRect(0, 0, w, h, QColor("#252A35"))
@@ -204,11 +270,22 @@ def formar(img, ancho, alto, forma="cuadrada", radio=6):
         y = (esc.height() - h) // 2
         p.drawImage(0, 0, esc, x, y, w, h)
     p.end()
-    destino.setDevicePixelRatio(escala)
     return destino
 
 
-TOPE_RECORTES = 120 * 1024 * 1024
+def _a_pixmap(qimg, escala):
+    pm = QPixmap.fromImage(qimg)
+    pm.setDevicePixelRatio(escala)
+    return pm
+
+
+def formar(img, ancho, alto, forma="cuadrada", radio=6):
+    """Recorta la imagen para llenar el hueco (como object-fit: cover)."""
+    escala = _escala_pantalla()
+    return _a_pixmap(formar_imagen(img, *_spec(ancho, alto, forma, radio, escala)), escala)
+
+
+TOPE_RECORTES = 64 * 1024 * 1024
 _peso_recortes = {"total": 0}
 
 
@@ -237,21 +314,31 @@ def pedir(url, ancho, alto, forma="cuadrada", radio=6, callback=None):
         # ya bajada: se recorta ahora y se devuelve (sin callback, que llegaria
         # antes de que quien llama guarde el resultado y lo pisaria)
         img = _IMAGENES[url]
+        _IMAGENES.move_to_end(url)
         if img.isNull():
             return None
         pm = formar(img, ancho, alto, forma, radio)
         _guardar_recorte(clave, pm)
         return pm
 
+    escala = _escala_pantalla()
+    spec = _spec(ancho, alto, forma, radio, escala)
+
     def listo(img):
         if img is None or img.isNull():
             return
-        pm = formar(img, ancho, alto, forma, radio)
+        hecho = _hechos_ahora["hechos"].get(spec) if _hechos_ahora["url"] == url else None
+        if hecho is not None:
+            pm = _a_pixmap(hecho, escala)        # recortada en el hilo de bajada: aquí solo se convierte
+        else:
+            pm = formar(img, ancho, alto, forma, radio)
         _guardar_recorte(clave, pm)
         if callback:
             callback(pm)
 
     if url:
+        with _cerrojo:
+            _recortes_pedidos.setdefault(url, set()).add(spec)
         imagen(url, listo)
     return None
 
@@ -289,6 +376,8 @@ def color_dominante(img):
         h, s, v, _a = color.getHsv()
         color.setHsv(max(0, h), min(255, int(s * 1.05)), min(150, max(70, int(v * 0.62))))
     _COLORES[clave] = color
+    while len(_COLORES) > TOPE_COLORES:
+        _COLORES.popitem(last=False)
     return color
 
 

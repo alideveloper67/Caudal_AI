@@ -12,8 +12,9 @@ Todo está dibujado con QPainter (sin imágenes):
 - el fondo (colores de la carátula, desenfocados, con viñeta), la placa del tocadiscos y
   las sombras son otra capa cacheada: por cuadro solo se compone.
 
-La animación corre a ~60 fps con un QTimer que se detiene solo cuando todo está quieto o
-la pantalla no se ve. Mientras el vinilo se ve y suena (o hace menos de 60 s que se pausó)
+La animación corre a ~30 fps con un QTimer que se detiene solo cuando todo está quieto o
+la pantalla no se ve, y cada cuadro repinta solo la zona del disco y el brazo (el fondo ya
+viene compuesto, con su transparencia, en la capa cacheada). Mientras el vinilo se ve y suena (o hace menos de 60 s que se pausó)
 puede impedir que Windows apague la pantalla o entre en reposo.
 """
 
@@ -28,12 +29,13 @@ from PySide6.QtWidgets import (QApplication, QHBoxLayout, QLabel, QPushButton, Q
                                QWidget)
 
 from . import imagenes
-from .componentes import BotonIcono, BotonPlay, Deslizador
+from .componentes import BotonIcono, BotonPlay, Deslizador, a_la_vista
 from .letra_viva import _BOTON, desenfocar, paleta_de
 
 RPM = 100.0 / 3.0                 # 33 1/3 vueltas por minuto
 GRADOS_POR_SEG = RPM * 6.0        # = 200 grados por segundo
-MS_CUADRO = 16                    # ~60 fps
+MS_CUADRO = 33                    # ~30 fps: el plato gira suave y cuesta la mitad que a 60
+MS_DORMIDO = 300                  # ventana minimizada u oculta: solo mira si vuelve a verse
 ESPERA_BAJAR = 0.9                # s que el brazo espera antes de posarse al empezar
 SEG_BAJAR = 0.95                  # lo que tarda el brazo en posarse
 SEG_SUBIR = 0.55                  # y en levantarse
@@ -749,7 +751,15 @@ class PaginaVinilo(QWidget):
         if dt is None:
             import time
             ahora = time.monotonic()
-            dt = 0.0 if self._ult is None else min(0.05, ahora - self._ult)
+            if not a_la_vista(self):
+                # minimizada: nada que pintar; al volver sigue donde iba (sin saltos)
+                self._ult = None
+                if self.reloj.interval() != MS_DORMIDO:
+                    self.reloj.setInterval(MS_DORMIDO)
+                return
+            if self.reloj.interval() != MS_CUADRO:
+                self.reloj.setInterval(MS_CUADRO)
+            dt = 0.0 if self._ult is None else min(0.1, ahora - self._ult)
             self._ult = ahora
         self._t += dt
         sonando = self._suena()
@@ -771,7 +781,21 @@ class PaginaVinilo(QWidget):
         self.prog += (self._prog_obj - self.prog) * min(1.0, dt * 5.0)
         if self._quieto():
             self.reloj.stop()
-        self.update()
+        self.update(self.zona_animada())
+
+    def zona_animada(self):
+        """El rectángulo que cambia de un cuadro a otro: el disco, el brazo y sus sombras."""
+        from PySide6.QtCore import QRect
+        geo = self._geo
+        if geo is None:
+            return self.rect()
+        R = geo.R
+        disco = QRectF(geo.cx - 1.12 * R, geo.cy - 1.12 * R, 2.24 * R, 2.3 * R)
+        alcance = geo.L + 0.45 * R
+        b = geo.pivote
+        brazo = QRectF(b.x() - alcance, b.y() - alcance, 2 * alcance, 2 * alcance + 0.2 * R)
+        zona = disco.united(brazo).adjusted(-10, -10, 10, 10).toAlignedRect()
+        return zona.intersected(QRect(0, 0, self.width(), self.height()))
 
     def showEvent(self, e):
         super().showEvent(e)
@@ -821,7 +845,16 @@ class PaginaVinilo(QWidget):
         geo = self._geo
         dpr = self._dpr()
         if self._pm_base is None:
-            self._pm_base = pintar_base(w, h, geo, self._img, self.paleta, self.mancha, dpr)
+            base = pintar_base(w, h, geo, self._img, self.paleta, self.mancha, dpr)
+            # la transparencia (0,97) se compone UNA vez aquí y no en cada cuadro: mismo resultado,
+            # sin mezclar toda la pantalla con opacidad 30 veces por segundo
+            self._pm_base = QPixmap(base.size())
+            self._pm_base.setDevicePixelRatio(dpr)
+            self._pm_base.fill(Qt.transparent)
+            q = QPainter(self._pm_base)
+            q.setOpacity(0.97)
+            q.drawPixmap(0, 0, base)
+            q.end()
         if self._pm_disco is None:
             self._pm_disco = pintar_disco(geo.R * 2, self._img, self.paleta, dpr)
         if self._pm_brillo is None:
@@ -841,9 +874,7 @@ class PaginaVinilo(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
         p.setRenderHint(QPainter.SmoothPixmapTransform, True)
-        p.setOpacity(0.97)
-        p.drawPixmap(0, 0, self._pm_base)
-        p.setOpacity(1.0)
+        p.drawPixmap(0, 0, self._pm_base)       # ya trae su 0,97 de opacidad
         R = geo.R
         p.save()
         p.translate(geo.cx, geo.cy)

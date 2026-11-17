@@ -196,7 +196,7 @@ class PaginaJuntos(QWidget):
 
         self.g.cambio.connect(self._pintar)
         self.g.error.connect(self._mostrar_error)
-        self.g.reaccion.connect(lambda e, n, mio: flotar_emoji(self, e, n, mio))
+        self.g.reaccion.connect(self._al_reaccionar)
         self._pintar()
 
     # ------------------------------------------------------------ entrada
@@ -515,6 +515,9 @@ class PaginaJuntos(QWidget):
         menu.exec(caja.mapToGlobal(pos))
 
     # ------------------------------------------------------------ pintar
+    def _al_reaccionar(self, e, n, mio):
+        flotar_emoji(self, e, n, mio)
+
     def _pintar(self):
         s = self.g.sala
         if s is None:

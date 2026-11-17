@@ -13,9 +13,11 @@ Lo ya descargado suena desde el disco (sin internet); lo demas se pide a
 YouTube en la mejor calidad, sin anuncios y en segundo plano.
 """
 
+import json
 import os
 import random
 import re
+import threading
 import time
 
 from PySide6.QtCore import QObject, QTimer, Signal
@@ -74,6 +76,8 @@ RECORTE_MAX_INICIO = 15.0    # nunca se salta mas que esto al entrar
 RECORTE_MINIMO = 0.4         # por debajo de esto no merece la pena recortar
 FUNDIDO_DJ_CORTO = 1.2       # fundido minimo al saltar un silencio sin crossfade
 APAGADO_SUAVE_SEG = 30.0     # el temporizador baja el volumen estos ultimos segundos
+AVISO_POSICION_SEG = 0.2     # la interfaz se entera de la posicion a ~5 avisos/s como mucho
+SALTO_POSICION_SEG = 0.75    # (salvo un salto: buscar, cambio de pista), la letra interpola sola
 
 
 def analizar_silencedetect(texto, desplazamiento=0.0, tramo=None):
@@ -237,7 +241,11 @@ class Motor(QObject):
         opciones = dict(
             ytdl=False, idle="yes", keep_open="no",
             input_default_bindings=False, input_vo_keyboard=False, osc=False,
-            cache="yes", demuxer_max_bytes="200MiB", demuxer_max_back_bytes="60MiB",
+            # caché de red: al audio le sobran 32/16 MiB (son ~30 min de música a 160 kb/s); el video
+            # necesita más para que 4K no se corte
+            cache="yes",
+            demuxer_max_bytes="150MiB" if wid is not None else "32MiB",
+            demuxer_max_back_bytes="50MiB" if wid is not None else "16MiB",
             demuxer_readahead_secs=40, audio_client_name="Caudal",
             volume_max=100, msg_level="all=no", network_timeout=25,
             audio_pitch_correction="yes",
@@ -478,7 +486,45 @@ class Motor(QObject):
         hilo.join(1.5)
 
 
+class EstadoSesion:
+    """Lo que comparten la interfaz y el hilo que guarda la sesión (solo Python, sin Qt): cada
+    guardado lleva un número y nunca se pisa uno más nuevo con uno más viejo."""
+
+    def __init__(self):
+        self.cerrojo = threading.Lock()
+        self.gen = 0
+        self.escrita = 0
+        self.texto = None        # lo último escrito (para no reescribir lo mismo en pausa)
+
+    def nueva(self):
+        with self.cerrojo:
+            self.gen += 1
+            return self.gen
+
+
+def _escribir_sesion_aparte(estado, archivo, texto, gen):
+    """En su hilo, con su propia conexión: escribe la sesión si nadie guardó una más nueva."""
+    import sqlite3
+    with estado.cerrojo:
+        if gen <= estado.escrita:
+            return
+        try:
+            con = sqlite3.connect(archivo, timeout=15)
+            try:
+                con.execute("INSERT OR REPLACE INTO estado (clave, valor) VALUES (?,?)",
+                            ("sesion", texto))
+                con.commit()
+            finally:
+                con.close()
+            estado.escrita = gen
+            estado.texto = texto
+        except Exception:  # noqa: BLE001 - la próxima vez se reintenta
+            pass
+
+
 class Reproductor(QObject):
+    _sesion_estado = None            # EstadoSesion (se crea al primer guardado)
+
     pista_cambio = Signal(object)
     estado_cambio = Signal(str)            # cargando | sonando | pausa | parado
     posicion_cambio = Signal(float)
@@ -520,6 +566,7 @@ class Reproductor(QObject):
         self._buscando_radio = False
         self._fundido = None
         self._ultimo_guardado = 0.0
+        self._sesion_estado = EstadoSesion()
         self._calidad_forzada = None
         self._traspaso = None
         self._est_carga = 1.5           # segundos que suele tardar en abrir un video
@@ -953,7 +1000,7 @@ class Reproductor(QObject):
         if m:
             m.buscar(segundos)
             self._posicion = float(segundos)
-            self.posicion_cambio.emit(self._posicion)
+            self._emitir_posicion(forzar=True)
 
     def avanzar(self, delta):
         self.buscar(max(0.0, self._posicion + delta))
@@ -1074,6 +1121,8 @@ class Reproductor(QObject):
         if modo not in ("audio", "video") or modo == self.modo:
             return False
         self.modo = modo
+        if modo == "video":
+            self._video_en_sesion = True      # desde ahora se deja listo el video de cada canción
         self.modo_cambio.emit(modo)
         return True
 
@@ -1150,7 +1199,7 @@ class Reproductor(QObject):
             self._posicion = float(inicio or 0)
             self.pista_cambio.emit(pista)
             self.duracion_cambio.emit(self._duracion)
-            self.posicion_cambio.emit(self._posicion)
+            self._emitir_posicion(forzar=True)
         if not self._traspaso:
             self._fijar_estado("cargando")
         self._apagar_si_toca_al_cambiar(cambio)
@@ -1340,8 +1389,11 @@ class Reproductor(QObject):
                 pista, self._fuente))
         # precargar la siguiente para que empiece al instante
         QTimer.singleShot(4000, lambda: gen == self._gen and self._precargar())
-        # y dejar listo el video de esta, por si pulsas "Ver el video"
-        if self.modo == "audio" and vid and not pista.get("archivo"):
+        # y dejar listo el video de esta, por si pulsas "Ver el video": solo si ya se usó el video
+        # en esta sesión (resolverlo para cada canción gastaba red y procesador casi siempre en balde;
+        # si no, se resuelve al pedirlo)
+        if (self.modo == "audio" and vid and not pista.get("archivo")
+                and getattr(self, "_video_en_sesion", False)):
             QTimer.singleShot(2500, lambda: gen == self._gen and self._preparar_video(vid))
 
     def _preparar_video(self, vid):
@@ -1445,7 +1497,7 @@ class Reproductor(QObject):
             if m is t["saliente"]:
                 # mientras el nuevo carga, la barra sigue a lo que suena
                 self._posicion = float(valor)
-                self.posicion_cambio.emit(self._posicion)
+                self._emitir_posicion()
                 objetivo = t.get("objetivo")
                 if objetivo is None:
                     return
@@ -1466,7 +1518,7 @@ class Reproductor(QObject):
         elif not self._es_actual(m):
             return
         self._posicion = float(valor)
-        self.posicion_cambio.emit(self._posicion)
+        self._emitir_posicion()
         # si ya suena bien un rato tras un reintento, el contador vuelve a cero
         if getattr(self, "_reintentos", 0) and self._posicion > getattr(self, "_reintento_desde", 0) + 20:
             self._reintentos = 0
@@ -1624,8 +1676,26 @@ class Reproductor(QObject):
     def pidio_pantalla_completa(self):
         """Lo redefine la ventana; aqui solo existe para que la tecla tenga destino."""
 
+    def _emitir_posicion(self, forzar=False):
+        """Avisa a la interfaz de la posicion con freno (~5/s): mpv la cambia decenas de veces por
+        segundo y cada aviso repintaba barra, letra y vinilo. Los saltos (buscar, otra pista) y
+        `forzar` pasan siempre. La logica fina (traspasos, saltos de SponsorBlock, fundidos)
+        sigue usando cada valor de mpv: solo se frena el aviso."""
+        pos = float(getattr(self, "_posicion", 0.0) or 0.0)
+        ahora = time.monotonic()
+        ultima_t, ultima_v = getattr(self, "_pos_emitida", (0.0, None))
+        if not forzar and ultima_v is not None:
+            pasado = ahora - ultima_t
+            esperado = ultima_v + pasado * float(getattr(self, "velocidad", 1.0) or 1.0)
+            if pasado < AVISO_POSICION_SEG and abs(pos - esperado) < SALTO_POSICION_SEG:
+                return
+        self._pos_emitida = (ahora, pos)
+        self.posicion_cambio.emit(pos)
+
     def _fijar_estado(self, estado):
         if estado != self.estado:
+            if estado != "sonando":
+                self._emitir_posicion(forzar=True)    # al pausar, la posicion exacta
             self.estado = estado
             self.estado_cambio.emit(estado)
             if estado in ("pausa", "parado"):
@@ -2015,18 +2085,41 @@ class Reproductor(QObject):
     # ------------------------------------------------------------ sesion
 
     def _guardar_sesion_pronto(self):
+        """Guardado de rutina (cambio de canción, cada ~15 s mientras suena): se prepara aquí y se
+        escribe en otro hilo con su propia conexión, para que la interfaz nunca espere a la base
+        (antes se quedaba esperando si la sincronización la tenía ocupada). El hilo solo toca
+        datos de Python (texto y `EstadoSesion`), nunca el reproductor."""
         self._ultimo_guardado = time.time()
         try:
-            self.guardar_sesion()
+            datos = self._datos_sesion()
+            if datos is None:
+                return
+            archivo = getattr(self.coleccion, "archivo", None)
+            if not archivo:
+                self.guardar_sesion()
+                return
+            texto = json.dumps(datos, ensure_ascii=False)    # aquí: los datos no cambian a medias
+            estado = self._estado_sesion()
+            if texto == estado.texto:
+                return
+            gen = estado.nueva()
+            threading.Thread(target=_escribir_sesion_aparte, args=(estado, str(archivo), texto, gen),
+                             name="guardar-sesion", daemon=True).start()
         except Exception:
             pass
 
-    def guardar_sesion(self):
+    def _estado_sesion(self):
+        estado = getattr(self, "_sesion_estado", None)
+        if estado is None:
+            estado = self._sesion_estado = EstadoSesion()
+        return estado
+
+    def _datos_sesion(self):
         if not self.actual:
-            return
+            return None
         limpiar = lambda p: {k: v for k, v in p.items() if not k.startswith("_") or k == "_auto"}
         inicio = max(0, self.pos - 30)
-        datos = {
+        return {
             "secuencia": [limpiar(p) for p in self.secuencia[inicio:self.pos + 120]],
             "pos": self.pos - inicio,
             "proximas": [limpiar(p) for p in self.proximas[:100]],
@@ -2034,7 +2127,18 @@ class Reproductor(QObject):
             "posicion": self._posicion,
             "modo": self.modo,
         }
-        self.coleccion.guardar_estado("sesion", datos)
+
+    def guardar_sesion(self):
+        """Guardado al momento (al cerrar o reabrir): no vuelve hasta que está escrito."""
+        datos = self._datos_sesion()
+        if datos is None:
+            return
+        estado = self._estado_sesion()
+        gen = estado.nueva()
+        with estado.cerrojo:
+            self.coleccion.guardar_estado("sesion", datos)
+            estado.escrita = max(estado.escrita, gen)
+            estado.texto = None
 
     def restaurar_sesion(self):
         datos = self.coleccion.estado("sesion")
@@ -2051,7 +2155,7 @@ class Reproductor(QObject):
         self.estado = "parado"
         self.pista_cambio.emit(self.actual)
         self.duracion_cambio.emit(self._duracion)
-        self.posicion_cambio.emit(self._posicion)
+        self._emitir_posicion(forzar=True)
         self.estado_cambio.emit("parado")
         self.cola_cambio.emit()
         return True

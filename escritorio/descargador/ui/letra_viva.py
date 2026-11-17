@@ -33,15 +33,23 @@ from PySide6.QtWidgets import (QApplication, QHBoxLayout, QLabel, QPushButton, Q
 
 from .. import catalogo, traductor
 from ..hilos import en_segundo_plano
+from ..memoria import DiccionarioLimitado
 from . import iconos, imagenes
+from .componentes import a_la_vista
 
-# letras ya pedidas (clave de la pista -> datos de catalogo.letras)
-CACHE_LETRAS = {}
+# letras ya pedidas (clave de la pista -> datos de catalogo.letras), las 300 últimas
+CACHE_LETRAS = DiccionarioLimitado(300)
 
 ADELANTO_MS = 180        # la linea se enciende un pelin antes: se siente a tiempo
-FPS_SONANDO = 16         # ms entre cuadros mientras suena (~60 fps)
 RADIO = 12               # esquinas de los paneles de Caudal
-FPS_QUIETO = 40          # en pausa solo se mueve el fondo, mas despacio
+# ms entre cuadros: fluido (~60 fps) solo mientras algo se mueve de verdad (el paso de una linea a
+# otra, la ola, la rueda); entre lineas basta ~20 fps para el relleno del karaoke y el fondo, que
+# se mueve muy despacio; en pausa, sin letra o sin sincronizar solo queda el fondo (~7 fps)
+FPS_SONANDO = 16
+FPS_REPOSO = 50
+FPS_QUIETO = 150
+FPS_DORMIDO = 300        # ventana minimizada u oculta: solo mira si vuelve a verse
+VEL_QUIETA = 18.0        # px/s: más lento que esto ya no hace falta ir a 60 fps
 
 
 # ------------------------------------------------------------------ colores
@@ -230,6 +238,7 @@ class LienzoLetra(QWidget):
         self._pos_base = 0.0
         self._pos_reloj = time.monotonic()
         self._rutas = {}             # brillo de la linea actual (caminos de texto)
+        self._moviendo = True        # hay una transicion en marcha: cuadros fluidos
 
         self.reloj = QTimer(self)
         self.reloj.setTimerType(Qt.PreciseTimer)
@@ -238,11 +247,15 @@ class LienzoLetra(QWidget):
         r = ctx.reproductor
         r.pista_cambio.connect(self._pista)
         r.posicion_cambio.connect(self._posicion)
-        r.estado_cambio.connect(lambda _e: self._ritmo())
+        r.estado_cambio.connect(self._al_estado)
 
     # ----------------------------------------------------------- tiempo
     def _posicion(self, seg):
-        self._pos_base = float(seg or 0)
+        seg = float(seg or 0)
+        # un salto (buscar, otra cancion) mueve la letra: cuadros fluidos hasta que se asiente
+        if abs(seg - self.ahora_ms() / 1000) > 1.0:
+            self._despertar()
+        self._pos_base = seg
         self._pos_reloj = time.monotonic()
 
     def ahora_ms(self):
@@ -254,14 +267,39 @@ class LienzoLetra(QWidget):
             pos += pasado * float(getattr(r, "velocidad", 1.0) or 1.0)
         return pos * 1000
 
+    def _al_estado(self, _e=None):
+        self._ritmo()
+
     def _ritmo(self):
         if not self.isVisible():
             self.reloj.stop()
             return
-        sonando = getattr(self.ctx.reproductor, "estado", "") == "sonando"
-        ms = FPS_SONANDO if sonando else FPS_QUIETO
+        ms = self._ms_objetivo()
         if not self.reloj.isActive() or self.reloj.interval() != ms:
             self.reloj.start(ms)
+
+    def _ms_objetivo(self):
+        """Cuántos ms hasta el siguiente cuadro, según lo que se ve ahora."""
+        if not a_la_vista(self):
+            return FPS_DORMIDO
+        if self._moviendo:
+            return FPS_SONANDO
+        sonando = getattr(self.ctx.reproductor, "estado", "") == "sonando"
+        if not (sonando and self.lineas and self.sincronizada):
+            return FPS_QUIETO
+        # justo antes de que entre la siguiente linea se pasa a fluido: el salto se ve suave
+        sig = self._actual + 1
+        if 0 <= sig < len(self.lineas) and self.lineas[sig]["ms"] is not None:
+            falta = self.lineas[sig]["ms"] - (self.ahora_ms() + ADELANTO_MS)
+            if falta < FPS_REPOSO + 10:
+                return FPS_SONANDO
+        return FPS_REPOSO
+
+    def _despertar(self):
+        """Algo cambió por la persona (rueda, raton, clic): cuadros fluidos ya."""
+        self._moviendo = True
+        if self.isVisible() and (not self.reloj.isActive() or self.reloj.interval() != FPS_SONANDO):
+            self.reloj.start(FPS_SONANDO)
 
     def showEvent(self, e):
         super().showEvent(e)
@@ -350,6 +388,7 @@ class LienzoLetra(QWidget):
         self._rutas = {}
         self._items = []
         self._scroll = 0.0
+        self._despertar()
         self.update()
 
     # ----------------------------------------------------------- medidas
@@ -417,9 +456,18 @@ class LienzoLetra(QWidget):
     # ----------------------------------------------------------- animacion
     def _cuadro(self):
         ahora = time.monotonic()
+        if not a_la_vista(self):
+            # minimizada u oculta en la bandeja: no se calcula ni se pinta nada
+            self._ultimo_cuadro = ahora
+            if self.reloj.interval() != FPS_DORMIDO:
+                self.reloj.start(FPS_DORMIDO)
+            return
         dt = min(0.1, ahora - self._ultimo_cuadro)
         self._ultimo_cuadro = ahora
         self._pulso = _suave(self._pulso, 0.0, dt, 2.2)
+        # «se mueve» = algo avanza más de ~1 px por cuadro a 20 fps (VEL_QUIETA px/s): por
+        # debajo, 20 cuadros por segundo se ven igual de suaves que 60
+        moviendo = self._pulso > 0.3
         if self.lineas:
             self._repartir()
             i = self._indice(self.ahora_ms())
@@ -438,16 +486,29 @@ class LienzoLetra(QWidget):
             else:
                 objetivo = -self.margen_arriba - 30
             if time.monotonic() - self._ultimo_toque > 3.5:
-                self._manual = _suave(self._manual, 0.0, dt, 4.0)
+                self._manual = _suave(self._manual, 0.0, dt, 4.0)    # vuelve sola a lo que suena
+                if abs(self._manual) * 4.0 > VEL_QUIETA:
+                    moviendo = True
             self._scroll = _suave(self._scroll, objetivo, dt, 7.0)
+            if abs(self._scroll - objetivo) * 7.0 > VEL_QUIETA:
+                moviendo = True
             for k, it in enumerate(self._items):
                 destino = it["y"] - self._scroll - self._manual
                 if it["yv"] is None:
                     it["yv"] = destino
                 # ola: cuanto mas lejos de la actual, mas tarda en llegar
                 d = abs(k - self._actual) if self._actual >= 0 else 0
-                it["yv"] = _suave(it["yv"], destino, dt, max(3.2, 9.5 - d * 1.1))
-                it["foco"] = _suave(it["foco"], 1.0 if k == self._actual else 0.0, dt, 9.0)
+                rapidez = max(3.2, 9.5 - d * 1.1)
+                it["yv"] = _suave(it["yv"], destino, dt, rapidez)
+                foco = 1.0 if k == self._actual else 0.0
+                it["foco"] = _suave(it["foco"], foco, dt, 9.0)
+                if not moviendo and (abs(it["yv"] - destino) * rapidez > VEL_QUIETA
+                                     or abs(it["foco"] - foco) > 0.02):
+                    moviendo = True
+        self._moviendo = moviendo
+        ms = self._ms_objetivo()
+        if self.reloj.interval() != ms:
+            self.reloj.start(ms)
         self.update()
 
     # ----------------------------------------------------------- pintura
@@ -655,7 +716,10 @@ class LienzoLetra(QWidget):
     def mouseMoveEvent(self, e):
         k = self._item_en(e.position().y())
         ok = k >= 0 and self.sincronizada and not self.lineas[k]["pausa"]
-        self._encima = k if ok else -1
+        nuevo = k if ok else -1
+        if nuevo != self._encima:
+            self._encima = nuevo
+            self.update()
         self.setCursor(Qt.PointingHandCursor if ok else Qt.ArrowCursor)
 
     def leaveEvent(self, e):
@@ -671,14 +735,14 @@ class LienzoLetra(QWidget):
             self._manual = 0.0
             self.ctx.reproductor.buscar(max(0, self.lineas[k]["ms"]) / 1000)
             self._posicion(max(0, self.lineas[k]["ms"]) / 1000)
+            self._despertar()
 
     def wheelEvent(self, e):
         self._ultimo_toque = time.monotonic()
         self._manual -= e.angleDelta().y() * 0.9
         alto = getattr(self, "_alto_total", 0)
         self._manual = max(-alto, min(alto, self._manual))
-        if not self.reloj.isActive():
-            self._ritmo()
+        self._despertar()
         e.accept()
 
     # ----------------------------------------------------------- tarjeta

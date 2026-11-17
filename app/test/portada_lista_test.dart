@@ -111,6 +111,27 @@ void main() {
     await c.cerrar();
   });
 
+  test('mosaico: solo lee las primeras canciones, en orden, sin repetir ni vacías', () async {
+    final c = await Coleccion.abrirEn('${tmp.path}/m.db');
+    final id = await c.crearLista('Larga');
+    final pistas = [
+      {'clave': 'yt:0', 'titulo': '0', 'miniatura': ''},
+      {'clave': 'yt:1', 'titulo': '1', 'miniatura': 'https://x/a.jpg'},
+      {'clave': 'yt:2', 'titulo': '2', 'miniatura': 'https://x/a.jpg'},
+      for (var i = 3; i < 500; i++) {'clave': 'yt:$i', 'titulo': '$i', 'miniatura': 'https://x/$i.jpg'},
+    ];
+    await c.agregarALista(id, pistas); // guarda tambien las pistas, en una transaccion
+    // una que falta en `pistas` (p. ej. borrada) no corta el mosaico
+    await c.db.delete('pistas', where: 'clave = ?', whereArgs: ['yt:3']);
+    expect(await c.portadasDeLista(id), ['https://x/a.jpg', 'https://x/4.jpg', 'https://x/5.jpg', 'https://x/6.jpg']);
+    expect(await c.portadasDeLista(id, 1), ['https://x/a.jpg']);
+    // ya no hace falta leer las 500: las consultas llevan LIMIT
+    final sinMiniaturas = await c.crearLista('Sin fotos');
+    await c.agregarALista(sinMiniaturas, [for (var i = 0; i < 60; i++) {'clave': 'yt:s$i', 'titulo': 's$i'}]);
+    expect(await c.portadasDeLista(sinMiniaturas), isEmpty, reason: 'mira como mucho 40 y para');
+    await c.cerrar();
+  });
+
   test('una imagen que no es imagen lanza error y no toca la portada', () async {
     final c = await Coleccion.abrirEn('${tmp.path}/c.db');
     final id = await c.crearLista('X');

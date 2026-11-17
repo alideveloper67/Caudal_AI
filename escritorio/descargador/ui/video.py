@@ -345,13 +345,12 @@ class VistaVideo(QWidget):
         v.addWidget(self.controles)
 
         self.r.pista_cambio.connect(self._pista)
-        self.r.estado_cambio.connect(lambda e: (self.bt_play.set_sonando(e == "sonando"),
-                                                self.bt_play.set_cargando(e == "cargando")))
+        self.r.estado_cambio.connect(self._estado_play)
         self.r.posicion_cambio.connect(self._posicion)
         self.r.duracion_cambio.connect(self._duracion)
         self.r.calidad_cambio.connect(self._calidad)
         self.r.video_listo.connect(self._video_listo)
-        self.r.modo_cambio.connect(lambda _m: self._escena())
+        self.r.modo_cambio.connect(self._al_cambiar_modo)
         self._pista(self.r.actual)
         self._escena()
 
@@ -397,6 +396,14 @@ class VistaVideo(QWidget):
         """¿Toca el modo ambiente? Cuando suena solo el audio, o cuando el video
         se esta viendo en el mini reproductor."""
         return self.r.modo != "video" or self.r.destino_video != "principal"
+
+    # métodos ligados (no lambdas): PySide suelta la conexión sola al destruir el widget
+    def _estado_play(self, e):
+        self.bt_play.set_sonando(e == "sonando")
+        self.bt_play.set_cargando(e == "cargando")
+
+    def _al_cambiar_modo(self, _m):
+        self._escena()
 
     def _escena(self):
         ambiente = self.en_ambiente()
@@ -678,10 +685,9 @@ class MiniReproductor(QWidget):
         self._agarre = agarre
 
         self.r.pista_cambio.connect(self._pista)
-        self.r.estado_cambio.connect(lambda e: (self.bt_play.set_sonando(e == "sonando"),
-                                                self.bt_play.set_cargando(e == "cargando")))
+        self.r.estado_cambio.connect(self._estado_play)
         self.r.posicion_cambio.connect(self._pos)
-        self.r.duracion_cambio.connect(lambda d: setattr(self, "_dur", float(d or 0)))
+        self.r.duracion_cambio.connect(self._al_duracion)
         self.r.modo_cambio.connect(self._modo)
         self.r.video_listo.connect(self._video_listo)
         self._pista(self.r.actual)
@@ -733,6 +739,13 @@ class MiniReproductor(QWidget):
 
     def _video_listo(self, _datos):
         pass
+
+    def _estado_play(self, e):
+        self.bt_play.set_sonando(e == "sonando")
+        self.bt_play.set_cargando(e == "cargando")
+
+    def _al_duracion(self, d):
+        self._dur = float(d or 0)
 
     def _modo(self, modo):
         self.pila.setCurrentIndex(0 if modo == "video" else 1)

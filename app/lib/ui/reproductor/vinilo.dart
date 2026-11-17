@@ -29,7 +29,10 @@ class _VinilVistaState extends State<VinilVista> with SingleTickerProviderStateM
   static const _segundosPorVuelta = 1.8; // 33⅓ rpm
   late final Ticker _reloj;
   Duration _antes = Duration.zero;
-  double _angulo = 0; // en vueltas
+
+  /// El giro en vueltas: solo lo escucha la etiqueta (sin reconstruir el
+  /// tocadiscos ni repintar el disco y el brillo, que son fijos).
+  final _angulo = ValueNotifier<double>(0);
   double _vel = 0; // 0 parado · 1 velocidad de reproducción
 
   @override
@@ -58,15 +61,15 @@ class _VinilVistaState extends State<VinilVista> with SingleTickerProviderStateM
     if (!widget.sonando && _vel < 0.004) {
       _vel = 0;
       _reloj.stop();
-      setState(() {});
       return;
     }
-    setState(() => _angulo = (_angulo + _vel * dt / _segundosPorVuelta) % 1.0);
+    _angulo.value = (_angulo.value + _vel * dt / _segundosPorVuelta) % 1.0;
   }
 
   @override
   void dispose() {
     _reloj.dispose();
+    _angulo.dispose();
     super.dispose();
   }
 
@@ -105,43 +108,51 @@ class _VinilVistaState extends State<VinilVista> with SingleTickerProviderStateM
           top: (w * 0.92 - disco) / 2,
           width: disco,
           height: disco,
-          child: RepaintBoundary(
-            child: Stack(fit: StackFit.expand, children: [
-              CustomPaint(painter: _DiscoPintor()),
-              // la etiqueta (la carátula) gira con el disco
-              Center(
-                child: Transform.rotate(
-                  angle: _angulo * 2 * pi,
-                  child: SizedBox(
-                    width: disco * 0.36,
-                    height: disco * 0.36,
-                    child: Stack(fit: StackFit.expand, children: [
-                      ClipOval(child: Portada(url: widget.url, lado: disco * 0.36, circulo: true)),
-                      // una marca en la etiqueta para que se note el giro
-                      Align(
-                        alignment: const Alignment(0, -0.82),
-                        child: Container(
-                          width: disco * 0.018,
-                          height: disco * 0.018,
-                          decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.85), shape: BoxShape.circle),
+          child: Stack(fit: StackFit.expand, children: [
+            // el disco con sus surcos: fijo, se pinta una vez
+            RepaintBoundary(child: CustomPaint(painter: _DiscoPintor())),
+            // la etiqueta (la carátula) gira con el disco: solo se recompone
+            // su capa (la imagen de la etiqueta va en su propia capa y no se repinta)
+            Center(
+              child: RepaintBoundary(
+                child: AnimatedBuilder(
+                  animation: _angulo,
+                  child: RepaintBoundary(
+                    child: SizedBox(
+                      width: disco * 0.36,
+                      height: disco * 0.36,
+                      child: Stack(fit: StackFit.expand, children: [
+                        ClipOval(child: Portada(url: widget.url, lado: disco * 0.36, circulo: true)),
+                        // una marca en la etiqueta para que se note el giro
+                        Align(
+                          alignment: const Alignment(0, -0.82),
+                          child: Container(
+                            width: disco * 0.018,
+                            height: disco * 0.018,
+                            decoration: BoxDecoration(color: Colors.white.withValues(alpha: 0.85), shape: BoxShape.circle),
+                          ),
                         ),
-                      ),
-                    ]),
+                      ]),
+                    ),
+                  ),
+                  builder: (_, etiqueta) => Transform.rotate(angle: _angulo.value * 2 * pi, child: etiqueta),
+                ),
+              ),
+            ),
+            // el agujero central y el brillo de la luz (fijos: no giran con el disco)
+            RepaintBoundary(
+              child: Stack(fit: StackFit.expand, children: [
+                Center(
+                  child: Container(
+                    width: disco * 0.035,
+                    height: disco * 0.035,
+                    decoration: const BoxDecoration(color: Color(0xFF0B0D12), shape: BoxShape.circle),
                   ),
                 ),
-              ),
-              // el agujero central
-              Center(
-                child: Container(
-                  width: disco * 0.035,
-                  height: disco * 0.035,
-                  decoration: const BoxDecoration(color: Color(0xFF0B0D12), shape: BoxShape.circle),
-                ),
-              ),
-              // el brillo de la luz (fijo: no gira con el disco)
-              CustomPaint(painter: _BrilloPintor(widget.color)),
-            ]),
-          ),
+                CustomPaint(painter: _BrilloPintor(widget.color)),
+              ]),
+            ),
+          ]),
         ),
         // el brazo
         Positioned.fill(

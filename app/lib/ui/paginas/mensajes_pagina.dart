@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../../nucleo/vida_app.dart';
 import '../../nucleo/chat.dart';
 import '../../nucleo/coleccion.dart';
 import '../../nucleo/nube.dart';
@@ -47,8 +48,14 @@ class MensajesPagina extends StatefulWidget {
 class _MensajesPaginaState extends State<MensajesPagina> {
   List<ResumenChat>? _chats;
   String? _error_;
-  Timer? _reloj;
   ControladorAmigos? _amigos;
+
+  /// Cada 8 s, solo con la app a la vista y esta pantalla delante.
+  late final Sondeo _sondeo = Sondeo(const Duration(seconds: 8), () async {
+    if (!mounted) return;
+    _amigos?.cargar();
+    await _cargar();
+  });
 
   @override
   void initState() {
@@ -57,15 +64,18 @@ class _MensajesPaginaState extends State<MensajesPagina> {
       setState(() => _amigos = ControladorAmigos(socialDe(context))..cargar());
       _cargar();
     });
-    _reloj = Timer.periodic(const Duration(seconds: 8), (_) {
-      _cargar();
-      _amigos?.cargar();
-    });
+    _sondeo.iniciar();
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _sondeo.seguirPantalla(context);
   }
 
   @override
   void dispose() {
-    _reloj?.cancel();
+    _sondeo.detener();
     _amigos?.dispose();
     super.dispose();
   }
@@ -431,8 +441,13 @@ class _ConversacionPaginaState extends State<ConversacionPagina> {
   int _enCamino = 0;
   bool _cargado = false;
   String? _errorCarga;
-  Timer? _reloj;
   Chat? _chat;
+
+  /// Mensajes nuevos cada 3 s, solo con la conversacion a la vista; al volver
+  /// a ella (o a la app) se consulta en el acto.
+  late final Sondeo _sondeo = Sondeo(const Duration(seconds: 3), () async {
+    if (mounted && _chat != null) await _nuevos();
+  });
 
   @override
   void initState() {
@@ -441,13 +456,19 @@ class _ConversacionPaginaState extends State<ConversacionPagina> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _chat = chatDe(context);
       _cargar();
-      _reloj = Timer.periodic(const Duration(seconds: 3), (_) => _nuevos());
+      _sondeo.iniciar();
     });
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _sondeo.seguirPantalla(context);
+  }
+
+  @override
   void dispose() {
-    _reloj?.cancel();
+    _sondeo.detener();
     _campo.dispose();
     _scroll.dispose();
     super.dispose();

@@ -206,7 +206,10 @@ def gusto(col, ahora=None):
     hoy = ahora or datetime.now()
     historial = mixes.leer_historial(col, desde=hoy - timedelta(days=180), limite=8000)
     try:
-        me_gusta = col.lista_me_gusta()[:400]
+        try:
+            me_gusta = col.lista_me_gusta(limite=400)     # solo los 400 primeros, no todos
+        except TypeError:                                 # colecciones de prueba sin `limite`
+            me_gusta = col.lista_me_gusta()[:400]
     except Exception:  # noqa: BLE001
         me_gusta = []
     return Gusto.desde(historial, col.estado(CLAVE_SALTOS, None) or {}, ahora=hoy,
@@ -741,10 +744,49 @@ def descubrir(col, ahora=None):
     return m
 
 
+_CACHE_TIEMPO = {}      # (base, día, escuchas de antes de hoy) -> resultado
+
+
+def _huella_tiempo(col, hoy):
+    """Lo que decide la máquina del tiempo de hoy: cuántas escuchas hay de antes de hoy (y en
+    total, por si el mes pasado aún se rellena con los últimos 30 días). None si no se puede."""
+    try:
+        medianoche = hoy.replace(hour=0, minute=0, second=0, microsecond=0).timestamp()
+        f = col.con.execute("SELECT COUNT(*), SUM(fecha < ?) FROM reproducciones", (medianoche,)).fetchone()
+        return (str(getattr(col, "archivo", id(col))), mixes.clave_dia(hoy), int(f[1] or 0)), int(f[0] or 0)
+    except Exception:  # noqa: BLE001
+        return None, 0
+
+
 def maquina_del_tiempo_de(col, ahora=None):
-    """«Vuelve en el tiempo»: tu mes pasado primero y después lo de hace meses."""
+    """«Vuelve en el tiempo»: tu mes pasado primero y después lo de hace meses.
+
+    Lee hasta un año de escuchas: el resultado se guarda para el resto del día (solo depende
+    de lo escuchado antes de hoy; si el mes pasado aún tira de los últimos 30 días, también
+    se rehace al sumar escuchas de hoy)."""
     hoy = ahora or datetime.now()
+    clave, total = _huella_tiempo(col, hoy)
+    if clave is not None:
+        guardado = _CACHE_TIEMPO.get(clave)
+        if guardado is not None and (not guardado["usa_hoy"] or guardado["total"] == total):
+            return list(guardado["valor"])
     historial = mixes.leer_historial(col, desde=hoy - timedelta(days=380))
     salida = maquina_del_tiempo(historial, ahora=hoy)
     mes = mes_pasado(historial, ahora=hoy)
-    return ([mes] if mes else []) + salida
+    valor = ([mes] if mes else []) + salida
+    if clave is not None:
+        if len(_CACHE_TIEMPO) > 8:
+            _CACHE_TIEMPO.clear()
+        usa_hoy = mes is None or mes.get("titulo") == "Tu último mes"
+        _CACHE_TIEMPO[clave] = {"valor": valor, "usa_hoy": usa_hoy, "total": total}
+    return list(valor)
+
+
+def maquina_del_tiempo_en_memoria(col, ahora=None):
+    """El resultado de hoy si ya está calculado (sin tocar el historial), o None."""
+    hoy = ahora or datetime.now()
+    clave, total = _huella_tiempo(col, hoy)
+    guardado = _CACHE_TIEMPO.get(clave) if clave is not None else None
+    if guardado is not None and (not guardado["usa_hoy"] or guardado["total"] == total):
+        return list(guardado["valor"])
+    return None
