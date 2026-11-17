@@ -36,12 +36,19 @@ class PaginaBiblioteca(Pagina):
         traer.setToolTip("De Spotify, Apple Music o YouTube Music")
         traer.clicked.connect(lambda: ctx.ventana._traer_lista())
         cab.addWidget(traer)
+        codigo = QPushButton("  Tengo un código")
+        codigo.setObjectName("contorno")
+        codigo.setIcon(iconos.icono("compartir", 15, C["texto"]))
+        codigo.setToolTip("Unirte a una lista que te compartieron")
+        codigo.clicked.connect(lambda: ctx.tengo_un_codigo())
+        cab.addWidget(codigo)
         cab.addWidget(nueva)
         self.cuerpo.addLayout(cab)
         chips = QHBoxLayout()
         chips.setSpacing(8)
         self.chips = {}
-        for clave, texto in (("todo", "Todo"), ("listas", "Listas"), ("albumes", "Álbumes"),
+        for clave, texto in (("todo", "Todo"), ("listas", "Listas"), ("compartidas", "Compartidas"),
+                             ("albumes", "Álbumes"),
                              ("artistas", "Artistas"), ("disco", "En tu disco")):
             c = Chip(texto)
             c.setChecked(clave == self.filtro)
@@ -59,6 +66,7 @@ class PaginaBiblioteca(Pagina):
         for s in (ctx.listas_cambio, ctx.guardados_cambio, ctx.descargas_cambio):
             s.connect(self._pintar)
         self._pintar()
+        self._traer_compartidas()
 
     def _filtrar(self, clave):
         self.filtro = clave
@@ -66,11 +74,35 @@ class PaginaBiblioteca(Pagina):
             c.setChecked(k == clave)
         self._pintar()
 
+    def _compartidas(self):
+        from ... import listas_compartidas as LC
+        datos = LC.ultima_conocida("mis_compartidas")
+        return datos if datos is not None else LC.compartidas_guardadas(self.ctx.coleccion)
+
+    def _traer_compartidas(self):
+        """Las listas de otras personas: se pinta lo último que se sabía y se actualiza en segundo plano."""
+        from ... import listas_compartidas as LC
+        from ...hilos import en_segundo_plano
+        from ..contexto import nube_de
+        nube = nube_de(self.ctx)
+        if nube is None or LC.en_cache("mis_compartidas", 20) is not None:
+            return
+
+        def listo(filas):
+            anterior = self._compartidas()
+            LC.guardar_cache("mis_compartidas", filas)
+            LC.guardar_compartidas(self.ctx.coleccion, filas)
+            if filas != anterior:
+                self._pintar()
+        en_segundo_plano(nube.mis_compartidas, ok=listo, error=lambda _e: None, dueno=self)
+
     def _pintar(self, *_):
         _borrar_layout(self.zv)
         col = self.ctx.coleccion
         f = self.filtro
         el = []
+        from ... import listas_compartidas as LC
+        mias_comp = {u for u in LC.codigos_guardados(col)}
         if f in ("todo", "listas"):
             n = col.total_me_gusta()
             el.append({"tipo": "me_gusta", "titulo": "Tus me gusta",
@@ -78,7 +110,8 @@ class PaginaBiblioteca(Pagina):
             for l in col.listas():
                 portadas = col.portadas_de_lista(l["id"], 1)
                 el.append({"tipo": "mi_lista", "id": l["id"], "titulo": l["nombre"],
-                           "subtitulo": f"Lista • {l['n']} canciones",
+                           "subtitulo": f"Lista • {l['n']} canciones"
+                                        + (" • Compartida" if l.get("uuid") in mias_comp else ""),
                            "miniatura": portadas[0] if portadas else ""})
             el += col.guardados("lista")
         if f in ("todo", "albumes"):
@@ -87,9 +120,23 @@ class PaginaBiblioteca(Pagina):
             el += [dict(g, subtitulo="Artista") for g in col.guardados("artista")]
         if f == "disco":
             el += col.descargadas()[:300]
-        if not el:
+        comp = []
+        if f in ("todo", "listas", "compartidas"):
+            comp = [{"tipo": "lista_compartida", "id": c["id"], "titulo": c["nombre"],
+                     "subtitulo": "Compartida · " + LC.nombre_persona(c["dueno"]),
+                     "rol": c["rol"], "dueno": c["dueno"], "miniatura": ""}
+                    for c in self._compartidas()]
+        if not el and not comp and f != "compartidas":
             from ..componentes import SinResultados
             self.zv.addWidget(SinResultados("biblioteca", "Aquí no hay nada todavía",
                                             "Guarda álbumes, sigue artistas o crea listas."))
             return
-        self.zv.addWidget(Rejilla(self.ctx, "", el))
+        if el:
+            self.zv.addWidget(Rejilla(self.ctx, "", el))
+        if comp:
+            self.zv.addSpacing(18)
+            self.zv.addWidget(Rejilla(self.ctx, "Listas compartidas", comp))
+        elif f == "compartidas":
+            from ..componentes import SinResultados
+            self.zv.addWidget(SinResultados("compartir", "Aquí aparecerán las listas que compartan contigo",
+                                            "Pulsa «Tengo un código» y escribe el que te pasaron."))

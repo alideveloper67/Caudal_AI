@@ -3,13 +3,14 @@ import 'dart:async';
 import 'coleccion.dart';
 import 'nube.dart';
 import 'social.dart' show Relacion;
+import 'tarjeta_lista.dart';
 
 /// Mensajes entre dos personas (como los de Spotify): texto y canciones.
 /// Todo pasa por Supabase con las reglas de supabase/esquema.sql: cada uno
 /// solo ve sus conversaciones.
 class ResumenChat {
   ResumenChat({required this.id, required this.otro, required this.usuario, required this.nombre,
-      required this.ultimo, this.ultimoTexto = '', this.ultimaPista, this.ultimoMio = false, this.sinLeer = 0,
+      required this.ultimo, this.ultimoTexto = '', this.ultimaPista, this.ultimaLista, this.ultimoMio = false, this.sinLeer = 0,
       this.fotoUrl = ''});
 
   final String id;
@@ -19,6 +20,9 @@ class ResumenChat {
   final DateTime ultimo;
   final String ultimoTexto;
   final Json? ultimaPista;
+
+  /// La última cosa que se mandó fue una lista (tarjeta).
+  final TarjetaLista? ultimaLista;
   final bool ultimoMio;
   final int sinLeer;
 
@@ -34,6 +38,7 @@ class ResumenChat {
     if (ultimaPista != null) {
       return '$quien♪ ${ultimaPista!['titulo'] ?? 'Una canción'}';
     }
+    if (ultimaLista != null) return '$quien${ultimaLista!.vistaPrevia}';
     if (ultimoTexto.isEmpty) return 'Di hola 👋';
     return '$quien$ultimoTexto';
   }
@@ -46,6 +51,7 @@ class ResumenChat {
         ultimo: DateTime.tryParse('${d['ultimo']}')?.toLocal() ?? DateTime.now(),
         ultimoTexto: '${d['ultimo_texto'] ?? ''}',
         ultimaPista: d['ultimo_pista'] is Map ? Map<String, dynamic>.from(d['ultimo_pista'] as Map) : null,
+        ultimaLista: TarjetaLista.desde(d['ultimo_lista']),
         ultimoMio: '${d['ultimo_autor']}' == yo,
         sinLeer: (d['sin_leer'] as num?)?.toInt() ?? 0,
         fotoUrl: '${d['foto_url'] ?? ''}',
@@ -53,11 +59,14 @@ class ResumenChat {
 }
 
 class Mensaje {
-  Mensaje({required this.id, required this.autor, required this.texto, this.pista, required this.creado});
+  Mensaje({required this.id, required this.autor, required this.texto, this.pista, this.lista, required this.creado});
   final int id;
   final String autor;
   final String texto;
   final Json? pista;
+
+  /// Una lista compartida que viaja en el mensaje (tarjeta con botón «Unirme»).
+  final TarjetaLista? lista;
   final DateTime creado;
 
   factory Mensaje.desde(Map d) => Mensaje(
@@ -65,6 +74,7 @@ class Mensaje {
         autor: '${d['autor']}',
         texto: '${d['texto'] ?? ''}',
         pista: d['pista'] is Map ? Chat.pistaJugable(Map<String, dynamic>.from(d['pista'] as Map)) : null,
+        lista: TarjetaLista.desde(d['lista']),
         creado: DateTime.tryParse('${d['creado']}')?.toLocal() ?? DateTime.now(),
       );
 }
@@ -122,17 +132,19 @@ class Chat {
     final filtro = desde > 0 ? '&id=gt.$desde' : '';
     final orden = desde > 0 ? 'id.asc' : 'id.desc';
     final r = await sesion.pedir('GET',
-        'mensajes?chat=eq.$chat$filtro&select=id,autor,texto,pista,creado&order=$orden&limit=$limite');
+        'mensajes?chat=eq.$chat$filtro&select=id,autor,texto,pista,lista,creado&order=$orden&limit=$limite');
     final l = [for (final d in (r as List? ?? const [])) if (d is Map) Mensaje.desde(d)];
     return desde > 0 ? l : l.reversed.toList();
   }
 
-  Future<Mensaje> enviar(String chat, {String texto = '', Json? pista}) async {
+  /// Manda texto, una canción o una lista (tarjeta).
+  Future<Mensaje> enviar(String chat, {String texto = '', Json? pista, TarjetaLista? lista}) async {
     final r = await sesion.pedir('POST', 'mensajes',
         cuerpo: {
           'chat': chat,
           'texto': texto.trim(),
           if (pista != null) 'pista': Coleccion.paraNube(pista),
+          if (lista != null) 'lista': lista.aJson(),
         },
         cabeceras: {'Prefer': 'return=representation'});
     return Mensaje.desde((r as List).first as Map);

@@ -5,6 +5,8 @@ supabase/esquema.sql: cada uno solo ve sus conversaciones."""
 
 from datetime import datetime
 
+from .nube import ErrorNube
+
 
 def _fecha(texto):
     try:
@@ -30,6 +32,8 @@ def vista_previa(c, yo):
     quien = "Tú: " if str(c.get("ultimo_autor")) == str(yo) else ""
     if c.get("ultimo_pista"):
         return f"{quien}♪ {c['ultimo_pista'].get('titulo') or 'Una canción'}"
+    if c.get("ultimo_lista"):
+        return f"{quien}📋 Lista «{c['ultimo_lista'].get('nombre') or 'sin nombre'}»"
     if not c.get("ultimo_texto"):
         return "Di hola 👋"
     return quien + c["ultimo_texto"]
@@ -41,6 +45,9 @@ def para_nube(p):
 
 
 class Chat:
+    # ¿la base ya conoce mensajes.lista? (supabase/listas.sql). Si todavía no, el chat sigue como antes.
+    _con_lista = True
+
     def __init__(self, sesion):
         self.sesion = sesion
 
@@ -96,19 +103,30 @@ class Chat:
     def mensajes(self, chat, desde=0, limite=200):
         filtro = f"&id=gt.{int(desde)}" if desde else ""
         orden = "id.asc" if desde else "id.desc"
-        filas = self.sesion.pedir(
-            "GET", f"mensajes?chat=eq.{chat}{filtro}&select=id,autor,texto,pista,creado"
-                   f"&order={orden}&limit={limite}") or []
+
+        def pedir(columnas):
+            return self.sesion.pedir(
+                "GET", f"mensajes?chat=eq.{chat}{filtro}&select={columnas}&order={orden}&limit={limite}") or []
+        try:
+            filas = pedir("id,autor,texto,pista,lista,creado" if Chat._con_lista else "id,autor,texto,pista,creado")
+        except ErrorNube:
+            if not Chat._con_lista:
+                raise
+            Chat._con_lista = False       # la base aún no tiene tarjetas de lista
+            filas = pedir("id,autor,texto,pista,creado")
         for f in filas:
             f["fecha"] = _fecha(f.get("creado"))
             if f.get("pista"):
                 f["pista"] = pista_jugable(f["pista"])
         return filas if desde else list(reversed(filas))
 
-    def enviar(self, chat, texto="", pista=None):
+    def enviar(self, chat, texto="", pista=None, lista=None):
+        """`lista`: la tarjeta de una lista compartida {codigo, nombre, canciones, rol}."""
         cuerpo = {"chat": chat, "texto": (texto or "").strip()}
         if pista is not None:
             cuerpo["pista"] = para_nube(pista)
+        if lista is not None:
+            cuerpo["lista"] = lista
         filas = self.sesion.pedir("POST", "mensajes", json=cuerpo,
                                   cabeceras={"Prefer": "return=representation"})
         m = filas[0]

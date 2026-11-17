@@ -273,6 +273,52 @@ class Deslizador(QWidget):
         self.setCursor(Qt.PointingHandCursor)
         self.setMouseTracking(True)
         self._x_raton = None
+        self._alto_base = alto
+        self._mascota = None          # GestorMascota (solo la barra del reproductor la usa)
+        self._reproductor = None
+        self._cuadro = 0
+        self._fase = 0.0
+        self._reloj = None
+
+    # ---- mascotita que camina sobre la barra (exclusiva de donadores y fundadores)
+    ESCALA_MASCOTA = 1
+
+    def poner_mascota(self, gestor, reproductor):
+        self._mascota = gestor
+        self._reproductor = reproductor
+        self._reloj = QTimer(self)
+        self._reloj.setInterval(170)
+        self._reloj.timeout.connect(self._paso_mascota)
+        gestor.cambiada.connect(self._mascota_cambio)
+        reproductor.estado_cambio.connect(lambda _e: self._mascota_cambio())
+        self._mascota_cambio()
+
+    def _mascota_cambio(self):
+        datos = self._mascota.datos() if self._mascota else None
+        if datos:
+            self.setFixedHeight(self._alto_base + int(datos["alto"] * self.ESCALA_MASCOTA) - 8)
+            sonando = getattr(self._reproductor, "estado", "") == "sonando"
+            if sonando and not self._reloj.isActive():
+                self._reloj.start()
+            elif not sonando:
+                self._reloj.stop()
+                self._cuadro = 0
+        else:
+            self.setFixedHeight(self._alto_base)
+            if self._reloj:
+                self._reloj.stop()
+        self.alto_cambiado()
+        self.update()
+
+    def alto_cambiado(self):
+        """Gancho para que quien contiene la barra se ajuste (la barra crece con la mascota)."""
+
+    def _paso_mascota(self):
+        from .. import mascotas
+        datos = self._mascota.datos() if self._mascota else None
+        self._cuadro = (self._cuadro + 1) % mascotas.num_cuadros(datos)
+        self._fase += 0.9
+        self.update()
 
     def set_valor(self, v):
         if self.arrastrando:
@@ -336,7 +382,8 @@ class Deslizador(QWidget):
         p.setRenderHint(QPainter.Antialiasing, True)
         margen = 6
         ancho = self.width() - 2 * margen
-        y = self.height() / 2
+        datos = self._mascota.datos() if self._mascota else None
+        y = (self.height() - self._alto_base / 2) if datos else self.height() / 2
         grosor = 4
         pista = QRectF(margen, y - grosor / 2, ancho, grosor)
         p.setPen(Qt.NoPen)
@@ -355,6 +402,12 @@ class Deslizador(QWidget):
         if activo:
             p.setBrush(QColor("#FFFFFF"))
             p.drawEllipse(QPointF(margen + ancho * self.valor, y), 6, 6)
+        if datos:
+            self._pintar_mascota(p, datos, margen + ancho * self.valor, y, margen)
+
+    def _pintar_mascota(self, p, datos, x, y, margen):
+        from .. import mascotas
+        mascotas.pintar(p, datos, x, y, margen, self.width(), self._cuadro, self._fase, self.ESCALA_MASCOTA)
 
 
 # ---------------------------------------------------------------- filas

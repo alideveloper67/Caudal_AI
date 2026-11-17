@@ -17,7 +17,7 @@ C = {
     "borde_claro": "#363D4B",
     "texto":       "#F3F5F9",
     "texto2":      "#A9B1C0",
-    "texto3":      "#6F788A",
+    "texto3":      "#8993A6",   # antes #6F788A: con 4,4:1 de contraste cansaba la vista; ahora 6:1
     "acento":      "#22D3EE",
     "acento_alto": "#67E8F9",
     "acento_bajo": "#0EA5C6",
@@ -50,6 +50,58 @@ FONDOS = {
     "bosque": ("Bosque", "#050D0A", "#0C1813", "#111F19", "#172A22", "#20372D", "#1A2D25", "#1C3027"),
     "grafito": ("Grafito", "#121316", "#1A1C20", "#202227", "#282B31", "#33373E", "#2B2E34", "#2E3138"),
 }
+
+# Fondos con personaje: la paleta teñida con sus colores, su acento (se pone al elegirlo) y un mosaico
+# tenue con su dibujito detrás de toda la app (descargador/fondos/<clave>.png, densidad 2).
+# Las capas las calcula herramientas/mascotas/fondos_tematicos.py (las mismas que el teléfono).
+TEMAS = {
+    "hellokitty": ("Hello Kitty", "#FF4D6D", "#1C0A10", "#241318", "#2A191E", "#302026", "#3C2C31", "#35252A", "#37272D"),
+    "kuromi": ("Kuromi", "#FF77B7", "#120A1C", "#1A1324", "#20192A", "#272030", "#332C3C", "#2C2535", "#2E2737"),
+    "pikachu": ("Pikachu", "#F5D142", "#17130A", "#1F1B13", "#252119", "#2C2820", "#37342C", "#312D25", "#332F27"),
+    "charmander": ("Charmander", "#FF8A3D", "#1A0D07", "#221510", "#281C16", "#2F231D", "#3A2F2A", "#332822", "#352A25"),
+    "squirtle": ("Squirtle", "#5EC8E5", "#071420", "#101C28", "#16222D", "#1D2934", "#2A353F", "#222E39", "#25303B"),
+    "bulbasaur": ("Bulbasaur", "#5FD3A0", "#061712", "#0F1F1A", "#152520", "#1C2C27", "#293733", "#21312C", "#24332E"),
+    "snoopy": ("Snoopy", "#E8403F", "#111215", "#191A1D", "#1F2023", "#26272A", "#323336", "#2B2C2F", "#2E2E31"),
+    "totoro": ("Totoro", "#8CCB6E", "#0E1210", "#161A18", "#1C201E", "#242726", "#303331", "#292C2A", "#2B2E2D"),
+    "mymelody": ("My Melody", "#FF6FA5", "#1C0A16", "#24131E", "#2A1924", "#30202B", "#3C2C37", "#352530", "#372732"),
+    "purin": ("Pompompurin", "#F7C948", "#181306", "#201B0F", "#262115", "#2D281C", "#383429", "#312D21", "#342F24"),
+    "cinnamoroll": ("Cinnamoroll", "#7FB8FF", "#0A1324", "#131B2C", "#192131", "#202838", "#2C3443", "#252D3C", "#272F3E"),
+    "kirby": ("Kirby", "#FF8FB8", "#1C0B16", "#24141E", "#2A1A24", "#30212B", "#3C2D37", "#352630", "#372832"),
+    "doraemon": ("Doraemon", "#2E8BFF", "#06111F", "#0F1927", "#151F2C", "#1C2633", "#29323E", "#212B38", "#242E3A"),
+    "olaf": ("Olaf", "#8ECDF5", "#0A1520", "#131D28", "#19232D", "#202A34", "#2C363F", "#252F39", "#27313B"),
+    "nyan": ("Nyan Cat", "#FF7AC8", "#0B0E2C", "#141633", "#1A1C39", "#21243F", "#2D304A", "#262943", "#282B45"),
+    "capibara": ("Capibara", "#FFA53D", "#1A1008", "#221811", "#281E17", "#2F261E", "#3A312B", "#332A23", "#352D26"),
+    "pochacco": ("Pochacco", "#FF3D86", "#1A0A12", "#22131A", "#281920", "#2F2027", "#3A2C33", "#33252C", "#35272E"),
+    "nailong": ("Nailong", "#FFD23F", "#181406", "#201C0F", "#262215", "#2D291C", "#383529", "#312E21", "#343024"),
+    "gato_negro": ("Gato negro", "#7BD88F", "#0F0F12", "#17171A", "#1D1D20", "#252527", "#313133", "#29292C", "#2C2C2E"),
+}
+FONDOS.update({k: (v[0],) + v[2:] for k, v in TEMAS.items()})
+
+
+def es_tema(valor):
+    return valor in TEMAS
+
+
+def acento_de_tema(valor):
+    """El acento que acompaña a un fondo con personaje ("" si no es uno de ellos)."""
+    return TEMAS[valor][1] if valor in TEMAS else ""
+
+
+def ruta_patron(valor):
+    """El mosaico del fondo con personaje (o None)."""
+    if valor not in TEMAS:
+        return None
+    from pathlib import Path
+    p = Path(__file__).resolve().parent.parent / "fondos" / f"{valor}.png"
+    return p if p.exists() else None
+
+
+def patron_actual():
+    return ruta_patron(ACTUAL.get("fondo"))
+
+
+# tamaño base de la letra: la ventana lo adapta (más chica en pantallas pequeñas, más grande en las enormes)
+ESCALA = {"base": 13}
 
 
 # lo que se está viendo ahora mismo (lo que se aplicó al arrancar)
@@ -199,7 +251,7 @@ QWidget#raiz {{
 }}
 QWidget {{
     color: {C['texto']};
-    font-size: 13px;
+    font-size: {ESCALA['base']}px;
 }}
 QToolTip {{
     background: {C['superficie3']};

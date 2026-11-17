@@ -3,11 +3,14 @@ import 'package:flutter/material.dart';
 import '../../nucleo/recomendador.dart';
 import '../../nucleo/catalogo.dart';
 import '../../nucleo/coleccion.dart';
+import '../../nucleo/listas_compartidas.dart';
 import '../comunes.dart';
 import '../hoja_portada.dart';
 import '../servicios.dart';
 import '../tema.dart';
 import 'inicio.dart';
+import 'lista_compartir.dart';
+import 'lista_privacidad_hoja.dart';
 
 /// Album, lista de YouTube, tu lista, Tus me gusta o lo descargado.
 class ColeccionPagina extends StatefulWidget {
@@ -40,6 +43,7 @@ class _ColeccionPaginaState extends State<ColeccionPagina> {
       _col = Caudal.leer(context).coleccion;
       if (_local) _col!.addListener(_cargar);
       _cargar();
+      if (_tipo == 'mi_lista') _refrescarSiCompartida();
     });
   }
 
@@ -47,6 +51,22 @@ class _ColeccionPaginaState extends State<ColeccionPagina> {
   void dispose() {
     _col?.removeListener(_cargar);
     super.dispose();
+  }
+
+  /// Si esta lista propia ya se compartio, otras personas pudieron anadir
+  /// canciones: se baja lo de la nube al abrirla.
+  Future<void> _refrescarSiCompartida() async {
+    final s = Caudal.leer(context);
+    final id = _idLista;
+    final sinc = s.sincronizador;
+    if (id == null || sinc == null) return;
+    try {
+      final l = await s.coleccion.lista(id);
+      final uuid = '${l?['uuid'] ?? ''}';
+      if (uuid.isEmpty) return;
+      final r = await ListasQueComparto.cargar(s.cuenta.id);
+      if (r.estaCompartida(uuid)) await sinc.refrescarAhora();
+    } catch (_) {}
   }
 
   /// Sale de la pagina una sola vez (borrar la lista la cierra por dos lados).
@@ -457,6 +477,19 @@ class _ColeccionPaginaState extends State<ColeccionPagina> {
                 if (id == null) return;
                 final l = await s.coleccion.lista(id);
                 await s.coleccion.editarLista(id, fijada: (l?['fijada'] ?? 0) != 1);
+              }),
+          ListTile(leading: const Icon(Icons.ios_share_rounded, color: C.texto2), title: const Text('Compartir lista'),
+              onTap: () {
+                Navigator.pop(ctx);
+                final id = _idLista;
+                if (id != null) hojaCompartirLista(context, id: id);
+              }),
+          ListTile(leading: const Icon(Icons.public_rounded, color: C.texto2), title: const Text('Quién puede verla'),
+              subtitle: const Text('Pública o privada, y mostrarla en tu perfil'),
+              onTap: () {
+                Navigator.pop(ctx);
+                final id = _idLista;
+                if (id != null) mostrarHojaPrivacidadLista(context, id);
               }),
           ListTile(leading: const Icon(Icons.edit_outlined, color: C.texto2), title: const Text('Cambiar el nombre'),
               onTap: () {

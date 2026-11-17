@@ -1,0 +1,18 @@
+{
+  "#26262f": {"luz": "#4a4a5e", "sombra": "#15151c", "contorno": "#0b0b10", "oscuro": "#020203"},
+  "#26262e": {"luz": "#4a4a5e", "sombra": "#15151c", "contorno": "#0b0b10", "oscuro": "#020203", "interior": true},
+  "#27262f": {"luz": "#4a4a5e", "sombra": "#15151c", "contorno": "#0b0b10", "oscuro": "#020203", "interior": true},
+  "#62627a": {"fijo": true},
+  "#f6c9a0": {"sombra": "#e8ad86", "contorno": "#9a5a34"},
+  "#ffffff": {"fijo": true},
+  "#14141c": {"fijo": true},
+  "#121218": {"fijo": true},
+  "#6a1a22": {"fijo": true},
+  "#ec6a78": {"fijo": true},
+  "#f39a8a": {"fijo": true},
+  "#e0242e": {"sombra": "#a8141e", "contorno": "#6a0a12", "interior": true},
+  "#ffd23a": {"fijo": true},
+  "#fbfbff": {"sombra": "#c4c8e4", "contorno": "#6a6c94", "interior": true},
+  "#f5c21a": {"sombra": "#d4900c", "contorno": "#7a4a06", "interior": true},
+  "#f5c21b": {"sombra": "#d4900c", "contorno": "#7a4a06", "interior": true}
+}

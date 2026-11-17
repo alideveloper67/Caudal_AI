@@ -58,6 +58,13 @@ def _traducir(r):
     for clave, frase in _FRASES_SOCIAL:
         if clave in texto:
             return ErrorNube(frase)
+    # las listas compartidas (supabase/listas.sql) ya contestan con frases en español pensadas para
+    # personas («Ese código no existe…», «Esta lista ya tiene 20 personas…»): se dicen tal cual
+    mensaje = str(datos.get("message") or "")
+    if (str(datos.get("code")) == "P0001" and mensaje[:1].isupper()
+            and any(x in mensaje.lower() for x in ("lista", "código", "canciones", "sesión", "dueño", "acceso",
+                                                   "persona", "permiso"))):
+        return ErrorNube(mensaje)
     if "invalid login" in texto or "invalid_grant" in texto or "invalid_credentials" in texto:
         return ErrorNube("Usuario o contraseña incorrectos.")
     if "already registered" in texto or "already exists" in texto or "user_already_exists" in texto:

@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (QDialog, QFrame, QGraphicsOpacityEffect, QHBoxLay
                                QPushButton, QScrollArea, QToolButton, QVBoxLayout, QWidget)
 
 from ... import chat as CH
+from ... import listas_compartidas as LC
 from ... import social as S
 from ...hilos import en_segundo_plano
 from .. import iconos
@@ -185,19 +186,13 @@ def nuevo_chat(ctx, padre, al_listo):
         ctx.navegar({"pagina": "amigos", "pestana": "amigos"})
 
 
-def enviar_pista_a_chat(ctx, pista):
-    """«Enviar en un chat…» del menú de una canción."""
+def _pedir_destino(ctx, mandar):
+    """Muestra a quién enviarlo (tus conversaciones o alguien nuevo) y llama a `mandar(destino)`."""
     c = chat_de(ctx)
     if c is None:
         ctx.aviso.emit("Los mensajes necesitan internet.")
         return
     ventana = getattr(ctx, "ventana", None)
-
-    def mandar(destino):
-        en_segundo_plano(c.enviar, destino["id"], "", pista,
-                         ok=lambda _m: ctx.aviso.emit(f"Enviada a {destino['visible']}"),
-                         error=lambda e: ctx.aviso.emit(_motivo(e)),
-                         dueno=ventana, urgente=True)
 
     def con_chats(chats):
         from PySide6.QtGui import QCursor
@@ -213,6 +208,38 @@ def enviar_pista_a_chat(ctx, pista):
     en_segundo_plano(c.solo_amigos, ok=con_chats,
                      error=lambda _e: ctx.aviso.emit("No se pudo conectar. Revisa tu internet."),
                      dueno=ventana, urgente=True)
+
+
+def enviar_pista_a_chat(ctx, pista):
+    """«Enviar en un chat…» del menú de una canción."""
+    c = chat_de(ctx)
+    if c is None:
+        ctx.aviso.emit("Los mensajes necesitan internet.")
+        return
+    ventana = getattr(ctx, "ventana", None)
+
+    def mandar(destino):
+        en_segundo_plano(c.enviar, destino["id"], "", pista,
+                         ok=lambda _m: ctx.aviso.emit(f"Enviada a {destino['visible']}"),
+                         error=lambda e: ctx.aviso.emit(_motivo(e)),
+                         dueno=ventana, urgente=True)
+    _pedir_destino(ctx, mandar)
+
+
+def enviar_lista_a_chat(ctx, tarjeta):
+    """«Enviar por el chat» del diálogo de compartir: la lista ya tiene código; falta elegir a quién."""
+    c = chat_de(ctx)
+    if c is None:
+        ctx.aviso.emit("Los mensajes necesitan internet.")
+        return
+    ventana = getattr(ctx, "ventana", None)
+
+    def mandar(destino):
+        en_segundo_plano(c.enviar, destino["id"], "", None, tarjeta,
+                         ok=lambda _m: ctx.aviso.emit(f"Lista enviada a {destino['visible']}"),
+                         error=lambda e: ctx.aviso.emit(_motivo(e)),
+                         dueno=ventana, urgente=True)
+    _pedir_destino(ctx, mandar)
 
 
 def _motivo(e, que="enviar"):
@@ -245,6 +272,9 @@ class PaginaMensajes(QWidget):
         h = QHBoxLayout(self)
         h.setContentsMargins(24, 20, 24, 20)
         h.setSpacing(16)
+        # sin ancho mínimo rígido: con poco sitio se ve la lista o la conversación (ver _acomodar),
+        # así que la suma de las dos no debe impedir que la página se estreche
+        h.setSizeConstraint(QHBoxLayout.SetNoConstraint)
 
         # ---- lista de conversaciones
         izq = QVBoxLayout()
@@ -381,6 +411,15 @@ class PaginaMensajes(QWidget):
                                     f"padding:7px;}}QToolButton:hover{{background:{C['superficie3']};}}")
         self.bt_suena.clicked.connect(self._enviar_suena)
         fila.addWidget(self.bt_suena)
+        self.bt_lista = QToolButton()
+        self.bt_lista.setIcon(iconos.icono("lista", 18, C["acento"]))
+        self.bt_lista.setText("")
+        self.bt_lista.setToolTip("Enviar una lista")
+        self.bt_lista.setCursor(Qt.PointingHandCursor)
+        self.bt_lista.setStyleSheet(f"QToolButton{{background:{C['superficie2']};border:none;border-radius:10px;"
+                                    f"padding:7px;}}QToolButton:hover{{background:{C['superficie3']};}}")
+        self.bt_lista.clicked.connect(self._elegir_lista)
+        fila.addWidget(self.bt_lista)
         self.campo = QLineEdit()
         self.campo.setPlaceholderText("Escribe un mensaje")
         self.campo.setMaxLength(2000)
@@ -450,7 +489,7 @@ class PaginaMensajes(QWidget):
 
     # ------------------------------------------------------------ estado
     def _activar(self, si):
-        for w in (self.bt_mezcla, self.bt_emoji, self.bt_suena, self.campo):
+        for w in (self.bt_mezcla, self.bt_emoji, self.bt_suena, self.bt_lista, self.campo):
             w.setEnabled(si)
         self.bt_enviar.setEnabled(si and bool(self.campo.text().strip()))
 
@@ -699,7 +738,10 @@ class PaginaMensajes(QWidget):
         v.setSpacing(2)
         color = C["acento_texto"] if mio else C["texto"]
         p = m.get("pista")
-        if p:
+        tarjeta = LC.tarjeta_limpia(m.get("lista")) if not p else None
+        if tarjeta:
+            v.addLayout(self._tarjeta_lista(tarjeta, mio, color))
+        elif p:
             fila = QHBoxLayout()
             port = Portada(52, radio=6)
             port.set_url(p.get("miniatura") or "")
@@ -743,13 +785,85 @@ class PaginaMensajes(QWidget):
         self.lay.insertLayout(self.lay.count() - 1, fila_ext)
         return caja, hora
 
-    def _enviar(self, pista=None):
+    def _tarjeta_lista(self, t, mio, color):
+        """La tarjeta de una lista compartida: nombre, canciones, permiso y «Unirme» / «Abrir»."""
+        fila = QHBoxLayout()
+        port = Portada(52, radio=6)
+        port.set_url(t.get("portada") or "")
+        fila.addWidget(port)
+        n = t["canciones"]
+        txt = QLabel(f"<b>{_html(t['nombre'])}</b><br><span style='font-size:11px'>"
+                     f"Lista · {n} {'canción' if n == 1 else 'canciones'} · {LC.etiqueta_rol(t['rol'])}</span>")
+        txt.setWordWrap(True)
+        txt.setStyleSheet(f"color:{color};background:transparent;")
+        fila.addWidget(txt, 1)
+        conocida = LC.lista_de_codigo(self.ctx.coleccion, t["codigo"])
+        boton = QPushButton("Abrir" if conocida else "Unirme")
+        boton.setCursor(Qt.PointingHandCursor)
+        boton.setFixedHeight(32)
+        boton.setStyleSheet(f"QPushButton{{background:{C['acento_texto'] if mio else C['acento']};"
+                            f"color:{C['acento'] if mio else C['acento_texto']};border:none;border-radius:16px;"
+                            "padding:0 16px;font-weight:800;}")
+        boton.clicked.connect(lambda _=False, t=t, b=boton: self._abrir_tarjeta(t, b))
+        fila.addWidget(boton)
+        return fila
+
+    def _abrir_tarjeta(self, t, boton):
+        from ..contexto import nube_de
+        from ..dialogos_listas import abrir_lista_unida
+        col = self.ctx.coleccion
+        conocida = LC.lista_de_codigo(col, t["codigo"])
+        if conocida and conocida["tipo"] == "mia":
+            self.ctx.navegar({"pagina": "mi_lista", "id": conocida["id"]})
+            return
+        if conocida:
+            self.ctx.navegar({"pagina": "lista_compartida", "id": conocida["id"],
+                              "el": {"tipo": "lista_compartida", "id": conocida["id"], "titulo": t["nombre"],
+                                     "rol": t["rol"], "dueno": {}}})
+            return
+        nube = nube_de(self.ctx)
+        if nube is None:
+            self.ctx.aviso.emit("Unirte a una lista necesita internet.")
+            return
+        boton.setEnabled(False)
+        boton.setText("Uniéndote…")
+
+        def listo(r):
+            LC.recordar_union(col, t["codigo"], r["lista_id"])
+            try:
+                boton.setEnabled(True)
+                boton.setText("Abrir")
+            except RuntimeError:
+                pass
+            abrir_lista_unida(self.ctx, dict(r, codigo=t["codigo"]))
+
+        def fallo(e):
+            from ..contexto import explicar_error
+            try:
+                boton.setEnabled(True)
+                boton.setText("Unirme")
+            except RuntimeError:
+                pass
+            self.ctx.aviso.emit(explicar_error(e, "unirte a la lista"))
+        en_segundo_plano(nube.unirse, t["codigo"], ok=listo, error=fallo, dueno=self, urgente=True)
+
+    def _elegir_lista(self):
+        """«Enviar una lista» desde dentro del chat."""
         if not self.actual or self.chat is None:
             return
-        texto = "" if pista else self.campo.text().strip()
-        if not texto and pista is None:
+        from ..dialogos_listas import DialogoEnviarLista
+        d = DialogoEnviarLista(self.ctx, self.actual.get("visible") or "", self)
+        if d.exec() == QDialog.Accepted and d.tarjeta:
+            self.ctx.aviso.emit(d.frase)
+            self._enviar(lista=d.tarjeta)
+
+    def _enviar(self, pista=None, lista=None):
+        if not self.actual or self.chat is None:
             return
-        if pista is None:
+        texto = "" if (pista or lista) else self.campo.text().strip()
+        if not texto and pista is None and lista is None:
+            return
+        if pista is None and lista is None:
             self.campo.clear()
         self.campo.setFocus()
         self._quitar_cargando()
@@ -757,13 +871,13 @@ class PaginaMensajes(QWidget):
         # se ve al momento, con «Enviando…», y se confirma (o se ofrece reintentar)
         self._siguiente_local += 1
         clave = self._siguiente_local
-        caja, hora = self._burbuja({"texto": texto, "pista": pista}, pendiente=True)
-        self.pendientes[clave] = (caja, hora, texto, pista)
+        caja, hora = self._burbuja({"texto": texto, "pista": pista, "lista": lista}, pendiente=True)
+        self.pendientes[clave] = (caja, hora, texto, pista, lista)
         self._al_final()
         self._mandar(cid, clave)
 
     def _mandar(self, cid, clave):
-        _caja, hora, texto, pista = self.pendientes[clave]
+        _caja, hora, texto, pista, lista = self.pendientes[clave]
         hora.setText("Enviando…")
         hora.setCursor(Qt.ArrowCursor)
         hora.mousePressEvent = lambda _ev: None
@@ -790,7 +904,7 @@ class PaginaMensajes(QWidget):
             except RuntimeError:
                 pass
 
-        en_segundo_plano(self.chat.enviar, cid, texto, pista, ok=ok, error=fallo, dueno=self, urgente=True)
+        en_segundo_plano(self.chat.enviar, cid, texto, pista, lista, ok=ok, error=fallo, dueno=self, urgente=True)
 
     def _enviar_suena(self):
         r = getattr(self.ctx, "reproductor", None)

@@ -31,6 +31,7 @@ import 'reproduccion/servicio_audio.dart';
 import 'ui/armazon.dart';
 import 'ui/comunes.dart';
 import 'nucleo/fondo_app.dart';
+import 'nucleo/mascota_app.dart';
 import 'nucleo/social.dart';
 import 'ui/fondo_capa.dart';
 import 'ui/paginas/acceso.dart';
@@ -280,6 +281,7 @@ class _CaudalAppState extends State<CaudalApp> {
     unawaited(FondoApp.i
         .iniciar(c.id, c.sesion != null && c.sesion!.acceso.isNotEmpty ? Social(c.sesion!) : null)
         .catchError((_) {}));
+    unawaited(MascotaApp.i.iniciar(c.id).catchError((_) {}));
     unawaited(_buscarVersion());
     unawaited(_pedirNotificaciones());
   }
@@ -334,6 +336,7 @@ class _CaudalAppState extends State<CaudalApp> {
     _inteligente = null;
     await Cuentas.olvidar(s.cuenta);
     FondoApp.i.reiniciar();
+    MascotaApp.i.reiniciar();
     Gustos.actuales = [];
     setState(() {
       _s = null;
@@ -412,6 +415,14 @@ class _CaudalAppState extends State<CaudalApp> {
           builder: (_, enVentana, __) => Stack(children: [
             const CapaFondoApp(),
             contenido,
+            // el personaje del fondo con personaje, encima, en su esquina (se agranda pellizcándolo)
+            if (Aspecto.patron != null && !enVentana)
+              Positioned.fill(
+                child: PersonajeEncima(
+                  alto: s.ajustes.entero('tamano_personaje').toDouble(),
+                  alCambiar: (v) => s.ajustes.poner('tamano_personaje', v.round(), avisar: false),
+                ),
+              ),
             if (enVentana && s.reproductor.pantalla != null)
               Positioned.fill(
                 child: ColoredBox(

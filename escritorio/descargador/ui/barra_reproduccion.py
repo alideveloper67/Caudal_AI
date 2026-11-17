@@ -120,6 +120,10 @@ class BarraReproduccion(QFrame):
         self.barra = Deslizador(16)
         self.barra.movido.connect(self._moviendo)
         self.barra.soltado.connect(self._soltar)
+        gm = getattr(ctx, "mascota", None)
+        if gm is not None:
+            self.barra.alto_cambiado = self._ajustar_alto
+            self.barra.poner_mascota(gm, self.r)
         tiempo.addWidget(self.barra, 1)
         self.et_total = QLabel("0:00")
         self.et_total.setObjectName("ayuda")
@@ -222,6 +226,10 @@ class BarraReproduccion(QFrame):
         self.bt_gusta.set_icono("corazon_lleno" if gusta else "corazon")
         self.bt_gusta.set_activo(gusta, punto=False)
         self.bt_gusta.setToolTip("Quitar de Tus me gusta" if gusta else "Guardar en Tus me gusta")
+
+    def _ajustar_alto(self):
+        """La barra de progreso crece cuando hay una mascotita encima: el reproductor también."""
+        self.setFixedHeight(88 + max(0, self.barra.height() - 16))
 
     def _estado(self, estado):
         self.bt_play.set_sonando(estado in ("sonando",))

@@ -9,7 +9,8 @@ from PySide6.QtGui import QBrush, QColor, QConicalGradient, QFont, QPainter, QPa
 from PySide6.QtWidgets import (QAbstractButton, QColorDialog, QGridLayout, QHBoxLayout, QLabel,
                                QPushButton, QVBoxLayout, QWidget)
 
-from .estilos import ACENTOS, FONDOS, C, acento_de, es_color, fondo_de
+from .estilos import ACENTOS, FONDOS, TEMAS, C, acento_de, acento_de_tema, es_color, fondo_de, ruta_patron
+from .fondo_capa import pixmap_patron
 
 
 def nombre_acento(valor):
@@ -182,10 +183,11 @@ class Circulo(QAbstractButton):
 class TarjetaFondo(QAbstractButton):
     """Un fondo para elegir: sus capas en pequeño y el nombre debajo."""
 
-    def __init__(self, capas, nombre, padre=None):
+    def __init__(self, capas, nombre, padre=None, patron=None):
         super().__init__(padre)
         self.capas = capas
         self.nombre = nombre
+        self.patron = patron            # el personaje del fondo (QPixmap) o None
         self.setToolTip(nombre)
         self.setAccessibleName(nombre)
         self.setCheckable(True)
@@ -213,6 +215,15 @@ class TarjetaFondo(QAbstractButton):
             p.setBrush(QColor(self.capas[4]))
             p.drawRoundedRect(QRectF(r.left() + r.width() * 0.3 + 15, r.top() + 24,
                                      r.width() * 0.36, 8), 3, 3)
+            if self.patron is not None:
+                # el personaje, chico, en la esquina (como en la app)
+                pm = self.patron
+                th = r.height() - 8
+                tw = pm.width() * th / max(1, pm.height())
+                p.save()
+                p.setRenderHint(QPainter.SmoothPixmapTransform, True)
+                p.drawPixmap(QRectF(r.right() - tw - 3, r.bottom() - th - 2, tw, th), pm, QRectF(pm.rect()))
+                p.restore()
         else:
             p.setPen(QPen(QColor(C["borde_claro"]), 1.4, Qt.DashLine))
             p.setBrush(QColor(C["superficie"]))
@@ -283,7 +294,7 @@ class SelectorAspecto(QWidget):
         rejilla.setHorizontalSpacing(8)
         rejilla.setVerticalSpacing(6)
         self.tarjetas = {}
-        claves = list(FONDOS.items())
+        claves = [(k, v) for k, v in FONDOS.items() if k not in TEMAS]
         for i, (clave, v) in enumerate(claves):
             t = TarjetaFondo(v[1:], v[0])
             t.clicked.connect(lambda _=False, k=clave: self._elegir_fondo(k))
@@ -295,6 +306,20 @@ class SelectorAspecto(QWidget):
         rejilla.addWidget(self.tarjeta_propia, len(claves) // 4, len(claves) % 4)
         rejilla.setColumnStretch(4, 1)
         izq.addLayout(rejilla)
+        # fondos con personaje: su paleta, su acento y su dibujito detrás de toda la app
+        izq.addSpacing(10)
+        izq.addWidget(self._titulo("Con personajes", "Sus colores y el personaje a un costado; si tienes mascotas, "
+                                                    "también camina por la barra."))
+        rejilla_t = QGridLayout()
+        rejilla_t.setHorizontalSpacing(8)
+        rejilla_t.setVerticalSpacing(6)
+        for i, (clave, v) in enumerate(TEMAS.items()):
+            t = TarjetaFondo(FONDOS[clave][1:], v[0], patron=pixmap_patron(ruta_patron(clave)))
+            t.clicked.connect(lambda _=False, k=clave: self._elegir_fondo(k))
+            self.tarjetas[clave] = t
+            rejilla_t.addWidget(t, i // 4, i % 4)
+        rejilla_t.setColumnStretch(4, 1)
+        izq.addLayout(rejilla_t)
         izq.addStretch(1)
         self.izq = izq
 
@@ -340,6 +365,7 @@ class SelectorAspecto(QWidget):
         v.addWidget(a)
         b = QLabel(ayuda)
         b.setObjectName("secundario")
+        b.setWordWrap(True)          # que una ayuda larga no ensanche todo Ajustes
         v.addWidget(b)
         return w
 
@@ -354,6 +380,9 @@ class SelectorAspecto(QWidget):
         self._guardar("acento", k)
 
     def _elegir_fondo(self, k):
+        # un fondo con personaje trae su color (luego se puede cambiar)
+        if acento_de_tema(k):
+            self.a["acento"] = acento_de_tema(k)
         self._guardar("fondo", k)
 
     def _acento_propio(self):

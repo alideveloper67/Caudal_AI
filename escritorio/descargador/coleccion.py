@@ -57,11 +57,13 @@ class Coleccion:
         self._existe_cache = {}
         self._gustan = None
         self.sincronizador = None       # lo pone main al entrar con una cuenta
-        self._crear()
         try:
             self.con.execute("PRAGMA journal_mode=WAL")   # leer mientras se sincroniza
+            # con WAL basta con «normal»: cada guardado deja de esperar al disco (antes ~0,4 s por cambio)
+            self.con.execute("PRAGMA synchronous=NORMAL")
         except sqlite3.DatabaseError:
             pass
+        self._crear()
 
     # ------------------------------------------------------------ esquema
 
@@ -81,7 +83,8 @@ class Coleccion:
         columnas = {f["name"] for f in c.execute("PRAGMA table_info(listas)").fetchall()}
         for col, tipo in (("descripcion", "TEXT DEFAULT ''"), ("fijada", "INTEGER DEFAULT 0"),
                           ("color", "TEXT DEFAULT ''"), ("tocada", "REAL DEFAULT 0"),
-                          ("uuid", "TEXT"), ("portada", "TEXT")):
+                          ("uuid", "TEXT"), ("portada", "TEXT"),
+                          ("publica", "INTEGER DEFAULT 0"), ("en_perfil", "INTEGER DEFAULT 0")):
             if col not in columnas:
                 c.execute(f"ALTER TABLE listas ADD COLUMN {col} {tipo}")
         c.execute("""CREATE TABLE IF NOT EXISTS lista_items (
@@ -154,24 +157,31 @@ class Coleccion:
         self.con.commit()
         return nuevo
 
-    def _anotar_lista(self, lista_id):
+    def _anotar_lista(self, lista_id, privacidad=False):
         l = self.lista(lista_id)
         if l:
-            self._anotar("lista_poner", {"uuid": self._uuid_lista(lista_id), "nombre": l["nombre"],
-                                         "descripcion": l.get("descripcion") or "",
-                                         "fijada": bool(l.get("fijada"))})
+            datos = {"uuid": self._uuid_lista(lista_id), "nombre": l["nombre"],
+                     "descripcion": l.get("descripcion") or "",
+                     "fijada": bool(l.get("fijada"))}
+            if privacidad:
+                # solo viaja cuando la persona la cambia: así no estorba si la nube aún no la conoce
+                datos["publica"] = bool(l.get("publica"))
+                datos["en_perfil"] = bool(l.get("publica")) and bool(l.get("en_perfil"))
+            self._anotar("lista_poner", datos)
 
     # ------------------------------------------------------------ pistas
 
-    def recordar(self, pista):
-        """Guarda los datos de una pista en linea para poder pintarla sin internet."""
+    def recordar(self, pista, confirmar=True):
+        """Guarda los datos de una pista en linea para poder pintarla sin internet.
+        `confirmar=False`: quien llama confirma una sola vez al final (listas largas)."""
         if not pista or not pista.get("clave") or pista["clave"].startswith("local:"):
             return
         datos = {k: v for k, v in pista.items() if k not in ("archivo",)}
         self.con.execute(
             "INSERT OR REPLACE INTO pistas (clave, datos, actualizada) VALUES (?,?,?)",
             (pista["clave"], json.dumps(datos, ensure_ascii=False), time.time()))
-        self.con.commit()
+        if confirmar:
+            self.con.commit()
 
     def pista(self, clave):
         if not clave:
@@ -192,9 +202,22 @@ class Coleccion:
             return None
 
     def pistas(self, claves):
+        """Las pistas de esas claves, en el mismo orden. Las de internet se leen de una vez
+        (una consulta por tandas) y no una por una."""
+        claves = list(claves)
+        en_linea = [c for c in claves if c and not c.startswith("local:")]
+        datos = {}
+        for i in range(0, len(en_linea), 500):
+            tanda = en_linea[i:i + 500]
+            marcas = ",".join("?" * len(tanda))
+            for f in self.con.execute(f"SELECT clave, datos FROM pistas WHERE clave IN ({marcas})", tanda):
+                try:
+                    datos[f["clave"]] = json.loads(f["datos"])
+                except ValueError:
+                    pass
         salida = []
         for c in claves:
-            p = self.pista(c)
+            p = datos.get(c) if c and not c.startswith("local:") else self.pista(c)
             if p:
                 salida.append(p)
         return salida
@@ -294,7 +317,7 @@ class Coleccion:
 
     def lista_me_gusta(self, filtro=""):
         claves = [f["clave"] for f in self.con.execute(
-            "SELECT clave FROM me_gusta ORDER BY fecha DESC").fetchall()]
+            "SELECT clave FROM me_gusta ORDER BY fecha DESC, rowid DESC").fetchall()]
         pistas = self.pistas(claves)
         return _filtrar(pistas, filtro)
 
@@ -339,7 +362,8 @@ class Coleccion:
                 return nombre
             n += 1
 
-    def editar_lista(self, lista_id, nombre=None, descripcion=None, fijada=None):
+    def editar_lista(self, lista_id, nombre=None, descripcion=None, fijada=None,
+                     publica=None, en_perfil=None):
         if nombre is not None:
             nombre = nombre.strip()
             if not nombre:
@@ -355,8 +379,15 @@ class Coleccion:
         if fijada is not None:
             self.con.execute("UPDATE listas SET fijada = ? WHERE id = ?",
                              (1 if fijada else 0, lista_id))
+        if publica is not None or en_perfil is not None:
+            actual = self.lista(lista_id) or {}
+            pub = bool(actual.get("publica")) if publica is None else bool(publica)
+            perfil = bool(actual.get("en_perfil")) if en_perfil is None else bool(en_perfil)
+            # «en el perfil» solo existe en una lista pública (igual que en el servidor)
+            self.con.execute("UPDATE listas SET publica = ?, en_perfil = ? WHERE id = ?",
+                             (1 if pub else 0, 1 if (pub and perfil) else 0, lista_id))
         self.con.commit()
-        self._anotar_lista(lista_id)
+        self._anotar_lista(lista_id, privacidad=publica is not None or en_perfil is not None)
 
     def borrar_lista(self, lista_id):
         self._borrar_archivo_portada(lista_id)
@@ -379,7 +410,7 @@ class Coleccion:
         for p in pistas:
             if not p.get("clave"):
                 continue
-            self.recordar(p)
+            self.recordar(p, confirmar=False)
             orden += 1
             cur = self.con.execute(
                 "INSERT OR IGNORE INTO lista_items (lista_id, clave, orden, agregada)"
@@ -414,6 +445,14 @@ class Coleccion:
         claves = [f["clave"] for f in self.con.execute(
             "SELECT clave FROM lista_items WHERE lista_id = ? ORDER BY orden", (lista_id,))]
         return _filtrar(self.pistas(claves), filtro)
+
+    def claves_de_lista(self, lista_id):
+        return {f["clave"] for f in self.con.execute(
+            "SELECT clave FROM lista_items WHERE lista_id = ?", (lista_id,))}
+
+    def lista_por_uuid(self, lista_uuid):
+        f = self.con.execute("SELECT * FROM listas WHERE uuid = ?", (lista_uuid,)).fetchone()
+        return dict(f) if f else None
 
     def listas_con(self, clave):
         return {f["lista_id"] for f in self.con.execute(
@@ -468,7 +507,10 @@ class Coleccion:
         if propia:
             return [propia]
         salida = []
-        for p in self.pistas_de_lista(lista_id)[:40]:
+        # solo las primeras que hagan falta (no se leen las 300 de la lista para pintar una carátula)
+        claves = [f["clave"] for f in self.con.execute(
+            "SELECT clave FROM lista_items WHERE lista_id = ? ORDER BY orden LIMIT 40", (lista_id,))]
+        for p in self.pistas(claves):
             m = p.get("miniatura")
             if m and m not in salida:
                 salida.append(m)
@@ -587,12 +629,12 @@ class Coleccion:
         self.con.execute("INSERT OR REPLACE INTO busquedas (texto, fecha) VALUES (?,?)",
                          (texto, time.time()))
         self.con.execute("DELETE FROM busquedas WHERE texto NOT IN "
-                         "(SELECT texto FROM busquedas ORDER BY fecha DESC LIMIT 30)")
+                         "(SELECT texto FROM busquedas ORDER BY fecha DESC, rowid DESC LIMIT 30)")
         self.con.commit()
 
     def busquedas_recientes(self, n=12):
         return [f["texto"] for f in self.con.execute(
-            "SELECT texto FROM busquedas ORDER BY fecha DESC LIMIT ?", (n,))]
+            "SELECT texto FROM busquedas ORDER BY fecha DESC, rowid DESC LIMIT ?", (n,))]
 
     def borrar_busquedas(self):
         self.con.execute("DELETE FROM busquedas")

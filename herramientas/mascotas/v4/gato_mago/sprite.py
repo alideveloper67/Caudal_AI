@@ -1,0 +1,170 @@
+#!/usr/bin/env python3
+"""Pixel art reproducido de forma exacta. Generado por la skill pixel-art-exact.
+
+Requiere solo Pillow:  pip install pillow
+Uso:  python sprite.py                 -> guarda sprite.png
+      from sprite import render; render(scale=8).save("x.png")
+"""
+from PIL import Image, ImageDraw
+
+# Paleta: símbolo -> (R, G, B). '.' es el fondo.
+PALETTE = {
+    ".": (255, 255, 255),
+    "A": (5, 3, 4),
+    "B": (247, 240, 240),
+    "C": (228, 217, 225),
+    "D": (216, 203, 215),
+    "E": (152, 81, 219),
+    "F": (130, 67, 199),
+    "G": (30, 21, 28),
+    "H": (194, 176, 196),
+    "I": (245, 182, 8),
+    "J": (168, 152, 171),
+    "K": (104, 52, 169),
+    "L": (78, 40, 131),
+    "M": (51, 37, 66),
+    "N": (85, 75, 79),
+    "O": (251, 215, 44),
+    "P": (242, 179, 102),
+    "Q": (222, 150, 137),
+    "R": (132, 118, 133),
+    "S": (188, 112, 177),
+    "T": (246, 188, 189),
+    "U": (90, 55, 14),
+    "V": (148, 92, 35),
+    "W": (251, 226, 130),
+    "X": (158, 101, 67),
+    "Y": (200, 123, 80),
+    "Z": (202, 131, 24),
+    "a": (159, 52, 2),
+}
+
+# Cada fila = una fila de píxeles lógicos; cada letra = un color de PALETTE.
+ROWS = [
+    ".........................................AAAA...............................................",
+    "..........................................AAAA..............................................",
+    "...........................................AAAA.............................................",
+    ".............................................AAA..............AAAAAAAAAAAA..................",
+    ".............................................AAAAA........AAAAAAAAAAAAAAAAAA................",
+    "............................................AAAAAAA.....AAAAAAAAAAKKKKAGGAAA................",
+    ".........................................AAAVVZZAAAA..AAAAAAARRSSEEEEEEEEFGAAA..............",
+    "..........................AAAA.........AAAAWOOOIIAAAAAAAAAASQQQSEFFFFFFFFEFGAA..............",
+    "..........................AUUAA...A..AXXWWWWWOOIIAAAAAAAAQSQSEEEFFFKKKKKFFFFAAA.............",
+    ".........................AAAUZAAAAAAAXPWWWWWWWOAAAAAAAQAQSEEFFFGGFAAAAAMLFFFAAA.............",
+    ".........................AAIIOZAAAAAAXPPPPPPPWAAAAAAQQQQFFFFFFGGAAAAMMMGGLFFAAA.............",
+    ".........................AAIOOOOOAIAAXPPPPPPPAAAAAQQQQEFFFFFAAAGNNAAMLLLLLFFKAA.............",
+    ".........................AAIIOOOOIAAAYQQQGGGGFFAQQQQEEFFFAAAANNRRRRAALLLLLKFKAA.............",
+    ".......................AAAIIIOOOOIAAYYYGGGGGFFFPQQQFFFFAAAAARRRRJJJAAMLLLLKFKAA.............",
+    ".................AA...AAAIIIIOOOOIAAAYGGGGGGPPPEEFFFFFAAGNRRRRQQQQJAAMLLLLFFAAA.............",
+    ".................AA...AAIIZIIOOIOOIAAAGGFGQPPPEEFFFAAAAGNRRRQQQQTTTRAALLLLFKAAA.............",
+    ".................AA...AAGZZZIOOIIIIAAAFFGWWQEEFFFAAAARRRRRRQQQQTTTCRAALLLLKKAAA.............",
+    ".................AA.VVPPGAZZIOIUUUUGGFFQPPEEFLLFAAAAJJJJRRRRQTTTTTCRAALLLKKGAA..............",
+    "................AAAAVPPPPAAZIOGGAAGGFFPQEEEFLAAAAAJJJHHHHHHRRTTTTCCRAALLKLGAA...............",
+    "................AAAYPPPPPAAVIIGAMFFFFPQEEFFAAAAAJJJHHHHHHDDDRRTTCCCAAALLKMAAA...............",
+    "................AAYYPPPPPAAVGGAMFFQPPEEFFFAAAAAJJHHHDDDDDDDDDJRCCCDAAALKMAAA................",
+    "...............AAGYYYPPPAAAGGGGFSQPEEEFFFAAAAHHHHHDDCCDDDDDDCCJRCDHAALKMAAA.......AAAA......",
+    "...............AAGYYYYGAAAKLLGGPQSEEFAAAAAAJHHHDDDDDCCDDDDDDDCCNJHAAALMAAA.......AAAAAA.....",
+    "...............AAGGGAAGFKKFLLPPQEEEFAAAARJJHHDDDDDDDDDDDDDDDDCCNNJAALAAAANAAA...AAAZAAAA....",
+    "..............AAAAAAGFFFFFQQPPPEEEEAAAARJHHHDDDDDDDDDDDDDRDDDCDDNAAAAAAANMAAAAAAAAZOIUAA....",
+    "...........AAAAAALLFFEFFFQQQEEFFEGAAAAJJHHDDDDDDDCDDDDDDRGGGDDDDDAAAAANNMAAGGGAAAAOWIUAA....",
+    "........AAAAAAAAEFFFEEQPPQEEEFFGAAGJJJJHHCCCCDDDDCCDDDDDGGGGDDDDDDAAANNNAAAOIIAAAIWWIUAA....",
+    "......AAAAAAAAAEEEEFQPPQEEEEEAAAGJJJJJANCCCCCDDDDCCDDDDDGAAAADDDDDAAANNNAAAIOOOOIOOOIUAAA...",
+    ".....AAAAAAAEEESSSPPQEEEEEEEAAAAJJJJJANCNCCCCCDDCCBBDDCCGAAAAJDDDDDAAANNNAAAIIOOWOOOIIUAAAA.",
+    "...AAAAAAEESSSQPPPSEEEEEEEAAAAAJJHHJAAAAGCCCCCCCBBBBBBCBGAAAAJDDDDDAAANNNAAAIIIOWOOWWIIIUAA.",
+    "..AAAAAAQQPPQQQEEEEFFEEGAAAAAJJJHHHNAAAAAGCCCCCBBBBNNBBBBGAADDDDDDDDAAANNUAAIIOOOWOWWOOIIUAA",
+    ".AAAGFEESSSSEEEEEEEAAAAAGJJJJJHHDDDNAAAAAGCCCBBBBBBNGGBBBBBDDDTTTTDDAAAAUAAAIIOOOOOOOOOIIUAA",
+    ".AAGFEEEEEEFFFFFMMAAAAAJJJJJHHHDCCDDAAAAAGCCBBBBBBAAABBBBBBDDDTTTTDDDAAGUAAAIOOIOOOOIIIIUAAA",
+    "MAAAFFFFFFFFMMAAAAAANRJJJJHHHDCCCCCDDAAAAJCBBBBBBBBGGBBBBBBBDDTTTDDDDGAGGAAAOOOIIOOOIIIAAAA.",
+    "MAAKKKKLMMMAAAAGGGANRJJHHHHHDCCCCCCDDCNNJCBBBBBBBBBGGBBBBBBBBCCCCCCDDGAGGAVIIIIIIIOOIUAAA...",
+    "MAAKKKLLLMMMLLLLLGAANJHHHHHDCCCCTTTDCCCDDBBBBBBMBBBAAMMBBBBBBBBBBCCCGAANGAAVIIGAIIOOIUAA....",
+    ".AAGKKKLLLLLLLLLGAGNHHHHHDDDCCCTTTTTTCCCBBBBBBBBMBABBBBBBBBBBBBBBBCCGAANNAAAAGGAAAIOIUAA....",
+    ".AAAGKKKLLLLLLLAAHNHHHDDDDDCCCCTTTTTTCCBBBBBBBBBRRBBBBBBBBBBBBBBBBCCAAANNAAAAGVAAAAIIUAA....",
+    "..AAAGKKKLLLLLLANHHHDCCCCDCCCCCCTTTTBBBBBBBBBBBBBBBBBBBBBBBBBBBBBCCAAANNNAAAYVGAAAAIIAAA....",
+    "...AAAGKLKKKKKKKANHHDDCCDDCCCCCCCBCCBBBBBBBBBBBBBBBBBBBBBBBBBBBBCCRAANNNNAAVYAAAAAAGGAA.....",
+    "....AAAAAAMMKKKKAAAADDHHHDCCCCBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBCRAAANNNAAAYVAA...AAAA......",
+    "......AAAAAAAAAAAAAAAHHHDCCCCBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBCRAAANNNMAAYYAAA....AA.......",
+    ".........AAAAAAAAAAAAHHHHDCCCCCBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBCCAAAAMNNMAAVYVAA..............",
+    "..................AAAAHHHHHCCCCCBBBBBBBBBBBBBBBBBBBBBBBBBBBBCCAAAGMAAAAAAYVAAA..............",
+    "...................AAAAJJHHDDCCCCCBBBBBBBBBBBBBBBBBBBBBBBCCCCAAAMGAAAAAAVVUAA...............",
+    "....................AAAAAJHHHHDDCCCBBBBBBBBBBBBBBBBBBBCCDDCCAAAMGAAARRAAXUAAA...............",
+    ".....................AAAAAAAHHHHHHHCCCCCCBBBBBBCCCHHDDCCAAAAAMMAAGACCRXXVAAA................",
+    ".......................AAAAAAANNHHHHHHCCCCCCCDDCCCAAAGGAAAMAAAAARBBCAVXVVAAA................",
+    "..........................AAAAAAGMMMMMMMMMMMMMMMAAVVGGAAMMKMAAARBBBBAVVUVAAA................",
+    "...........................AAALLMGGGGGGGGGGGGGAAAIOOOIUAMKKKAAACCBBGXXUMCAAA................",
+    "...........................AAKKKKKKKKFFFFFFKKKAAIOOOOIIUAKKKGGDCCCGGXXMBCAAA................",
+    ".......AAAAAAAA............AAKKKFFFFKKKKKKKKKKAIOOOIIIIIUUFKAGHDCCGXXXMBDAAA................",
+    ".....AAAAGGGAAAAA..........AAAFFEEEEEEEEFFFFKAAIOOZZIIOIUMFMAHHHDCAXXXDDAAAA................",
+    "....AAAAABBBBAAAAA.........AAAAKKFFEEEEEEEEEFAAIIIaaZOOIUMMAGHHHHAAUUXDDGAA.................",
+    "...AAAAABBBBBCAAAAA.......AAAGAALLLKKKEEEEEKKAAZIIIaIIIIMAAGAHHHHAUGARRGAAA.................",
+    "..AAAACBBBBBBBCAAAA......AAAGKLLLLGGAAGGGGGGGGAAZIIIIIIVAMLKAAHHAGXGAAAAA...................",
+    "..AAGCBBBBBBBBCCAAAA.....AAGKKKKKFFFFMMMMMGFFKAAAIIIIIVAALKFAAAAGXXVGAAA....................",
+    ".AAGCBBBBBBBBBBBCAAA....AAGFFFFFEEEFFFKKFFEEFKKMAAVVVAAALKFEFGAAXXVGAA......................",
+    ".AANCBBBBBBBBBBBCCAAA..AAGKFFFEEEEEEEEEEEEEFFFFKMAAAAAALLEEEEEGAXVGAAA......................",
+    ".AANCCBBBBBBBBCBCDRAAAAAAKFFFFEEEEEEEEEEEEFFEESSMAAJJAAAEQEEEEEAGAAAA.......................",
+    "GAADCCBBBBBBBBCBCDRAAGAAAFFFFEEEEEEEEEEEEFFEESPSAAABDJAAAQQEEEEGAAAA........................",
+    "GAADCCCCBBBBBCCCCDDAAAGFFFEFEEEEEEEEEEEEEEEEEPSAAABBBDAAASPSEEEEAAA.........................",
+    "GAADDCCCBBCCCCCCDDAAAMFFFFFEEEEEEEEEEEEEEEEEQQSAABBBBBDAAASPSEEEAAA.........................",
+    "GAADDCCCCCCCCCCCDDAAMEQQFFFEEEEEEEEEEEEEEEEEQSAAABBBBBDAAAAQQEEEFAAA........................",
+    "GAADDCCCCCCCCCCDDGAMEEQQPPQEEEEEEEEEEEEEEEEQQSMABBBBBBBBAAAQPSEEFFAAA.......................",
+    ".AANDDCCCCCCCCCCDDGAAAAQPPQPPEEEEEEEEEEEEEQPSSAMBBBBBBBCAAGQQPSEFFAAA.......................",
+    ".AANDDDDCCCCCCCCDDRGAAAAAPEESPPQEEEEEEEEEPPSSSABBBBBBBBCCGAAEQPEFFAAAA......................",
+    ".AAADDDDDDCCCCCDDDHRAAAAAAAASSSQPPPSSSSQPPSFMANCBBBBBBBCCCAALEQPSSSAAA......................",
+    "..AAAHHDDDDCCCDDDDDHRAANNAAAGSSEEEEPPPPQEEFMANCBBBBBBBCCDJNAALESPPSAAAA.....................",
+    "..AAAAHHDDDDDDDDDDHHAAAJJJJGAAAGEEEEFFFEEEMAGCCBBBBBBCCCDHJNAALEEEEFAAA.....................",
+    "...AAAAHHHDDDDDDHHHHAARJHJJJHHGAAAALLLLLEGAGCDCBBBBCCCCCCHHJMAAAAFFAAAA.....................",
+    "....AAAAHHHHHHHHHHHHAARHDDDHHHHHHMMAAAAAAGGJDCBCCCCCCCDCCDHHJMAAAAAAAA......................",
+    ".....AAAAHHHHHHHHJJMAMHHDCDDDDHHHHHHNNAANJJHCCCDDDRCCDCCCCDDJAAAAAAAA.......................",
+    "......AAAAHHHHJJJJJMAMHHCCCCCCDDDDHHJJNANJJHHDDDDGGRDCCCCCCDJAAA..A.........................",
+    ".......AAAAAARRJJJJMANHDCCCCCCCCCCCHHJNANRRRRGGAAJJHCCCCCCCCHAAA............................",
+    ".........AAAAAANNAAAANHDCCCCCBBBBBBCHJNAAAAAAAGJJJHDCCCCBBBBCHAA............................",
+    "..........AAAAAAAAAAAAHDDCBBBCBBBBBBCJAAAAAAAAJJJHDDCCBBBBDBBAAA............................",
+    "..............AAAAAAAADDDCBBBBCBBDBBCJAAA...AANJJHDDBBDBBBDDBAAA............................",
+    "....................AAMDDDCBBBJBBDDDHNAA....AAANJJHDDDDRBBRRAAAA............................",
+    "....................AAAMDDDDDJJDDDDHNAAA.....AAAGGARRRRARRRAAAAA............................",
+    ".....................AAAAANNNMMNNNAAAAA.......AAAAAAAAAAAAAAAAA.............................",
+    "......................AAAAAAAAAAAAAAAA..........AAAAAAAAAAAAAA..............................",
+    ".........................AAAAAAAAAA.........................................................",
+]
+
+BACKGROUND = "."
+CELL_X, CELL_Y = 1, 1      # tamaño original de cada píxel lógico en la imagen de origen
+OFFSET_X, OFFSET_Y = 0, 0
+CANVAS = (92, 83)              # tamaño original del lienzo
+
+
+def _bounds(k, cell, offset):
+    import math
+    return math.floor(offset + k * cell), math.floor(offset + (k + 1) * cell)
+
+
+def render(scale=None, transparent=False):
+    """Dibuja el sprite SIN suavizado (rectángulos sólidos).
+
+    scale=None  -> reproduce la imagen original (celda 1x1, lienzo 92x83).
+    scale=int   -> sprite de 92x83 px ampliado por un entero, sin márgenes.
+    transparent -> el fondo pasa a ser transparente (RGBA).
+    """
+    mode = "RGBA" if transparent else "RGB"
+    if scale is None:
+        cx, cy, ox, oy, size = CELL_X, CELL_Y, OFFSET_X, OFFSET_Y, CANVAS
+    else:
+        cx = cy = scale
+        ox = oy = 0
+        size = (len(ROWS[0]) * scale, len(ROWS) * scale)
+    bg = PALETTE[BACKGROUND]
+    bg_fill = (*bg, 0) if transparent else bg
+    img = Image.new(mode, size, bg_fill)
+    d = ImageDraw.Draw(img)
+    for r, row in enumerate(ROWS):
+        y0, y1 = _bounds(r, cy, oy)
+        for c, ch in enumerate(row):
+            if ch == BACKGROUND:
+                continue
+            x0, x1 = _bounds(c, cx, ox)
+            d.rectangle([x0, y0, x1 - 1, y1 - 1], fill=(*PALETTE[ch], 255) if transparent else PALETTE[ch])
+    return img
+
+
+if __name__ == "__main__":
+    render().save("sprite.png")
+    print("Guardado sprite.png")

@@ -5,7 +5,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../nucleo/catalogo.dart';
-import '../../nucleo/fondo_app.dart';
 import '../../nucleo/gustos.dart';
 import '../../nucleo/nube.dart';
 import '../comunes.dart';
@@ -399,7 +398,7 @@ class _GustosPaginaState extends State<GustosPagina> {
     );
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: FondoApp.i.activo ? C.fondo.withValues(alpha: 0.78) : C.fondo,
+        color: C.hayFondo ? C.fondo.withValues(alpha: 0.78) : C.fondo,
         border: Border(top: BorderSide(color: C.borde.withValues(alpha: 0.7))),
       ),
       child: SafeArea(

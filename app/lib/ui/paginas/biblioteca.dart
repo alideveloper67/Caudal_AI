@@ -1,12 +1,17 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../nucleo/coleccion.dart';
+import '../../nucleo/listas_compartidas.dart';
 import '../comunes.dart';
 import '../servicios.dart';
 import '../tema.dart';
 import 'ajustes_pagina.dart';
 import 'importar_archivos_hoja.dart';
 import 'inicio.dart';
+import 'lista_compartida_pagina.dart';
+import 'lista_compartir.dart';
 
 class BibliotecaPagina extends StatefulWidget {
   const BibliotecaPagina({super.key});
@@ -22,6 +27,10 @@ class _BibliotecaPaginaState extends State<BibliotecaPagina> with AutomaticKeepA
   Coleccion? _col;
   int _vuelta = 0;
 
+  /// Las listas de otras personas donde soy miembro (se traen de la nube, aparte).
+  List<ListaCompartida> _compartidas = ListasCompartidasVistas.lista.value;
+  Timer? _relojCompartidas;
+
   @override
   bool get wantKeepAlive => true;
 
@@ -31,13 +40,34 @@ class _BibliotecaPaginaState extends State<BibliotecaPagina> with AutomaticKeepA
     if (_col == null) {
       _col = Caudal.leer(context).coleccion..addListener(_cargar);
       _cargar();
+      _traerCompartidas();
+      _relojCompartidas = Timer.periodic(const Duration(seconds: 60), (_) => _traerCompartidas());
     }
   }
 
   @override
   void dispose() {
+    _relojCompartidas?.cancel();
     _col?.removeListener(_cargar);
     super.dispose();
+  }
+
+  /// Sin internet o sin cuenta, la sección simplemente no aparece.
+  Future<void> _traerCompartidas() async {
+    final base = listasDe(context);
+    if (base == null) return;
+    try {
+      final l = await base.misListasCompartidas();
+      ListasCompartidasVistas.lista.value = l;
+      if (!mounted) return;
+      _compartidas = l;
+      _cargar();
+    } catch (_) {}
+  }
+
+  Future<void> _tengoCodigo() async {
+    await hojaTengoCodigo(context);
+    if (mounted) _traerCompartidas();
   }
 
   Future<void> _cargar() async {
@@ -66,6 +96,13 @@ class _BibliotecaPaginaState extends State<BibliotecaPagina> with AutomaticKeepA
           'fijada': l['fijada'] == 1});
       }
       salida.addAll((await col.guardados('lista')).map((g) => {...g, 'subtitulo': g['subtitulo'] ?? 'Lista'}));
+      if (_compartidas.isNotEmpty) {
+        salida.add({'tipo': 'cabecera', 'titulo': 'Listas compartidas'});
+        for (final c in _compartidas) {
+          salida.add({'tipo': 'lista_compartida', 'id': c.id, 'titulo': c.nombre, 'insignia': true,
+            'subtitulo': 'Compartida · ${c.dueno.visible}', 'compartida': c});
+        }
+      }
     }
     if (f == null || f == 'albumes') {
       salida.addAll((await col.guardados('album')).map((g) => {...g, 'subtitulo': g['subtitulo'] ?? 'Álbum'}));
@@ -122,6 +159,11 @@ class _BibliotecaPaginaState extends State<BibliotecaPagina> with AutomaticKeepA
               const Text('Tu biblioteca', style: estiloTituloBarra),
             ]),
             actions: [
+              IconButton(
+                tooltip: 'Tengo un código',
+                icon: const Icon(Icons.pin_outlined, size: 26),
+                onPressed: _tengoCodigo,
+              ),
               IconButton(
                 tooltip: 'Traer música de otra app o de tu teléfono',
                 icon: const Icon(Icons.playlist_add_rounded, size: 28),
@@ -196,8 +238,24 @@ class _Item extends StatelessWidget {
   Widget build(BuildContext context) {
     final s = Caudal.leer(context);
     final tipo = el['tipo'];
+    if (tipo == 'cabecera') {
+      return Padding(
+        padding: const EdgeInsets.fromLTRB(Esp.lado, 18, Esp.lado, 4),
+        child: Text('${el['titulo']}', style: estiloTituloSeccion.copyWith(fontSize: 18)),
+      );
+    }
+    final compartida = tipo == 'lista_compartida';
     Widget portada;
-    if (tipo == 'me_gusta') {
+    if (compartida) {
+      portada = Container(
+        width: 60, height: 60,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(4),
+          gradient: const LinearGradient(colors: [Color(0xFF4C1D95), Color(0xFF7C5CFF)]),
+        ),
+        child: const Icon(Icons.group_rounded, color: Colors.white),
+      );
+    } else if (tipo == 'me_gusta') {
       portada = const PortadaMeGusta(lado: 60, radio: 4);
     } else if (tipo == 'descargados') {
       portada = Container(
@@ -230,8 +288,10 @@ class _Item extends StatelessWidget {
         final sonando = ctx != null && ctx['tipo'] == tipo && '${ctx['id']}' == '${el['id'] ?? tipo}' &&
             s.reproductor.estado.name != 'parado';
         return InkWell(
-          onTap: () => s.abrirElemento(context, el),
-          onLongPress: () => s.reproducirElemento(context, el),
+          onTap: () => compartida
+              ? abrirListaCompartida(context, el['compartida'] as ListaCompartida)
+              : s.abrirElemento(context, el),
+          onLongPress: compartida ? null : () => s.reproducirElemento(context, el),
           child: Padding(
             padding: const EdgeInsets.symmetric(horizontal: Esp.lado, vertical: 7),
             child: Row(children: [
@@ -242,6 +302,10 @@ class _Item extends StatelessWidget {
                     style: estiloTituloFila.copyWith(color: sonando ? C.acento : C.texto)),
                 const SizedBox(height: 3),
                 Row(children: [
+                  if (el['insignia'] == true) Padding(
+                    padding: const EdgeInsets.only(right: 5),
+                    child: Icon(Icons.group_rounded, size: 14, color: C.acento),
+                  ),
                   if (el['fijada'] == true) Padding(
                     padding: EdgeInsets.only(right: 5),
                     child: Icon(Icons.push_pin_rounded, size: 13, color: C.acento),

@@ -12,6 +12,7 @@ import 'compartir_perfil.dart';
 import 'mensajes_pagina.dart';
 import 'perfil_comun.dart';
 import 'perfil_editar_pagina.dart';
+import 'perfil_listas.dart';
 
 /// El perfil de una persona. Sin [usuario] abre el perfil propio (con el
 /// botón para editarlo); con un usuario, el de esa persona (con amistad,
@@ -288,6 +289,7 @@ class _PerfilPaginaState extends State<PerfilPagina> {
             icono: Icons.visibility_off_outlined,
             texto: 'Tus estadísticas están ocultas para los demás. Solo tú ves esta parte.',
           ),
+        SeccionListasPerfil(usuario: p.usuario, propio: propio, social: _social),
         _Seccion(
           titulo: p.esMio ? 'Mi música subida' : 'Su música subida',
           detalle: p.numSubidas > 0 ? '${p.numSubidas}' : null,

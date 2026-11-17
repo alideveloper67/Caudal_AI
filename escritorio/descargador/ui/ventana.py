@@ -6,8 +6,8 @@ import sys
 
 from PySide6.QtCore import QAbstractNativeEventFilter, QByteArray, QEvent, QObject, QPoint, Qt, QTimer
 from PySide6.QtGui import QAction, QGuiApplication, QIcon, QKeySequence, QShortcut
-from PySide6.QtWidgets import (QAbstractSpinBox, QApplication, QComboBox, QFrame, QHBoxLayout,
-                               QLabel, QLineEdit, QMenu, QMessageBox, QPlainTextEdit, QPushButton, QSplitter,
+from PySide6.QtWidgets import (QAbstractButton, QAbstractSpinBox, QApplication, QComboBox, QFrame, QHBoxLayout,
+                               QLabel, QLineEdit, QMenu, QMessageBox, QPlainTextEdit, QPushButton, QSlider, QSplitter,
                                QStackedWidget, QSystemTrayIcon, QTextEdit, QVBoxLayout, QWidget)
 
 from .. import catalogo, redes, version
@@ -111,7 +111,7 @@ class Ventana(QWidget):
         self.setObjectName("raiz")
         self.setWindowTitle(APP_NOMBRE)
         self.setWindowIcon(QIcon(iconos.icono_app(256)))
-        self.setMinimumSize(1060, 660)
+        self.setMinimumSize(940, 600)         # cabe en portátiles de 1366 × 768
         self.resize(1440, 900)
         self.setAcceptDrops(True)
         # «Fondo de Caudal»: la copia local se ve al instante (la nube la refresca después)
@@ -119,7 +119,9 @@ class Ventana(QWidget):
         from . import estilos
         self.fondo = GestorFondo(ctx)
         ctx.fondo = self.fondo
-        estilos.FONDO["activo"] = self.fondo.activo
+        from ..mascotas import GestorMascota
+        ctx.mascota = GestorMascota(ctx)      # la mascotita del reproductor (donadores y fundadores)
+        estilos.FONDO["activo"] = self.fondo.activo or estilos.patron_actual() is not None
         self.setStyleSheet(hoja(iconos.flechas_qss()))
         self.historia = []          # [(destino, widget o None)]
         self.indice = -1
@@ -142,6 +144,11 @@ class Ventana(QWidget):
                 self.restoreGeometry(QByteArray.fromBase64(geo.encode()))
             except Exception:
                 pass
+        self._dejar_a_la_vista()
+        self._t_letra = QTimer(self)
+        self._t_letra.setSingleShot(True)
+        self._t_letra.setInterval(300)
+        self._t_letra.timeout.connect(self._ajustar_letra)
         estado_split = self.ctx.coleccion.estado("divisor")
         if estado_split:
             try:
@@ -165,6 +172,8 @@ class Ventana(QWidget):
                                   + (self.r.motivo_no_disponible or "")))
         self.buscador_version = None
         self._aviso_grande = None
+        self._aviso_mascotas = None
+        self._grande_en_sesion = False
         self._novedad_pendiente = None
         QTimer.singleShot(2500, self._avisar_novedades)
         QTimer.singleShot(1500, self.fondo.sincronizar)
@@ -405,6 +414,9 @@ class Ventana(QWidget):
         elif pag in ("album", "lista", "mi_lista", "me_gusta", "disco"):
             from .paginas.coleccion import PaginaColeccion
             w = PaginaColeccion(self.ctx, destino)
+        elif pag == "lista_compartida":
+            from .paginas.lista_compartida import PaginaListaCompartida
+            w = PaginaListaCompartida(self.ctx, destino)
         elif pag == "mix":
             from .paginas.inicio import PaginaMix
             w = PaginaMix(self.ctx, destino)
@@ -675,6 +687,7 @@ class Ventana(QWidget):
         atajo("Escape", lambda: self.en_completa and self.alternar_completa()
               or self._escape_estudio()
               or self._en_vinilo() and self.cerrar_vinilo())
+        atajo("Ctrl+Shift+A", self._anadir_sonando_a_lista)
         atajo("Ctrl+Shift+E", self.abrir_estudio)
         atajo("Ctrl+Shift+N", self._notas_estudio)
         # en la vista de video: F, I, M y flechas como en YouTube
@@ -690,12 +703,32 @@ class Ventana(QWidget):
             sc.activated.connect(lambda a=accion: self._si_no_escribe(a))
         sc = QShortcut(QKeySequence("Ctrl+V"), self)
         sc.activated.connect(self._pegar_global)
+        # Espacio: reproducir / pausar (no cuando se escribe o hay un botón con el foco, que ya usa Espacio)
+        sp = QShortcut(QKeySequence("Space"), self)
+        sp.setContext(Qt.WindowShortcut)
+        sp.activated.connect(self._espacio)
+        bar = QShortcut(QKeySequence("/"), self)
+        bar.setContext(Qt.WindowShortcut)
+        bar.activated.connect(lambda: self._si_no_escribe(self.enfocar_busqueda))
 
     def _si_no_escribe(self, accion):
         foco = QApplication.focusWidget()
         if isinstance(foco, (QLineEdit, QTextEdit, QPlainTextEdit, QComboBox, QAbstractSpinBox)):
             return
         accion()
+
+    def _espacio(self):
+        foco = QApplication.focusWidget()
+        if isinstance(foco, (QAbstractButton, QSlider)):
+            return
+        self._si_no_escribe(self.r.alternar)
+
+    def _anadir_sonando_a_lista(self):
+        p = getattr(self.r, "actual", None)
+        if not p:
+            self.ctx.aviso.emit("Ahora no suena nada: pon una canción y vuelve a pulsar Ctrl+Mayús+A.")
+            return
+        self.ctx.elegir_listas([p])
 
     def _en_video(self):
         actual = self.historia[self.indice][0] if 0 <= self.indice < len(self.historia) else {}
@@ -711,7 +744,10 @@ class Ventana(QWidget):
             foco.paste()
             return
         texto = QGuiApplication.clipboard().text().strip()
-        if redes.extraer_urls(texto):
+        from .. import listas_compartidas as LC
+        if ("/l/" in texto or "caudal://lista" in texto) and LC.extraer_codigo(texto):
+            self.ctx.tengo_un_codigo(texto)         # pegaron un enlace de lista de Caudal
+        elif redes.extraer_urls(texto):
             self.buscar_texto(texto)
 
     # ------------------------------------------------------------ reproduccion
@@ -1002,7 +1038,8 @@ class Ventana(QWidget):
             if not callado:
                 self.aviso.mostrar(f"Tienes la versión {version.VERSION}, la más reciente.")
             return
-        if self._aviso_grande is not None and self._aviso_grande.isVisible():
+        abiertos = (self._aviso_grande, getattr(self, "_aviso_mascotas", None))
+        if any(a is not None and a.isVisible() for a in abiertos):
             # no se apilan dos avisos: este sale cuando se cierre el de novedades
             self._novedad_pendiente = novedad
             return
@@ -1020,10 +1057,24 @@ class Ventana(QWidget):
             self._aviso_grande = None
             return
         if self._aviso_grande is not None:
+            self._grande_en_sesion = True
             self._aviso_grande.finished.connect(self._tras_novedades)
+            return
+        # la presentación de la 2.4.2 (mascotitas y fondos): si en este arranque ya salió la
+        # de la edición grande, espera al siguiente para que no se encimen
+        from . import presentacion_mascotas
+        try:
+            otra = True if getattr(self, "_grande_en_sesion", False) else None
+            self._aviso_mascotas = presentacion_mascotas.mostrar_si_toca(self, otra)
+        except Exception:  # noqa: BLE001
+            self._aviso_mascotas = None
+            return
+        if self._aviso_mascotas is not None:
+            self._aviso_mascotas.finished.connect(self._tras_novedades)
 
     def _tras_novedades(self, _resultado=0):
         self._aviso_grande = None
+        self._aviso_mascotas = None
         pendiente, self._novedad_pendiente = self._novedad_pendiente, None
         if pendiente:
             QTimer.singleShot(400, lambda: mostrar_aviso(pendiente, self))
@@ -1078,9 +1129,18 @@ class Ventana(QWidget):
         self.capa_fondo = CapaFondo(self.fondo, self)
         self.capa_fondo.setGeometry(self.rect())
         self.capa_fondo.lower()
-        self.capa_fondo.setVisible(self.fondo.activo)
+        self.capa_fondo.setVisible(self._con_capa())
+        # el personaje del fondo elegido, sentado sobre la barra del reproductor
+        from .fondo_capa import PersonajeEsquina
+        self.personaje_fondo = PersonajeEsquina(self, getattr(self, "barra", None))
+        self.personaje_fondo.colocar()
         self.fondo.antes_de_cambiar.connect(self._fondo_antes)
         self.fondo.cambiado.connect(self._fondo_cambiado)
+
+    def _con_capa(self):
+        """La capa de fondo se ve con la imagen de «Fondo de Caudal» o con un fondo con personaje."""
+        from . import estilos
+        return self.fondo.activo or estilos.patron_actual() is not None
 
     def _fondo_antes(self):
         # una foto de lo que se ve ahora: se desvanece encima mientras aparece lo nuevo
@@ -1089,9 +1149,9 @@ class Ventana(QWidget):
     def _fondo_cambiado(self, encendido_o_apagado):
         from . import estilos
         if encendido_o_apagado:
-            estilos.FONDO["activo"] = self.fondo.activo
+            estilos.FONDO["activo"] = self._con_capa()
             self.setStyleSheet(hoja(iconos.flechas_qss()))
-            self.capa_fondo.setVisible(self.fondo.activo)
+            self.capa_fondo.setVisible(self._con_capa())
             self.capa_fondo.lower()
         foto, self._instantanea = self._instantanea, None
         if foto is not None:
@@ -1124,10 +1184,36 @@ class Ventana(QWidget):
         anim.finished.connect(fin)
         anim.start()
 
+    def _dejar_a_la_vista(self):
+        """Si el tamaño o la posición recordados quedaron fuera de la pantalla (otro monitor, otra
+        resolución), la ventana vuelve a caber y a verse."""
+        pantalla = QGuiApplication.screenAt(self.frameGeometry().center()) or QGuiApplication.primaryScreen()
+        if pantalla is None:
+            return
+        area = pantalla.availableGeometry()
+        g = self.frameGeometry()
+        if not area.intersects(g) or g.width() > area.width() or g.height() > area.height():
+            self.resize(min(self.width(), area.width() - 40), min(self.height(), area.height() - 60))
+            self.move(area.x() + (area.width() - self.width()) // 2, area.y() + (area.height() - self.height()) // 2)
+
+    def _ajustar_letra(self):
+        """La letra se adapta al ancho: un poco más chica en ventanas estrechas y más grande en pantallas anchas.
+        Solo se rehace la hoja de estilos al cruzar un umbral (no en cada pixel que se arrastra)."""
+        from . import estilos
+        ancho = self.width()
+        base = 12.5 if ancho < 1180 else (14 if ancho >= 1900 else 13)
+        if base != estilos.ESCALA["base"]:
+            estilos.ESCALA["base"] = base
+            self.setStyleSheet(hoja(iconos.flechas_qss()))
+
     def resizeEvent(self, e):
         super().resizeEvent(e)
+        if getattr(self, "_t_letra", None) is not None:
+            self._t_letra.start()
         if getattr(self, "capa_fondo", None) is not None:
             self.capa_fondo.setGeometry(self.rect())
+        if getattr(self, "personaje_fondo", None) is not None:
+            self.personaje_fondo.colocar()
         if self.aviso.isVisible():
             self.aviso.move((self.width() - self.aviso.width()) // 2,
                             self.height() - self.aviso.height() - 120)
@@ -1267,8 +1353,17 @@ class Ventana(QWidget):
         from PySide6.QtWidgets import QApplication
         from . import iconos
         from .estilos import C, aplicar_aspecto, hoja
+        from . import estilos
         viejo = dict(C)
         aplicar_aspecto(self.ajustes["acento"], self.ajustes["fondo"])
+        # el fondo con personaje enciende (o apaga) la capa del mosaico y los paneles translúcidos
+        estilos.FONDO["activo"] = self._con_capa()
+        if hasattr(self, "capa_fondo"):
+            self.capa_fondo.setVisible(self._con_capa())
+            self.capa_fondo.lower()
+            self.capa_fondo.update()
+        if getattr(self, "personaje_fondo", None) is not None:
+            self.personaje_fondo.colocar()
         # cada color de la paleta vieja pasa a su color nuevo en todas las hojas de estilo
         mapa = {}
         for k, v in viejo.items():

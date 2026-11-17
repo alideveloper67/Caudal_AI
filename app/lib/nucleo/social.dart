@@ -220,6 +220,60 @@ class PerfilTarjeta {
       );
 }
 
+/// Una lista que se ve en un perfil (`listas_de_perfil`).
+class ListaPerfil {
+  const ListaPerfil({
+    required this.id,
+    required this.nombre,
+    this.total = 0,
+    this.publica = false,
+    this.enPerfil = false,
+    this.miniatura = '',
+  });
+
+  final String id;
+  final String nombre;
+  final int total;
+  final bool publica;
+  final bool enPerfil;
+  final String miniatura;
+
+  static ListaPerfil desde(Map m) {
+    final canciones = m['canciones'] is List ? m['canciones'] as List : const [];
+    String mini = '';
+    for (final c in canciones) {
+      if (c is Map && '${c['miniatura'] ?? ''}'.isNotEmpty) {
+        mini = '${c['miniatura']}';
+        break;
+      }
+    }
+    return ListaPerfil(
+      id: '${m['id'] ?? ''}',
+      nombre: '${m['nombre'] ?? 'Lista'}',
+      total: m['total'] is num ? (m['total'] as num).toInt() : 0,
+      publica: m['publica'] == true,
+      enPerfil: m['publica'] == true && m['en_perfil'] == true,
+      miniatura: mini,
+    );
+  }
+
+  /// Las canciones de una lista abierta con `ver_lista_publica`, listas para reproducir.
+  static List<Json> pistasDe(Map? lista) {
+    final items = lista != null && lista['canciones'] is List ? lista['canciones'] as List : const [];
+    final salida = <Json>[];
+    for (final i in items) {
+      if (i is! Map) continue;
+      final datos = i['datos'] is Map ? Map<String, dynamic>.from(i['datos'] as Map) : <String, dynamic>{};
+      final clave = '${i['clave'] ?? datos['clave'] ?? ''}';
+      if (!clave.startsWith('yt:')) continue; // solo lo que suena en linea: lo local no viaja
+      datos['clave'] = clave;
+      datos.putIfAbsent('video_id', () => clave.substring(3));
+      salida.add(datos);
+    }
+    return salida;
+  }
+}
+
 /// El perfil completo de alguien (`ver_perfil`).
 class Perfil {
   const Perfil({
@@ -857,6 +911,28 @@ class Social {
   /// `null` si no existe o hay un bloqueo de por medio.
   Future<Perfil?> verPerfil(String usuario) async =>
       Perfil.desde(await sesion.rpc('ver_perfil', {'p_usuario': usuario.trim().toLowerCase()}));
+
+  /// Las listas que se ven en el perfil de alguien (en el mio, todas, con sus ajustes). Si la nube aun no
+  /// tiene la funcion nueva devuelve vacio en vez de romper el perfil.
+  Future<List<ListaPerfil>> listasDePerfil(String usuario) async {
+    final u = usuario.trim().toLowerCase();
+    if (u.isEmpty) return const [];
+    try {
+      final d = await sesion.rpc('listas_de_perfil', {'p_usuario': u});
+      return [
+        for (final x in d is List ? d : const [])
+          if (x is Map) ListaPerfil.desde(x)
+      ];
+    } on ErrorNube {
+      return const [];
+    }
+  }
+
+  /// Una lista publica (o mia) con todas sus canciones; `null` si no se puede abrir.
+  Future<Map?> verListaPublica(String id) async {
+    final d = await sesion.rpc('ver_lista_publica', {'p_lista': id});
+    return d is Map ? d : null;
+  }
 
   Future<int> darLike(String otro) async => _i(await sesion.rpc('dar_like', {'p_otro': otro}));
   Future<int> quitarLike(String otro) async => _i(await sesion.rpc('quitar_like', {'p_otro': otro}));

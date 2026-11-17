@@ -86,6 +86,7 @@ class PaginaPerfil(Pagina):
             poner(self._insignias(p))
         if p["top_artistas"] or p["top_canciones"]:
             poner(self._top(p, color))
+        poner(self._listas(p))
         poner(self._subidas(p))
         self.cuerpo.addStretch(1)
         PC.entrada(tarjetas)
@@ -453,6 +454,77 @@ class PaginaPerfil(Pagina):
             w.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         b.clicked.connect(lambda _=False: self.ctx.reproducir_pista(pista))
         return b
+
+    # ------------------------------------------------------------ listas
+    def _listas(self, p):
+        """Las listas que su dueño eligió mostrar. En mi perfil salen todas, con una marca en las ocultas.
+        La tarjeta se queda escondida hasta saber si hay algo que enseñar."""
+        mio = p["es_mio"]
+        f, v = PC.tarjeta()
+        f.hide()
+        v.addWidget(PC.titulo_seccion(
+            "Mis listas" if mio else "Listas",
+            "Solo se muestran las que eliges hacer públicas y mostrar aquí. "
+            "Las marcadas las ves solo tú." if mio else "Listas que compartió con la comunidad."))
+        cont = QVBoxLayout()
+        cont.setSpacing(2)
+        v.addLayout(cont)
+
+        def pintar(listas):
+            if not listas:
+                return
+            for l in listas:
+                cont.addWidget(self._fila_lista(l, mio))
+            f.show()
+        en_segundo_plano(self.social.listas_de_perfil, self.usuario, ok=pintar,
+                         error=lambda e: None, dueno=self)
+        return f
+
+    def _fila_lista(self, l, mio):
+        b = QPushButton()
+        b.setCursor(Qt.PointingHandCursor)
+        b.setFixedHeight(58)
+        b.setStyleSheet(f"QPushButton{{background:transparent;border:none;border-radius:10px;text-align:left;}}"
+                        f"QPushButton:hover{{background:{C['superficie']};}}")
+        h = QHBoxLayout(b)
+        h.setContentsMargins(6, 4, 10, 4)
+        por = Portada(46, radio=6)
+        canciones = l.get("canciones") or []
+        por.set_url(next((c.get("miniatura") for c in canciones if c.get("miniatura")), "") or "")
+        h.addWidget(por)
+        col = QVBoxLayout()
+        col.setSpacing(0)
+        col.addWidget(PC.etiqueta(l.get("nombre") or "Lista", "font-size:13px;font-weight:700;", False))
+        total = int(l.get("total") or 0)
+        col.addWidget(PC.etiqueta("1 canción" if total == 1 else f"{total} canciones",
+                                  f"color:{C['texto2']};font-size:11.5px;", False))
+        h.addLayout(col, 1)
+        if mio and not l.get("en_perfil"):
+            marca = "Privada" if not l.get("publica") else "Oculta en tu perfil"
+            h.addWidget(PC.etiqueta(marca, f"color:{C['texto3']};font-size:11.5px;", False))
+        for w in b.findChildren(QLabel):
+            w.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        b.clicked.connect(lambda _=False, l=l: self._abrir_lista(l, mio))
+        return b
+
+    def _abrir_lista(self, l, mio):
+        if mio:
+            fila = self.ctx.coleccion.con.execute("SELECT id FROM listas WHERE uuid = ?",
+                                                  (l.get("id"),)).fetchone()
+            if fila:
+                self.ctx.navegar({"pagina": "mi_lista", "id": fila["id"]})
+                return
+
+        def listo(d):
+            pistas = [x for x in (S.pista_de_item(i) for i in (d or {}).get("canciones") or []) if x]
+            if not pistas:
+                self.ctx.aviso.emit("Esta lista no tiene canciones para escuchar.")
+                return
+            self.ctx.reproducir_lista(pistas, 0, {"tipo": "lista_publica", "id": l.get("id"),
+                                                  "titulo": l.get("nombre") or "Lista"})
+        en_segundo_plano(self.social.ver_lista_publica, l.get("id"), ok=listo,
+                         error=lambda e: self.ctx.aviso.emit(S.explicar(e, "abrir la lista")),
+                         dueno=self, urgente=True)
 
     def _subidas(self, p):
         f, v = PC.tarjeta()

@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import '../../reproduccion/reproductor.dart';
 import '../plataforma.dart';
 import '../tema.dart';
+import 'mascota_barra.dart';
 
 String tiempo(Duration d) {
   final s = d.inSeconds;
@@ -139,6 +140,12 @@ class _BarraProgresoState extends State<BarraProgreso> with SingleTickerProvider
             Positioned.fill(
               child: CustomPaint(
                 painter: _Pintor(fraccion: _fraccion, activo: _activo, repintar: Listenable.merge([_cambios, _activo])),
+              ),
+            ),
+            // la mascotita de donadores y fundadores (sin ella, no se crea nada)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: MascotaEnBarra(r: r, fraccion: _fraccion, cambios: _cambios, margen: _margen),
               ),
             ),
             // el tiempo que flota sobre el dedo

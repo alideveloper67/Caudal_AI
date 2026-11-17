@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 
+import '../../nucleo/mascota_app.dart';
 import '../servicios.dart';
 import '../tema.dart';
 
@@ -97,6 +98,36 @@ class _AspectoPaginaState extends State<AspectoPagina> {
               elegido: fondoPropio,
               alPulsar: () => _propio(fondo: true),
             ),
+          ],
+        ),
+        const SizedBox(height: Esp.xl),
+        const Text('Con personajes', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+        const SizedBox(height: 4),
+        const Text('Sus colores y el personaje a un costado; si tienes mascotas, también camina por la barra.',
+            style: estiloSecundario),
+        const SizedBox(height: Esp.m),
+        GridView.count(
+          crossAxisCount: 3,
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          mainAxisSpacing: 10,
+          crossAxisSpacing: 10,
+          childAspectRatio: 0.95,
+          children: [
+            for (final e in Aspecto.temas.entries)
+              _TarjetaFondo(
+                colores: e.value.$3,
+                nombre: e.value.$1,
+                patron: Aspecto.patronDe(e.key),
+                elegido: e.key == fondo,
+                alPulsar: () async {
+                  // un fondo con personaje trae su color (luego se puede cambiar)
+                  await _poner('acento', Aspecto.hexDe(e.value.$2));
+                  await _poner('fondo', e.key);
+                  // y su personaje camina por la barra (solo si la cuenta tiene mascotas)
+                  await MascotaApp.i.elegir(e.key);
+                },
+              ),
           ],
         ),
         const SizedBox(height: Esp.xl),
@@ -391,8 +422,12 @@ class _Circulo extends StatelessWidget {
 
 /// Un fondo para elegir. Sin colores: la tarjeta de «elegir el tuyo».
 class _TarjetaFondo extends StatelessWidget {
-  const _TarjetaFondo({required this.colores, required this.nombre, required this.elegido, required this.alPulsar});
+  const _TarjetaFondo(
+      {required this.colores, required this.nombre, required this.elegido, required this.alPulsar, this.patron});
   final List<Color>? colores;
+
+  /// El personaje del fondo (se asoma en la esquina de la tarjeta).
+  final String? patron;
   final String nombre;
   final bool elegido;
   final VoidCallback alPulsar;
@@ -410,6 +445,15 @@ class _TarjetaFondo extends StatelessWidget {
           duration: const Duration(milliseconds: 200),
           decoration: BoxDecoration(
             color: cs?[0] ?? C.superficie,
+            image: patron == null
+                ? null
+                : DecorationImage(
+                    // el personaje, chico, en la esquina (como en la app)
+                    image: AssetImage(patron!),
+                    alignment: const Alignment(0.92, 0.45),
+                    scale: 2.6,
+                    filterQuality: FilterQuality.none,
+                  ),
             borderRadius: BorderRadius.circular(14),
             border: Border.all(color: elegido ? C.acento : (cs?[5] ?? C.superficie3), width: elegido ? 2.5 : 1),
           ),

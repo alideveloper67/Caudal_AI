@@ -522,6 +522,13 @@ def pista_de_top(x):
     return p
 
 
+def pista_de_item(item):
+    """Una canción de una lista de la nube (`{clave, datos}`) lista para reproducir, o None."""
+    datos = dict(item.get("datos") or {})
+    datos.setdefault("clave", item.get("clave") or "")
+    return pista_de_top(datos)
+
+
 # --------------------------------------------------------------- la sesión
 
 class Social:
@@ -542,6 +549,23 @@ class Social:
             return None
         d = self.sesion.rpc("ver_perfil", p_usuario=u)
         return perfil_limpio(d) if isinstance(d, dict) else None
+
+    def listas_de_perfil(self, usuario):
+        """Las listas que se ven en el perfil de alguien (en el mío, todas, con sus ajustes).
+        Sin la función nueva en la nube devuelve [] en vez de romper el perfil."""
+        u = (usuario or "").strip().lstrip("@").lower()
+        if not u:
+            return []
+        try:
+            d = self.sesion.rpc("listas_de_perfil", p_usuario=u)
+        except nube.ErrorNube:
+            return []
+        return [l for l in d if isinstance(l, dict)] if isinstance(d, list) else []
+
+    def ver_lista_publica(self, lista_id):
+        """Una lista pública (o mía) con todas sus canciones; None si no se puede abrir."""
+        d = self.sesion.rpc("ver_lista_publica", p_lista=lista_id)
+        return d if isinstance(d, dict) else None
 
     def guardar_perfil(self, campos):
         """Cambia mi perfil. Devuelve lo que quedó guardado (el servidor puede corregir cosas)."""

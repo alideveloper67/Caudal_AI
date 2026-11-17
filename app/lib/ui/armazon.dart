@@ -8,10 +8,12 @@ import 'package:flutter/services.dart';
 
 import '../nucleo/importar.dart';
 import '../nucleo/legal.dart';
+import '../nucleo/tarjeta_lista.dart';
 import '../nucleo/version.dart';
 import '../reproduccion/reproductor.dart';
 import 'comunes.dart';
 import 'menu_comunidad.dart';
+import 'novedades/presentacion_mascotas.dart';
 import 'novedades_grandes.dart';
 import 'paginas/acceso.dart';
 import 'paginas/mensajes_pagina.dart';
@@ -24,6 +26,8 @@ import 'paginas/estudio_pagina.dart';
 import 'paginas/importar_pagina.dart';
 import 'paginas/inicio.dart';
 import 'paginas/juntos_pagina.dart';
+import 'paginas/lista_compartida_pagina.dart';
+import 'paginas/lista_compartir.dart';
 import 'paginas/legal_pagina.dart';
 import 'plataforma.dart';
 import 'reproductor/animaciones.dart';
@@ -64,7 +68,15 @@ class _ArmazonState extends State<Armazon> {
     s.irAPestana = _ir;
     s.abrirEnPestana = (pagina) =>
         _navegadores[_pestana].currentState?.push(MaterialPageRoute(builder: (_) => pagina));
+    // las listas compartidas donde soy colaborador salen en «Añadir a una lista»
+    s.destinosExtraLista ??= () => destinosListasCompartidas(s);
     s.abrirEnlace = (texto) {
+      // caudal://lista?codigo=XXXX-XXXX o https://caudal-musica.netlify.app/l/XXXX-XXXX: vista previa y «Unirme»
+      if (esEnlaceDeLista(texto)) {
+        final ctx = _navegadores[_pestana].currentContext;
+        if (ctx != null) hojaTengoCodigo(ctx, codigoInicial: texto.trim());
+        return;
+      }
       // caudal://juntos?sala=XXXXXX entra directo a la sala de "Escuchar juntos"
       if (texto.trim().toLowerCase().startsWith('caudal://juntos')) {
         _navegadores[_pestana].currentState
@@ -118,14 +130,25 @@ class _ArmazonState extends State<Armazon> {
   /// La primera vez que se abre una version con novedades grandes sale su
   /// pantalla (sobre la app, sin tocar la musica). La version vista se guarda
   /// antes de enseñarla: si la cierran o la app se cae, no vuelve a salir.
+  ///
+  /// Después, la presentación de las mascotitas (2.3.2): una sola vez, y nunca
+  /// en el mismo arranque que las novedades grandes (espera al siguiente).
   Future<void> _novedadesDeLaVersion() async {
     try {
       final p = await SharedPreferences.getInstance();
       final actual = widget.versionActual ?? versionApp;
-      if (!tocaNovedades(p.getString(claveNovedadesVistas), actual) || !mounted) return;
-      await p.setString(claveNovedadesVistas, actual);
+      final grandes = tocaNovedades(p.getString(claveNovedadesVistas), actual);
+      if (grandes) {
+        if (!mounted) return;
+        await p.setString(claveNovedadesVistas, actual);
+        if (!mounted) return;
+        await NovedadesGrandes.mostrar(context);
+        return;
+      }
+      if (!tocaPresentacionMascotas(p.getString(clavePresentacionMascotasVista), actual) || !mounted) return;
+      await p.setString(clavePresentacionMascotasVista, actual);
       if (!mounted) return;
-      await NovedadesGrandes.mostrar(context);
+      await PresentacionMascotas.mostrar(context);
     } catch (_) {}
   }
 

@@ -119,6 +119,7 @@ DEFECTOS = {
     "traducir_letra": True,          # la traduccion bajo cada linea de la letra
     "acento": "cian",                # color de la app (estilos.ACENTOS)
     "fondo": "oscuro",               # fondo de la app (estilos.FONDOS)
+    "tamano_personaje": 124,         # alto del personaje del fondo con personaje (se cambia con el ratón)
     "normalizar": True,              # mismo volumen percibido entre canciones
     "autoplay": True,                # al acabarse la cola, seguir con canciones parecidas
     "sponsorblock": True,            # saltar lo que no es musica en videos musicales
@@ -152,6 +153,7 @@ DEFECTOS = {
     "mezcla_dj_seg": 8,              # segundos de mezcla, de 4 a 16
     "mezcla_dj_graves": True,        # cambio de graves: los graves de una cancion ceden a los de la otra
     "version_novedades_vista": "",   # ultima version cuyo aviso de novedades grande ya se vio
+    "presentacion_mascotas_vista": "",   # la presentacion de la 2.4.2 (mascotitas y fondos) ya se vio
 }
 
 

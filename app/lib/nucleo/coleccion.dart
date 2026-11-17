@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
@@ -75,8 +76,8 @@ class Coleccion extends ChangeNotifier {
     return c;
   }
 
-  /// Version de la base: 2 = listas con `portada` y `portada_datos`.
-  static const _versionBase = 2;
+  /// Version de la base: 2 = listas con `portada` y `portada_datos`; 3 = listas con `publica` y `en_perfil`.
+  static const _versionBase = 3;
 
   /// Para las pruebas: abre (y migra) una base en una ruta concreta.
   @visibleForTesting
@@ -90,13 +91,22 @@ class Coleccion extends ChangeNotifier {
 
   /// Cierra la base (pruebas).
   @visibleForTesting
-  Future<void> cerrar() => db.close();
+  Future<void> cerrar() {
+    _cerrada = true;
+    _relojListas?.cancel();
+    return db.close();
+  }
 
   static Future<void> _migrar(Database db, int desde, int hasta) async {
     if (desde < 2) {
       final cols = [for (final c in await db.rawQuery('PRAGMA table_info(listas)')) '${c['name']}'];
       if (!cols.contains('portada')) await db.execute('ALTER TABLE listas ADD COLUMN portada TEXT');
       if (!cols.contains('portada_datos')) await db.execute('ALTER TABLE listas ADD COLUMN portada_datos BLOB');
+    }
+    if (desde < 3) {
+      final cols = [for (final c in await db.rawQuery('PRAGMA table_info(listas)')) '${c['name']}'];
+      if (!cols.contains('publica')) await db.execute('ALTER TABLE listas ADD COLUMN publica INTEGER DEFAULT 0');
+      if (!cols.contains('en_perfil')) await db.execute('ALTER TABLE listas ADD COLUMN en_perfil INTEGER DEFAULT 0');
     }
   }
 
@@ -114,7 +124,7 @@ class Coleccion extends ChangeNotifier {
     b.execute('CREATE TABLE me_gusta (clave TEXT PRIMARY KEY, fecha REAL)');
     b.execute('CREATE TABLE listas (id INTEGER PRIMARY KEY AUTOINCREMENT, nombre TEXT NOT NULL, '
         "creada REAL, descripcion TEXT DEFAULT '', fijada INTEGER DEFAULT 0, tocada REAL DEFAULT 0, "
-        'uuid TEXT, portada TEXT, portada_datos BLOB)');
+        'uuid TEXT, portada TEXT, portada_datos BLOB, publica INTEGER DEFAULT 0, en_perfil INTEGER DEFAULT 0)');
     b.execute('CREATE TABLE lista_items (lista_id INTEGER NOT NULL, clave TEXT NOT NULL, '
         'orden REAL DEFAULT 0, agregada REAL, PRIMARY KEY (lista_id, clave))');
     b.execute('CREATE TABLE reproducciones (id INTEGER PRIMARY KEY AUTOINCREMENT, clave TEXT NOT NULL, '
@@ -152,6 +162,7 @@ class Coleccion extends ChangeNotifier {
       ..clear()
       ..addAll((await db.query('guardados', columns: ['tipo', 'id']))
           .map((f) => '${f['tipo']}|${f['id']}'));
+    await _refrescarListasEnMemoria();
     _porVideo.clear();
     await _recolocarRutasIOS();
     for (final f in await db.query('descargas', orderBy: 'fecha DESC')) {
@@ -179,6 +190,52 @@ class Coleccion extends ChangeNotifier {
     }
   }
 
+  // ---------------------------------------------- listas en memoria
+  //
+  // La hoja «Añadir a una lista» necesita las listas al instante: se guardan
+  // en memoria y se rehacen en segundo plano cada vez que algo cambia.
+
+  List<Json>? _listasMem;
+  int? _ultimaLista;
+  Timer? _relojListas;
+  bool _cerrada = false;
+
+  /// Las listas tal como estaban la ultima vez que se miraron (null si aun no).
+  /// Se pueden pintar sin esperar a la base.
+  List<Json>? get listasEnMemoria => _listasMem;
+
+  /// La ultima lista donde se anadio algo (para ponerla arriba).
+  int? get ultimaLista => _ultimaLista;
+
+  Future<void> _refrescarListasEnMemoria() async {
+    if (_cerrada) return;
+    _listasMem = await listas();
+    final u = await estado('ultima_lista');
+    _ultimaLista = u is int ? u : int.tryParse('${u ?? ''}');
+  }
+
+  void _programarListasEnMemoria() {
+    if (_cerrada) return;
+    _relojListas?.cancel();
+    _relojListas = Timer(const Duration(milliseconds: 150), () async {
+      try {
+        await _refrescarListasEnMemoria();
+      } catch (_) {}
+    });
+  }
+
+  @override
+  void notifyListeners() {
+    super.notifyListeners();
+    _programarListasEnMemoria();
+  }
+
+  /// Recuerda la lista elegida para ponerla arriba la proxima vez.
+  Future<void> marcarListaUsada(int id) async {
+    _ultimaLista = id;
+    await guardarEstado('ultima_lista', id);
+  }
+
   /// Tras traer cambios de otros dispositivos.
   Future<void> refrescarMemoria() async {
     await _cargarMemoria();
@@ -201,6 +258,12 @@ class Coleccion extends ChangeNotifier {
     };
   }
 
+  /// El id local de la lista con ese uuid de la nube (o null si no esta en este dispositivo).
+  Future<int?> idPorUuid(String uuid) async {
+    final f = await db.query('listas', columns: ['id'], where: 'uuid = ?', whereArgs: [uuid]);
+    return f.isEmpty ? null : f.first['id'] as int;
+  }
+
   Future<String> _uuidLista(int id) async {
     final f = await db.query('listas', columns: ['uuid'], where: 'id = ?', whereArgs: [id]);
     if (f.isEmpty) return '';
@@ -211,14 +274,17 @@ class Coleccion extends ChangeNotifier {
     return nuevo;
   }
 
-  Future<void> _anotarLista(int id) async {
+  Future<void> _anotarLista(int id, {bool privacidad = false}) async {
     final l = await lista(id);
     if (l == null) return;
+    final publica = (l['publica'] ?? 0) == 1;
     await _anotar('lista_poner', {
       'uuid': await _uuidLista(id),
       'nombre': l['nombre'],
       'descripcion': l['descripcion'] ?? '',
       'fijada': (l['fijada'] ?? 0) == 1,
+      // solo viajan cuando la persona los cambia: asi no estorban si la nube aun no los conoce
+      if (privacidad) ...{'publica': publica, 'en_perfil': publica && (l['en_perfil'] ?? 0) == 1},
     });
   }
 
@@ -329,7 +395,8 @@ class Coleccion extends ChangeNotifier {
     return id;
   }
 
-  Future<void> editarLista(int id, {String? nombre, String? descripcion, bool? fijada}) async {
+  Future<void> editarLista(int id,
+      {String? nombre, String? descripcion, bool? fijada, bool? publica, bool? enPerfil}) async {
     final cambios = <String, Object?>{};
     if (nombre != null) {
       nombre = nombre.trim();
@@ -340,9 +407,18 @@ class Coleccion extends ChangeNotifier {
     }
     if (descripcion != null) cambios['descripcion'] = descripcion;
     if (fijada != null) cambios['fijada'] = fijada ? 1 : 0;
+    final cambiaPrivacidad = publica != null || enPerfil != null;
+    if (cambiaPrivacidad) {
+      final actual = await lista(id);
+      final pub = publica ?? (actual?['publica'] ?? 0) == 1;
+      final perfil = enPerfil ?? (actual?['en_perfil'] ?? 0) == 1;
+      cambios['publica'] = pub ? 1 : 0;
+      // «en el perfil» solo existe en una lista publica (igual que en el servidor)
+      cambios['en_perfil'] = pub && perfil ? 1 : 0;
+    }
     if (cambios.isEmpty) return;
     await db.update('listas', cambios, where: 'id = ?', whereArgs: [id]);
-    await _anotarLista(id);
+    await _anotarLista(id, privacidad: cambiaPrivacidad);
     notifyListeners();
   }
 
@@ -355,30 +431,53 @@ class Coleccion extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<int> agregarALista(int id, List<Json> nuevas) async {
+  /// Anade canciones al final de la lista; devuelve cuantas entraron de verdad
+  /// (las que ya estaban no cuentan).
+  Future<int> agregarALista(int id, List<Json> nuevas) async =>
+      (await agregarAListaDetalle(id, nuevas)).length;
+
+  /// Igual que [agregarALista], pero devuelve las claves que entraron (para
+  /// poder deshacer). Todo en una sola transaccion, sin esperar fila por fila.
+  Future<List<String>> agregarAListaDetalle(int id, List<Json> nuevas) async {
     final f = await db.rawQuery('SELECT COALESCE(MAX(orden), 0) m FROM lista_items WHERE lista_id = ?', [id]);
     var orden = (f.first['m'] as num).toDouble();
-    var cuantas = 0;
+    final candidatas = <String>{
+      for (final pista in nuevas)
+        if (pista['clave'] is String) pista['clave'] as String
+    }.toList();
+    final vistas = <String>{};
+    for (var i = 0; i < candidatas.length; i += 400) {
+      final trozo = candidatas.sublist(i, min(i + 400, candidatas.length));
+      final filas = await db.query('lista_items', columns: ['clave'],
+          where: 'lista_id = ? AND clave IN (${List.filled(trozo.length, '?').join(',')})',
+          whereArgs: [id, ...trozo]);
+      for (final r in filas) {
+        vistas.add('${r['clave']}');
+      }
+    }
+    final entraron = <String>[];
     final subir = <Json>[];
+    final ahora = _ahora;
+    final b = db.batch();
     for (final pista in nuevas) {
       final clave = pista['clave'] as String?;
       if (clave == null) continue;
-      await recordar(pista);
-      orden += 1;
-      final r = await db.insert('lista_items',
-          {'lista_id': id, 'clave': clave, 'orden': orden, 'agregada': _ahora},
-          conflictAlgorithm: ConflictAlgorithm.ignore);
-      if (r > 0) {
-        cuantas++;
-        if (clave.startsWith('yt:')) {
-          subir.add({'clave': clave, 'datos': paraNube(pista), 'orden': orden});
-        }
+      if (clave.startsWith('yt:')) {
+        b.insert('pistas', {'clave': clave, 'datos': jsonEncode(paraNube(pista)), 'actualizada': ahora},
+            conflictAlgorithm: ConflictAlgorithm.replace);
       }
+      orden += 1;
+      if (!vistas.add(clave)) continue;
+      b.insert('lista_items', {'lista_id': id, 'clave': clave, 'orden': orden, 'agregada': ahora},
+          conflictAlgorithm: ConflictAlgorithm.ignore);
+      entraron.add(clave);
+      if (clave.startsWith('yt:')) subir.add({'clave': clave, 'datos': paraNube(pista), 'orden': orden});
     }
-    await db.update('listas', {'tocada': _ahora}, where: 'id = ?', whereArgs: [id]);
+    b.update('listas', {'tocada': ahora}, where: 'id = ?', whereArgs: [id]);
+    await b.commit(noResult: true);
     if (subir.isNotEmpty) await _anotar('items_poner', {'uuid': await _uuidLista(id), 'items': subir});
     notifyListeners();
-    return cuantas;
+    return entraron;
   }
 
   Future<void> quitarDeLista(int id, String clave) async {
@@ -386,6 +485,19 @@ class Coleccion extends ChangeNotifier {
     if (clave.startsWith('yt:')) {
       await _anotar('item_quitar', {'uuid': await _uuidLista(id), 'clave': clave});
     }
+    notifyListeners();
+  }
+
+  /// Quita varias canciones de una lista de una vez (una sola orden para la nube).
+  Future<void> quitarVariasDeLista(int id, List<String> claves) async {
+    if (claves.isEmpty) return;
+    final b = db.batch();
+    for (final c in claves) {
+      b.delete('lista_items', where: 'lista_id = ? AND clave = ?', whereArgs: [id, c]);
+    }
+    await b.commit(noResult: true);
+    final nube = [for (final c in claves) if (c.startsWith('yt:')) c];
+    if (nube.isNotEmpty) await _anotar('items_quitar', {'uuid': await _uuidLista(id), 'claves': nube});
     notifyListeners();
   }
 

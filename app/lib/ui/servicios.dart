@@ -219,55 +219,67 @@ class Servicios {
     }
   }
 
+  /// Punto de extension: quien conozca otros sitios donde se puede anadir
+  /// (por ejemplo listas compartidas donde la persona es colaboradora) pone
+  /// aqui una funcion que los devuelve. La hoja los muestra marcados, debajo
+  /// de las listas propias, y se cargan en segundo plano (no retrasan la hoja).
+  Future<List<DestinoLista>> Function()? destinosExtraLista;
+
+  /// «Añadir a una lista»: la hoja abre al instante (las listas viven en
+  /// memoria), se pueden elegir varias a la vez y se avisa con «Deshacer».
   Future<void> anadirALista(BuildContext context, List<Json> pistas) async {
-    final listas = await coleccion.listas();
-    if (!context.mounted) return;
-    final elegida = await showModalBottomSheet<int>(
+    final eleccion = await showModalBottomSheet<EleccionLista>(
       context: context,
       useRootNavigator: true,
       isScrollControlled: true,
-      builder: (ctx) => DraggableScrollableSheet(
-        expand: false,
-        initialChildSize: 0.6,
-        maxChildSize: 0.92,
-        builder: (_, scroll) => ListView(controller: scroll, children: [
-          const Padding(
-            padding: EdgeInsets.fromLTRB(20, 4, 20, 12),
-            child: Text('Añadir a una lista', style: estiloTituloSeccion),
-          ),
-          ListTile(
-            leading: CircleAvatar(backgroundColor: C.superficie3, child: Icon(Icons.add, color: C.texto)),
-            title: const Text('Nueva lista', style: TextStyle(fontWeight: FontWeight.w700)),
-            onTap: () => Navigator.pop(ctx, -1),
-          ),
-          for (final l in listas)
-            ListTile(
-              leading: const Icon(Icons.queue_music_rounded, color: C.texto2),
-              title: Text('${l['nombre']}'),
-              subtitle: Text('${l['n']} canciones', style: estiloSecundario),
-              onTap: () => Navigator.pop(ctx, idLista(l['id']) ?? -2),
-            ),
-          SizedBox(height: 8 + MediaQuery.paddingOf(ctx).bottom),
-        ]),
-      ),
+      builder: (ctx) => HojaAnadirALista(coleccion: coleccion, proveedorExtra: destinosExtraLista),
     );
-    if (elegida == null || elegida == -2 || !context.mounted) return;
-    var id = elegida;
-    if (elegida == -1) {
-      final libre = await coleccion.nombreLibre();
-      if (!context.mounted) return;
-      final nombre = await pedirTexto(context, 'Nueva lista', libre);
-      if (nombre == null) return;
+    if (eleccion == null || eleccion.vacia) return;
+
+    final creadas = <int>[];
+    final destinos = <_DestinoElegido>[];
+    for (final id in eleccion.ids) {
+      final l = await coleccion.lista(id);
+      if (l == null) continue;
+      destinos.add(_DestinoElegido('${l['nombre']}', id: id));
+    }
+    for (final nombre in eleccion.nuevas) {
       try {
-        id = await coleccion.crearLista(nombre);
+        final id = await coleccion.crearLista(nombre);
+        creadas.add(id);
+        destinos.add(_DestinoElegido(nombre, id: id, nueva: true));
       } on FormatException catch (e) {
         avisar(e.message);
-        return;
       }
     }
-    final nuevas = await coleccion.agregarALista(id, pistas);
-    final l = await coleccion.lista(id);
-    avisar(nuevas == 0 ? 'Ya estaba en «${l?['nombre']}»' : 'Añadido a «${l?['nombre']}»');
+    for (final d in eleccion.extras) {
+      destinos.add(_DestinoElegido(d.nombre, extra: d));
+    }
+    if (destinos.isEmpty) return;
+
+    for (final d in destinos) {
+      d.entraron = d.extra != null
+          ? await d.extra!.agregar(pistas)
+          : await coleccion.agregarAListaDetalle(d.id!, pistas);
+    }
+    final ultimo = destinos.lastWhere((d) => d.id != null, orElse: () => destinos.last);
+    if (ultimo.id != null) await coleccion.marcarListaUsada(ultimo.id!);
+
+    final texto = textoAvisoAnadido([for (final d in destinos) (d.nombre, d.entraron.length)]);
+    final algo = destinos.any((d) => d.entraron.isNotEmpty || d.nueva);
+    avisar(texto, deshacer: algo ? () => _deshacerAnadir(destinos) : null);
+  }
+
+  Future<void> _deshacerAnadir(List<_DestinoElegido> destinos) async {
+    for (final d in destinos) {
+      if (d.extra != null) {
+        await d.extra!.quitar?.call(d.entraron);
+      } else if (d.nueva) {
+        await coleccion.borrarLista(d.id!);      // la lista la creo este gesto: se va con el
+      } else {
+        await coleccion.quitarVariasDeLista(d.id!, d.entraron);
+      }
+    }
   }
 
   Future<void> quitarDeLista(int listaId, Json pista) async {
@@ -440,4 +452,371 @@ class Caudal extends InheritedWidget {
 
   @override
   bool updateShouldNotify(Caudal oldWidget) => !identical(s, oldWidget.s);
+}
+
+// ---------------------------------------------------------------- añadir a una lista
+
+/// Un sitio extra donde se puede anadir canciones (ver
+/// [Servicios.destinosExtraLista]): por ejemplo, una lista compartida.
+class DestinoLista {
+  const DestinoLista({
+    required this.id, required this.nombre, required this.agregar,
+    this.quitar, this.detalle = '', this.etiqueta = '', this.icono = Icons.group_rounded,
+  });
+
+  /// Identificador propio (solo debe ser distinto entre destinos).
+  final String id;
+  final String nombre;
+
+  /// Segunda linea (por ejemplo «12 canciones · de Ana»).
+  final String detalle;
+
+  /// Marca visible (por ejemplo «Compartida»).
+  final String etiqueta;
+  final IconData icono;
+
+  /// Anade las canciones y devuelve las claves que entraron de verdad.
+  final Future<List<String>> Function(List<Json> pistas) agregar;
+
+  /// Revierte lo anadido (si no hay, el aviso no ofrece «Deshacer» para este destino).
+  final Future<void> Function(List<String> claves)? quitar;
+}
+
+/// Lo que se eligio en la hoja: listas propias, listas por crear y destinos extra.
+class EleccionLista {
+  const EleccionLista({this.ids = const [], this.nuevas = const [], this.extras = const []});
+  final List<int> ids;
+  final List<String> nuevas;
+  final List<DestinoLista> extras;
+  bool get vacia => ids.isEmpty && nuevas.isEmpty && extras.isEmpty;
+}
+
+class _DestinoElegido {
+  _DestinoElegido(this.nombre, {this.id, this.extra, this.nueva = false});
+  final String nombre;
+  final int? id;
+  final DestinoLista? extra;
+  final bool nueva;
+  List<String> entraron = const [];
+}
+
+/// El aviso de despues de anadir: [resultados] = (nombre de la lista, cuantas entraron).
+String textoAvisoAnadido(List<(String, int)> resultados) {
+  if (resultados.length == 1) {
+    final (nombre, n) = resultados.first;
+    return n == 0 ? 'Ya estaba en «$nombre»' : 'Añadido a «$nombre»';
+  }
+  final con = resultados.where((r) => r.$2 > 0).toList();
+  if (con.length == 1) return 'Añadido a «${con.first.$1}»';
+  if (con.isEmpty) return 'Ya estaba en esas ${resultados.length} listas';
+  return 'Añadido a ${con.length} listas';
+}
+
+/// Cuantas listas hacen falta para que aparezca el buscador.
+const listasParaBuscar = 8;
+
+class HojaAnadirALista extends StatefulWidget {
+  const HojaAnadirALista({super.key, required this.coleccion, this.proveedorExtra});
+  final Coleccion coleccion;
+  final Future<List<DestinoLista>> Function()? proveedorExtra;
+
+  @override
+  State<HojaAnadirALista> createState() => _HojaAnadirAListaState();
+}
+
+class _HojaAnadirAListaState extends State<HojaAnadirALista> {
+  late List<Json> _listas;
+  List<DestinoLista> _extras = [];
+  bool _cargando = false;
+  late final int? _ultima;
+  final _seleccion = <String>{};
+  final _nuevas = <String>[];
+  final _buscar = TextEditingController();
+  final _nombreNueva = TextEditingController();
+  bool _creando = false;
+  String? _errorNueva;
+
+  @override
+  void initState() {
+    super.initState();
+    _ultima = widget.coleccion.ultimaLista;
+    final memoria = widget.coleccion.listasEnMemoria;
+    _listas = memoria ?? [];
+    _cargando = memoria == null;
+    _buscar.addListener(() => setState(() {}));
+    _refrescar();
+    final extra = widget.proveedorExtra;
+    if (extra != null) {
+      extra().then((d) {
+        if (mounted) setState(() => _extras = d);
+      }).catchError((_) {});
+    }
+  }
+
+  @override
+  void dispose() {
+    _buscar.dispose();
+    _nombreNueva.dispose();
+    super.dispose();
+  }
+
+  Future<void> _refrescar() async {
+    try {
+      final l = await widget.coleccion.listas();
+      if (mounted) {
+        setState(() {
+          _listas = l;
+          _cargando = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _cargando = false);
+    }
+  }
+
+  int? _idDe(Json l) => Servicios.idLista(l['id']);
+
+  void _alternar(String k) => setState(() {
+        if (!_seleccion.remove(k)) _seleccion.add(k);
+      });
+
+  EleccionLista _armar() => EleccionLista(
+        ids: [for (final k in _seleccion) if (k.startsWith('l:')) int.parse(k.substring(2))],
+        nuevas: [for (final n in _nuevas) if (_seleccion.contains('n:$n')) n],
+        extras: [for (final d in _extras) if (_seleccion.contains('x:${d.id}')) d],
+      );
+
+  void _elegirYa(EleccionLista e) => Navigator.pop(context, e);
+
+  Future<void> _abrirNueva() async {
+    setState(() {
+      _creando = true;
+      _errorNueva = null;
+    });
+    final libre = await widget.coleccion.nombreLibre();
+    if (!mounted) return;
+    _nombreNueva.text = libre;
+    _nombreNueva.selection = TextSelection(baseOffset: 0, extentOffset: libre.length);
+  }
+
+  void _crear() {
+    final nombre = _nombreNueva.text.trim();
+    if (nombre.isEmpty) {
+      setState(() => _errorNueva = 'Escribe un nombre para la lista.');
+      return;
+    }
+    final repetida = _listas.any((l) => '${l['nombre']}'.toLowerCase() == nombre.toLowerCase()) ||
+        _nuevas.any((n) => n.toLowerCase() == nombre.toLowerCase());
+    if (repetida) {
+      setState(() => _errorNueva = 'Ya tienes una lista con ese nombre.');
+      return;
+    }
+    // sin nada elegido: se crea y se anade, como siempre, en un solo gesto
+    if (_seleccion.isEmpty) return _elegirYa(EleccionLista(nuevas: [nombre]));
+    setState(() {
+      _nuevas.add(nombre);
+      _seleccion.add('n:$nombre');
+      _creando = false;
+      _errorNueva = null;
+    });
+  }
+
+  Widget _marca(String clave, VoidCallback alTocar, String etiquetaAccesible) {
+    final on = _seleccion.contains(clave);
+    return IconButton(
+      tooltip: on ? 'Quitar $etiquetaAccesible de la elección' : 'Elegir $etiquetaAccesible',
+      icon: Icon(on ? Icons.check_circle_rounded : Icons.radio_button_unchecked_rounded,
+          color: on ? C.acento : C.texto3),
+      onPressed: alTocar,
+    );
+  }
+
+  Widget _filaLista(Json l) {
+    final id = _idDe(l);
+    if (id == null) return const SizedBox.shrink();
+    final k = 'l:$id';
+    final nombre = '${l['nombre']}';
+    final n = l['n'] ?? 0;
+    return ListTile(
+      selected: _seleccion.contains(k),
+      selectedTileColor: C.superficie3.withValues(alpha: 0.5),
+      leading: const Icon(Icons.queue_music_rounded, color: C.texto2),
+      title: Text(nombre, maxLines: 1, overflow: TextOverflow.ellipsis),
+      subtitle: Text(n == 1 ? '1 canción' : '$n canciones', style: estiloSecundario),
+      trailing: _marca(k, () => _alternar(k), '«$nombre»'),
+      onTap: () => _seleccion.isEmpty ? _elegirYa(EleccionLista(ids: [id])) : _alternar(k),
+    );
+  }
+
+  Widget _filaNueva(String nombre) {
+    final k = 'n:$nombre';
+    return ListTile(
+      selected: _seleccion.contains(k),
+      selectedTileColor: C.superficie3.withValues(alpha: 0.5),
+      leading: CircleAvatar(backgroundColor: C.superficie3, child: Icon(Icons.add, color: C.acento)),
+      title: Text(nombre, maxLines: 1, overflow: TextOverflow.ellipsis),
+      subtitle: const Text('Lista nueva', style: estiloSecundario),
+      trailing: _marca(k, () => _alternar(k), '«$nombre»'),
+      onTap: () => _alternar(k),
+    );
+  }
+
+  Widget _filaExtra(DestinoLista d) {
+    final k = 'x:${d.id}';
+    return ListTile(
+      selected: _seleccion.contains(k),
+      selectedTileColor: C.superficie3.withValues(alpha: 0.5),
+      leading: Icon(d.icono, color: C.texto2),
+      title: Row(children: [
+        Flexible(child: Text(d.nombre, maxLines: 1, overflow: TextOverflow.ellipsis)),
+        if (d.etiqueta.isNotEmpty) ...[
+          const SizedBox(width: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            decoration: BoxDecoration(color: C.superficie3, borderRadius: BorderRadius.circular(20)),
+            child: Text(d.etiqueta, style: const TextStyle(fontSize: 11, color: C.texto2)),
+          ),
+        ],
+      ]),
+      subtitle: d.detalle.isEmpty ? null : Text(d.detalle, style: estiloSecundario),
+      trailing: _marca(k, () => _alternar(k), '«${d.nombre}»'),
+      onTap: () => _seleccion.isEmpty ? _elegirYa(EleccionLista(extras: [d])) : _alternar(k),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final total = _listas.length + _extras.length + _nuevas.length;
+    final conBuscador = total > listasParaBuscar;
+    final q = _buscar.text.trim().toLowerCase();
+    bool pasa(String nombre) => q.isEmpty || nombre.toLowerCase().contains(q);
+
+    final propias = [for (final l in _listas) if (pasa('${l['nombre']}')) l];
+    // la ultima usada va arriba (si se esta buscando, solo si coincide)
+    Json? ultima;
+    if (_ultima != null) {
+      for (final l in propias) {
+        if (_idDe(l) == _ultima) ultima = l;
+      }
+    }
+    final resto = [for (final l in propias) if (!identical(l, ultima)) l];
+    final extras = [for (final d in _extras) if (pasa(d.nombre)) d];
+    final nuevas = [for (final n in _nuevas) if (pasa(n)) n];
+    final hay = _seleccion.length;
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: MediaQuery.viewInsetsOf(context).bottom),
+      child: DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.6,
+        maxChildSize: 0.92,
+        builder: (_, scroll) => Column(children: [
+          const Padding(
+            padding: EdgeInsets.fromLTRB(20, 4, 20, 8),
+            child: Align(alignment: Alignment.centerLeft,
+                child: Text('Añadir a una lista', style: estiloTituloSeccion)),
+          ),
+          if (conBuscador)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: TextField(
+                controller: _buscar,
+                textInputAction: TextInputAction.search,
+                decoration: InputDecoration(
+                  hintText: 'Buscar una lista',
+                  prefixIcon: const Icon(Icons.search_rounded),
+                  suffixIcon: q.isEmpty ? null : IconButton(
+                      tooltip: 'Borrar búsqueda', icon: const Icon(Icons.close_rounded),
+                      onPressed: _buscar.clear),
+                  isDense: true,
+                  filled: true,
+                  fillColor: C.superficie3,
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(14), borderSide: BorderSide.none),
+                ),
+              ),
+            ),
+          Expanded(
+            child: ListView(controller: scroll, children: [
+              if (_creando)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                  child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _nombreNueva,
+                        autofocus: true,
+                        textInputAction: TextInputAction.done,
+                        onSubmitted: (_) => _crear(),
+                        onChanged: (_) {
+                          if (_errorNueva != null) setState(() => _errorNueva = null);
+                        },
+                        decoration: InputDecoration(
+                          labelText: 'Nombre de la lista nueva',
+                          errorText: _errorNueva,
+                          isDense: true,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Padding(
+                      padding: const EdgeInsets.only(top: 2),
+                      child: FilledButton(onPressed: _crear, child: const Text('Crear')),
+                    ),
+                  ]),
+                )
+              else
+                ListTile(
+                  leading: CircleAvatar(backgroundColor: C.superficie3, child: Icon(Icons.add, color: C.texto)),
+                  title: const Text('Nueva lista', style: TextStyle(fontWeight: FontWeight.w700)),
+                  onTap: _abrirNueva,
+                ),
+              if (_cargando) const LinearProgressIndicator(minHeight: 2),
+              for (final n in nuevas) _filaNueva(n),
+              if (ultima != null) ...[
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(20, 10, 20, 2),
+                  child: Text('Última que usaste', style: TextStyle(fontSize: 12, color: C.texto3)),
+                ),
+                _filaLista(ultima),
+                if (resto.isNotEmpty)
+                  const Padding(
+                    padding: EdgeInsets.fromLTRB(20, 10, 20, 2),
+                    child: Text('Tus listas', style: TextStyle(fontSize: 12, color: C.texto3)),
+                  ),
+              ],
+              for (final l in resto) _filaLista(l),
+              if (extras.isNotEmpty)
+                const Padding(
+                  padding: EdgeInsets.fromLTRB(20, 14, 20, 2),
+                  child: Text('Compartidas contigo', style: TextStyle(fontSize: 12, color: C.texto3)),
+                ),
+              for (final d in extras) _filaExtra(d),
+              if (!_cargando && q.isNotEmpty && propias.isEmpty && extras.isEmpty && nuevas.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.all(24),
+                  child: Center(child: Text('No hay ninguna lista con ese nombre.', style: estiloSecundario)),
+                ),
+              const SizedBox(height: 8),
+            ]),
+          ),
+          if (hay > 0)
+            SafeArea(
+              top: false,
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 6, 16, 10),
+                child: SizedBox(
+                  width: double.infinity,
+                  child: FilledButton(
+                    onPressed: () => _elegirYa(_armar()),
+                    child: Text(hay == 1 ? 'Listo' : 'Listo ($hay listas)'),
+                  ),
+                ),
+              ),
+            )
+          else
+            SizedBox(height: MediaQuery.paddingOf(context).bottom),
+        ]),
+      ),
+    );
+  }
 }

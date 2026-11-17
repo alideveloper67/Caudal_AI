@@ -77,34 +77,65 @@ class Sincronizador(QObject):
         self.archivo = str(coleccion.archivo)
         self._corriendo = False
         self._otra_vez = False
+        self._otra_completa = False
         self._cerrojo = threading.Lock()
+        self._envio = threading.RLock()     # un solo envío de pendientes a la vez
         self.ultimo_estado = ""
         self._reloj = QTimer(self)
         self._reloj.setInterval(CADA)
-        self._reloj.timeout.connect(self.ya)
+        self._reloj.timeout.connect(self.completa)
         self._pronto = QTimer(self)
         self._pronto.setSingleShot(True)
         self._pronto.setInterval(1500)
-        self._pronto.timeout.connect(self.ya)
+        self._pronto.timeout.connect(self.ligera)
 
     def iniciar(self):
         if not self.sesion:
             return
         self._reloj.start()
-        QTimer.singleShot(800, self.ya)
+        QTimer.singleShot(800, self.completa)
 
     def pronto(self):
-        """Un cambio local: se envia en un momento (se agrupan los seguidos)."""
+        """Un cambio local: se envia en un momento (se agrupan los seguidos).
+        Solo SE ENVÍA lo pendiente: no se vuelve a bajar toda la biblioteca."""
         self._pronto.start()
 
-    def ya(self):
+    def ligera(self):
+        self.ya(False)
+
+    def completa(self):
+        """Envía y además baja los cambios de otros dispositivos (arranque, cada 3 minutos, refrescar)."""
+        self.ya(True)
+
+    def ya(self, completo=True):
         if not self.sesion:
             return
         if self._corriendo:
             self._otra_vez = True
+            self._otra_completa = self._otra_completa or completo
             return
         self._corriendo = True
-        en_segundo_plano(self._ciclo, ok=self._terminado, error=self._fallo, dueno=self)
+        en_segundo_plano(self._ciclo, completo, ok=self._terminado, error=self._fallo, dueno=self)
+
+    def enviar_ahora(self):
+        """Sube ya lo pendiente (bloquea: llamar en segundo plano). Hace falta antes de compartir una
+        lista, que tiene que existir en la nube para poder tener código."""
+        if not self.sesion:
+            return
+        con = self._abrir()
+        try:
+            with self._envio:
+                self._enviar_pendientes(con)
+        finally:
+            con.close()
+
+    def refrescar_lista(self, lista_uuid):
+        """Trae solo los cambios de UNA lista (una lista abierta que otras personas también editan)."""
+        if not self.sesion or not lista_uuid:
+            return
+        en_segundo_plano(self._traer_una, lista_uuid,
+                         ok=lambda hay: hay and (self.coleccion.olvidar_memoria(), self.cambio_remoto.emit()),
+                         error=lambda _e: None, dueno=self)
 
     def _terminado(self, resultado):
         cambio, remotos = resultado
@@ -122,14 +153,19 @@ class Sincronizador(QObject):
             self.cambio_remoto.emit()
         if self._otra_vez:
             self._otra_vez = False
-            self.pronto()
+            completa, self._otra_completa = self._otra_completa, False
+            if completa:
+                QTimer.singleShot(0, self.completa)
+            else:
+                self.pronto()
 
     def _fallo(self, e):
         self._corriendo = False
         self._fijar("sin_conexion" if isinstance(e, SinConexion) else "error")
         if self._otra_vez:
             self._otra_vez = False
-            QTimer.singleShot(20000, self.ya)
+            self._otra_completa = False
+            QTimer.singleShot(20000, self.completa)
 
     def _fijar(self, estado):
         if estado != self.ultimo_estado:
@@ -138,22 +174,32 @@ class Sincronizador(QObject):
 
     # ------------------------------------------------------------ en el hilo
 
-    def _ciclo(self):
-        con = sqlite3.connect(self.archivo, timeout=15)
-        con.row_factory = sqlite3.Row
+    def _ciclo(self, completo=True):
+        con = self._abrir()
         try:
             uid = self.sesion.user_id
             marca = con.execute("SELECT valor FROM estado WHERE clave = 'nube_usuario'").fetchone()
-            if not marca or json.loads(marca["valor"]) != uid:
-                self._subida_inicial(con)
-                con.execute("INSERT OR REPLACE INTO estado (clave, valor) VALUES ('nube_usuario', ?)",
-                            (json.dumps(uid),))
-                con.commit()
-            self._enviar_pendientes(con)
-            cambio = self._traer(con)
-            return cambio, self._sincronizar_ajustes(con)
+            with self._envio:
+                if not marca or json.loads(marca["valor"]) != uid:
+                    self._subida_inicial(con)
+                    con.execute("INSERT OR REPLACE INTO estado (clave, valor) VALUES ('nube_usuario', ?)",
+                                (json.dumps(uid),))
+                    con.commit()
+                    completo = True
+                self._enviar_pendientes(con)
+            cambio = self._traer(con) if completo else False
+            return cambio, self._sincronizar_ajustes(con, forzar=completo)
         finally:
             con.close()
+
+    def _abrir(self):
+        con = sqlite3.connect(self.archivo, timeout=15)
+        con.row_factory = sqlite3.Row
+        try:
+            con.execute("PRAGMA synchronous=NORMAL")    # con WAL es seguro y cada confirmación no espera al disco
+        except sqlite3.DatabaseError:
+            pass
+        return con
 
     def _upsert(self, tabla, filas, conflicto):
         if not filas:
@@ -176,9 +222,14 @@ class Sincronizador(QObject):
             u = l["uuid"] or nuevo_uuid()
             if not l["uuid"]:
                 con.execute("UPDATE listas SET uuid = ? WHERE id = ?", (u, l["id"]))
-            self._upsert("listas", [{"id": u, "nombre": l["nombre"],
-                                     "descripcion": l["descripcion"] or "",
-                                     "fijada": bool(l["fijada"])}], "id")
+            fila_lista = {"id": u, "nombre": l["nombre"],
+                          "descripcion": l["descripcion"] or "",
+                          "fijada": bool(l["fijada"])}
+            if l["publica"]:
+                # solo si la usa: así la subida no se rompe mientras la nube no conozca estas columnas
+                fila_lista["publica"] = True
+                fila_lista["en_perfil"] = bool(l["en_perfil"])
+            self._upsert("listas", [fila_lista], "id")
             items = [{"lista_id": u, "clave": f["clave"], "datos": pistas.get(f["clave"], {}),
                       "orden": f["orden"] or 0}
                      for f in con.execute("SELECT clave, orden FROM lista_items WHERE lista_id = ?",
@@ -223,10 +274,19 @@ class Sincronizador(QObject):
         elif op == "me_gusta_quitar":
             s.pedir("DELETE", f"me_gusta?clave=eq.{_q(d['clave'])}")
         elif op == "lista_poner":
-            self._upsert("listas", [{"id": d["uuid"], "nombre": d["nombre"],
-                                     "descripcion": d.get("descripcion", ""),
-                                     "fijada": bool(d.get("fijada")),
-                                     "actualizada": _iso(time.time())}], "id")
+            fila = {"id": d["uuid"], "nombre": d["nombre"],
+                    "descripcion": d.get("descripcion", ""),
+                    "fijada": bool(d.get("fijada")),
+                    "actualizada": _iso(time.time())}
+            if "publica" in d:
+                con_ajustes = dict(fila, publica=bool(d["publica"]),
+                                   en_perfil=bool(d["publica"]) and bool(d.get("en_perfil")))
+                try:
+                    self._upsert("listas", [con_ajustes], "id")
+                    return
+                except ErrorNube:
+                    pass      # la nube aún no conoce estos ajustes: al menos se guarda lo demás
+            self._upsert("listas", [fila], "id")
         elif op == "lista_borrar":
             s.pedir("DELETE", f"listas?id=eq.{_q(d['uuid'])}")
         elif op == "items_poner":
@@ -248,11 +308,16 @@ class Sincronizador(QObject):
         elif op == "ajustes":
             self._upsert("ajustes", [{"datos": d, "actualizado": _iso(time.time())}], "user_id")
 
-    def _sincronizar_ajustes(self, con):
+    def _sincronizar_ajustes(self, con, forzar=True):
         """Ajustes comunes: si solo cambiaron en otro dispositivo, se aplican
-        aqui (devuelve cuales); si cambiaron aqui, se suben (gana el ultimo)."""
+        aqui (devuelve cuales); si cambiaron aqui, se suben (gana el ultimo).
+        Sin `forzar` (tras un cambio local cualquiera) no se pregunta a la nube si aqui no cambiaron."""
         if self.ajustes is None:
             return {}
+        if not forzar:
+            f = con.execute("SELECT valor FROM estado WHERE clave = 'ajustes_huella'").fetchone()
+            if f and json.loads(f["valor"]) == huella_ajustes(ajustes_compartidos(self.ajustes)):
+                return {}
         def leer(clave):
             f = con.execute("SELECT valor FROM estado WHERE clave = ?", (clave,)).fetchone()
             return json.loads(f["valor"]) if f else None
@@ -284,31 +349,66 @@ class Sincronizador(QObject):
         con.commit()
         return aplicar
 
+    def _paginado(self, ruta, tanda=1000):
+        """Todas las filas de una consulta, de a `tanda` (la nube entrega como mucho 1000 por petición)."""
+        filas, desde = [], 0
+        while True:
+            lote = self.sesion.pedir("GET", f"{ruta}&limit={tanda}&offset={desde}") or []
+            filas += lote
+            if len(lote) < tanda:
+                return filas
+            desde += tanda
+
     def _traer(self, con):
         """Lo de la nube manda (salvo lo que aun espera para subir). Devuelve si
-        algo cambio en la biblioteca local."""
+        algo cambio en la biblioteca local. Solo se escribe lo que de verdad cambió:
+        con 20 listas de 300 canciones, una descarga sin novedades no toca la base."""
         s = self.sesion
         if con.execute("SELECT COUNT(*) n FROM pendientes").fetchone()["n"]:
             return False
-        antes = _huella(con)
+        cambio = False
+        pistas = _pistas_conocidas(con)
 
         # me gusta
-        remoto = s.pedir("GET", "me_gusta?select=clave,datos,fecha&order=fecha.desc&limit=5000")
-        con.execute("DELETE FROM me_gusta WHERE clave LIKE 'yt:%'")
+        remoto = s.pedir("GET", "me_gusta?select=clave,datos,fecha&order=fecha.desc&limit=5000") or []
+        locales = {f["clave"] for f in con.execute("SELECT clave FROM me_gusta WHERE clave LIKE 'yt:%'")}
+        nube = {f["clave"] for f in remoto}
+        for clave in locales - nube:
+            con.execute("DELETE FROM me_gusta WHERE clave = ?", (clave,))
+            cambio = True
         for f in remoto:
-            _recordar(con, f["clave"], f["datos"])
-            con.execute("INSERT OR REPLACE INTO me_gusta (clave, fecha) VALUES (?,?)",
-                        (f["clave"], _epoch(f["fecha"])))
+            _recordar(con, f["clave"], f["datos"], pistas)
+            if f["clave"] not in locales:
+                con.execute("INSERT OR REPLACE INTO me_gusta (clave, fecha) VALUES (?,?)",
+                            (f["clave"], _epoch(f["fecha"])))
+                cambio = True
 
-        # listas y sus canciones
-        listas = s.pedir("GET", "listas?select=id,nombre,descripcion,fijada,creada&order=creada")
+        # listas y sus canciones (las canciones de TODAS las listas en una sola consulta paginada)
+        try:
+            listas = s.pedir("GET", "listas?select=id,nombre,descripcion,fijada,creada,publica,en_perfil"
+                                    "&order=creada")
+        except ErrorNube:             # la nube aún no conoce publica / en_perfil
+            listas = s.pedir("GET", "listas?select=id,nombre,descripcion,fijada,creada&order=creada")
+        listas = listas or []
+        items = self._paginado("lista_items?select=lista_id,clave,datos,orden&order=lista_id,orden,clave")
+        por_lista = {}
+        for i in items:
+            por_lista.setdefault(i["lista_id"], []).append(i)
         uuids = {l["id"] for l in listas}
         for l in listas:
-            fila = con.execute("SELECT id FROM listas WHERE uuid = ?", (l["id"],)).fetchone()
+            fila = con.execute("SELECT * FROM listas WHERE uuid = ?", (l["id"],)).fetchone()
             if fila:
                 lid = fila["id"]
-                con.execute("UPDATE listas SET nombre = ?, descripcion = ?, fijada = ? WHERE id = ?",
-                            (l["nombre"], l["descripcion"], 1 if l["fijada"] else 0, lid))
+                nuevo = (l["nombre"], l["descripcion"], 1 if l["fijada"] else 0)
+                if nuevo != (fila["nombre"], fila["descripcion"], fila["fijada"]):
+                    con.execute("UPDATE listas SET nombre = ?, descripcion = ?, fijada = ? WHERE id = ?",
+                                nuevo + (lid,))
+                    cambio = True
+                if "publica" in l:
+                    ajustes = (1 if l["publica"] else 0, 1 if (l["publica"] and l.get("en_perfil")) else 0)
+                    if ajustes != (fila["publica"] or 0, fila["en_perfil"] or 0):
+                        con.execute("UPDATE listas SET publica = ?, en_perfil = ? WHERE id = ?", ajustes + (lid,))
+                        cambio = True
             else:
                 nombre = l["nombre"]
                 if con.execute("SELECT 1 FROM listas WHERE nombre = ?", (nombre,)).fetchone():
@@ -318,16 +418,12 @@ class Sincronizador(QObject):
                                   (nombre, _epoch(l["creada"]), l["descripcion"],
                                    1 if l["fijada"] else 0, l["id"], _epoch(l["creada"])))
                 lid = cur.lastrowid
-            items = s.pedir("GET", f"lista_items?select=clave,datos,orden&lista_id=eq.{l['id']}"
-                                   "&order=orden&limit=5000")
-            locales = [f["clave"] for f in con.execute(
-                "SELECT clave FROM lista_items WHERE lista_id = ? AND clave NOT LIKE 'yt:%'", (lid,))]
-            con.execute("DELETE FROM lista_items WHERE lista_id = ? AND clave LIKE 'yt:%'", (lid,))
-            for i in items:
-                _recordar(con, i["clave"], i["datos"])
-                con.execute("INSERT OR REPLACE INTO lista_items (lista_id, clave, orden, agregada)"
-                            " VALUES (?,?,?,?)", (lid, i["clave"], i["orden"], time.time()))
-            _ = locales     # las canciones solo locales (archivos) se quedan como estaban
+                cambio = True
+                if l.get("publica"):
+                    con.execute("UPDATE listas SET publica = 1, en_perfil = ? WHERE id = ?",
+                                (1 if l.get("en_perfil") else 0, lid))
+            if _aplicar_items(con, lid, por_lista.get(l["id"], []), pistas):
+                cambio = True
         for l in con.execute("SELECT id, uuid FROM listas WHERE uuid IS NOT NULL").fetchall():
             if l["uuid"] not in uuids:
                 _p = con.execute("SELECT portada FROM listas WHERE id = ?", (l["id"],)).fetchone()
@@ -338,18 +434,24 @@ class Sincronizador(QObject):
                         pass
                 con.execute("DELETE FROM lista_items WHERE lista_id = ?", (l["id"],))
                 con.execute("DELETE FROM listas WHERE id = ?", (l["id"],))
+                cambio = True
 
         # guardados
-        guardados = s.pedir("GET", "guardados?select=tipo,id,datos,fecha")
-        con.execute("DELETE FROM guardados")
-        for g in guardados:
-            con.execute("INSERT OR REPLACE INTO guardados (tipo, id, datos, fecha) VALUES (?,?,?,?)",
-                        (g["tipo"], g["id"], json.dumps(g["datos"], ensure_ascii=False),
-                         _epoch(g["fecha"])))
+        guardados = s.pedir("GET", "guardados?select=tipo,id,datos,fecha") or []
+        locales_g = {(f["tipo"], f["id"]): f["datos"] for f in con.execute("SELECT tipo, id, datos FROM guardados")}
+        nube_g = {(g["tipo"], g["id"]): g for g in guardados}
+        if set(locales_g) != set(nube_g) or any(
+                _distinto(locales_g[k], g["datos"]) for k, g in nube_g.items()):
+            con.execute("DELETE FROM guardados")
+            for g in guardados:
+                con.execute("INSERT OR REPLACE INTO guardados (tipo, id, datos, fecha) VALUES (?,?,?,?)",
+                            (g["tipo"], g["id"], json.dumps(g["datos"], ensure_ascii=False),
+                             _epoch(g["fecha"])))
+            cambio = True
 
         # escuchas de otros dispositivos
         escuchas = s.pedir("GET", "escuchas?select=id,clave,datos,contexto,fecha"
-                                  "&order=fecha.desc&limit=300")
+                                  "&order=fecha.desc&limit=300") or []
         for e in escuchas:
             if con.execute("SELECT 1 FROM reproducciones WHERE nube_id = ?", (e["id"],)).fetchone():
                 continue
@@ -359,25 +461,88 @@ class Sincronizador(QObject):
             if ya:
                 con.execute("UPDATE reproducciones SET nube_id = ? WHERE id = ?", (e["id"], ya["id"]))
                 continue
-            _recordar(con, e["clave"], e["datos"])
+            _recordar(con, e["clave"], e["datos"], pistas)
             con.execute("INSERT INTO reproducciones (clave, fecha, contexto, nube_id) VALUES (?,?,?,?)",
                         (e["clave"], _epoch(e["fecha"]),
                          json.dumps(e["contexto"], ensure_ascii=False) if e["contexto"] else "",
                          e["id"]))
+            cambio = True
         con.commit()
-        return _huella(con) != antes
+        return cambio
+
+    def _traer_una(self, lista_uuid):
+        """Una sola lista (la que está abierta). Devuelve si cambió algo."""
+        con = self._abrir()
+        try:
+            if con.execute("SELECT COUNT(*) n FROM pendientes").fetchone()["n"]:
+                return False
+            fila = con.execute("SELECT id FROM listas WHERE uuid = ?", (lista_uuid,)).fetchone()
+            if not fila:
+                return False
+            items = self._paginado("lista_items?select=lista_id,clave,datos,orden"
+                                   f"&lista_id=eq.{_q(lista_uuid)}&order=orden,clave")
+            hay = _aplicar_items(con, fila["id"], items, _pistas_conocidas(con))
+            con.commit()
+            return hay
+        finally:
+            con.close()
 
 
-def _recordar(con, clave, datos):
-    if datos:
-        con.execute("INSERT OR REPLACE INTO pistas (clave, datos, actualizada) VALUES (?,?,?)",
-                    (clave, json.dumps(datos, ensure_ascii=False), time.time()))
+def _distinto(guardado, nuevo):
+    try:
+        return json.loads(guardado) != nuevo
+    except (TypeError, ValueError):
+        return True
+
+
+def _pistas_conocidas(con):
+    """clave -> datos (texto) de las pistas ya guardadas, para no reescribir las que no cambiaron."""
+    return {f["clave"]: f["datos"] for f in con.execute("SELECT clave, datos FROM pistas")}
+
+
+def _aplicar_items(con, lista_id, remotos, pistas):
+    """Deja las canciones de internet de la lista como están en la nube, tocando solo lo que
+    cambió. Las que son archivos de este equipo (local:) no se tocan. Devuelve si algo cambió."""
+    locales = {f["clave"]: f["orden"] for f in con.execute(
+        "SELECT clave, orden FROM lista_items WHERE lista_id = ? AND clave LIKE 'yt:%'", (lista_id,))}
+    cambio = False
+    nube = {i["clave"]: i["orden"] for i in remotos}
+    for clave in set(locales) - set(nube):
+        con.execute("DELETE FROM lista_items WHERE lista_id = ? AND clave = ?", (lista_id, clave))
+        cambio = True
+    for i in remotos:
+        _recordar(con, i["clave"], i["datos"], pistas)
+        antes = locales.get(i["clave"])
+        if antes is None or float(antes or 0) != float(i["orden"] or 0):
+            con.execute("INSERT INTO lista_items (lista_id, clave, orden, agregada) VALUES (?,?,?,?)"
+                        " ON CONFLICT(lista_id, clave) DO UPDATE SET orden = excluded.orden",
+                        (lista_id, i["clave"], i["orden"], time.time()))
+            cambio = True
+    return cambio
+
+
+def _recordar(con, clave, datos, pistas=None):
+    """Guarda los datos de una pista si son nuevos o cambiaron. Devuelve si escribió."""
+    if not datos:
+        return False
+    if pistas is not None and clave in pistas:
+        try:
+            if json.loads(pistas[clave]) == datos:
+                return False
+        except (TypeError, ValueError):
+            pass
+    texto = json.dumps(datos, ensure_ascii=False)
+    con.execute("INSERT OR REPLACE INTO pistas (clave, datos, actualizada) VALUES (?,?,?)",
+                (clave, texto, time.time()))
+    if pistas is not None:
+        pistas[clave] = texto
+    return True
 
 
 def _huella(con):
     partes = []
     for sql in ("SELECT group_concat(clave) FROM (SELECT clave FROM me_gusta ORDER BY clave)",
-                "SELECT group_concat(uuid || nombre || descripcion || fijada) FROM listas",
+                "SELECT group_concat(uuid || nombre || descripcion || fijada || COALESCE(publica, 0) || COALESCE(en_perfil, 0)) FROM listas",
                 "SELECT group_concat(lista_id || clave || orden) FROM lista_items",
                 "SELECT group_concat(tipo || id) FROM guardados",
                 "SELECT COUNT(*) FROM reproducciones"):

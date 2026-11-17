@@ -96,6 +96,19 @@ class Nube {
       'sin sesion': 'Tu sesión terminó. Vuelve a iniciar sesión.',
       'no tienes permiso para revisar': 'Esta cuenta no puede revisar música.',
       'ya no esta pendiente': 'Esa canción ya fue revisada por otra persona.',
+      // listas compartidas (supabase/listas.sql)
+      'ese código no existe o la lista': 'Ese código no existe o la lista ya no se comparte. Revisa que esté bien escrito.',
+      'no te puedes unir': 'No puedes unirte a esta lista.',
+      'ya tiene 20 personas': 'Esta lista ya está llena (20 personas). Pídele a su dueño que haga lugar.',
+      'esa lista no existe o no es tuya': 'Esa lista ya no existe o no es tuya. Si la acabas de crear, espera unos segundos a que se envíe y vuelve a probar.',
+      'no tienes acceso a esa lista': 'Ya no tienes acceso a esa lista. Puede que su dueño haya dejado de compartirla.',
+      'solo puedes escuchar': 'En esta lista solo puedes escuchar: no puedes añadir ni quitar canciones.',
+      'solo puedes quitar las canciones que añadiste': 'Solo puedes quitar las canciones que añadiste tú.',
+      'admite hasta 2000': 'Esta lista ya llegó al máximo de 2000 canciones.',
+      'no estás en esa lista': 'Ya no estás en esa lista.',
+      'esa persona no está en la lista': 'Esa persona ya no está en la lista.',
+      'solo el dueño de la lista': 'Solo el dueño de la lista puede quitar a alguien.',
+      'necesitas iniciar sesión': 'Tu sesión terminó. Vuelve a iniciar sesión.',
       'no se puede': 'No se puede hacer eso con esta persona.',
     };
     for (final e in casos.entries) {

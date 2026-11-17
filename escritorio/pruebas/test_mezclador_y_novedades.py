@@ -19,6 +19,14 @@ def datos_aislados(tmp_path, monkeypatch):
     yield tmp_path
 
 
+@pytest.fixture(autouse=True)
+def _sin_cuadros_modales(monkeypatch):
+    # en las pruebas no hay motor de audio: el aviso modal de la ventana colgaría la prueba
+    from PySide6.QtWidgets import QMessageBox
+    monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **k: 0))
+    monkeypatch.setattr(QMessageBox, "question", staticmethod(lambda *a, **k: QMessageBox.No))
+
+
 @pytest.fixture(scope="module")
 def app():
     from PySide6.QtWidgets import QApplication
@@ -457,6 +465,9 @@ def test_version_a_la_vista_y_aviso_sin_cortar_la_musica(app, datos_aislados, mo
     from descargador import version
     from descargador.ui import novedades_grandes
     from descargador.ui.ventana import Ventana
+    from PySide6.QtWidgets import QMessageBox
+    # sin motor de audio en las pruebas: el aviso modal colgaría la prueba esperando un clic
+    monkeypatch.setattr(QMessageBox, "warning", staticmethod(lambda *a, **k: 0))
     ctx = _contexto(app)
     v = Ventana(ctx)
     v.resize(1440, 900)
@@ -497,8 +508,8 @@ def test_pagina_mezclador_armar_ordenar_probar_reproducir_y_guardar(app, datos_a
     ctx = _contexto(app)
     avisos, llamadas = [], []
     ctx.aviso.connect(avisos.append)
-    ctx.reproductor.reproducir_set = lambda p, pasos, nombre="": llamadas.append(("set", len(p), pasos, nombre))
-    ctx.reproductor.probar_paso = lambda a, b, paso: llamadas.append(("prueba", a["clave"], b["clave"], paso))
+    ctx.reproductor.reproducir_set = lambda p, pasos, nombre="", **_: llamadas.append(("set", len(p), pasos, nombre))
+    ctx.reproductor.probar_paso = lambda a, b, paso, **_: llamadas.append(("prueba", a["clave"], b["clave"], paso))
     pagina = PaginaMezclador(ctx)
     pagina.resize(900, 900)
     pagina.show()

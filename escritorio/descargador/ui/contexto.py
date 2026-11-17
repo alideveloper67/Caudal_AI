@@ -36,6 +36,22 @@ PRESETS_DESCARGA = [
 ]
 
 
+def nube_de(ctx):
+    """Las llamadas de las listas compartidas, o None si no hay cuenta con conexión."""
+    from ..listas_compartidas import ListasCompartidas
+    s = (getattr(ctx, "cuenta", None) or {}).get("sesion")
+    return ListasCompartidas(s) if s and getattr(s, "access", "") else None
+
+
+def explicar_error(e, que="hacer eso"):
+    from ..nube import ErrorNube, SinConexion
+    if isinstance(e, SinConexion):
+        return "Sin conexión. Revisa tu internet y vuelve a intentarlo."
+    if isinstance(e, ErrorNube) and str(e).strip():
+        return str(e)
+    return f"No se pudo {que}. Vuelve a intentarlo."
+
+
 def url_de(pista):
     if pista.get("video_id"):
         if pista.get("es_video"):
@@ -84,6 +100,8 @@ class Contexto(QObject):
                           "titulo": el.get("titulo")})
         elif tipo == "mi_lista":
             self.navegar({"pagina": "mi_lista", "id": el["id"]})
+        elif tipo == "lista_compartida":
+            self.navegar({"pagina": "lista_compartida", "id": el["id"], "el": el})
         elif tipo == "me_gusta":
             self.navegar({"pagina": "me_gusta"})
 
@@ -125,6 +143,9 @@ class Contexto(QObject):
             self.reproducir_lista(pistas, 0, {"tipo": "mi_lista", "id": el["id"],
                                               "titulo": el.get("titulo") or el.get("nombre")},
                                   aleatorio)
+            return
+        if tipo == "lista_compartida":
+            self.pistas_de(el, lambda ps: self.reproducir_lista(ps, 0, None, aleatorio))
             return
         if tipo == "me_gusta":
             self.reproducir_lista(self.coleccion.lista_me_gusta(), 0,
@@ -168,6 +189,19 @@ class Contexto(QObject):
             al_tener([el])
         elif tipo == "mi_lista":
             al_tener(self.coleccion.pistas_de_lista(el["id"]))
+        elif tipo == "lista_compartida":
+            nube = nube_de(self)
+            if nube is None:
+                self.aviso.emit("Las listas compartidas necesitan internet.")
+                return
+
+            def listo(filas):
+                if filas:
+                    al_tener(list(filas))
+                else:
+                    self.aviso.emit("Esa lista aún no tiene canciones.")
+            en_segundo_plano(nube.pistas, el["id"], ok=listo,
+                             error=lambda e: self.aviso.emit(explicar_error(e)), dueno=self)
         elif tipo == "me_gusta":
             al_tener(self.coleccion.lista_me_gusta())
         elif tipo in ("album", "lista"):
@@ -214,6 +248,7 @@ class Contexto(QObject):
         self.avisar("Quitada de la lista", deshacer)
 
     def anadir_a_lista(self, pistas, lista_id=None):
+        """Una sola lista (o «Nueva lista…» si no se da). Avisa con «Deshacer»."""
         if isinstance(pistas, dict):
             pistas = [pistas]
         if lista_id is None:
@@ -226,13 +261,96 @@ class Contexto(QObject):
             except ValueError as e:
                 QMessageBox.warning(self.ventana, "Caudal", str(e))
                 return
-        nuevas = self.coleccion.agregar_a_lista(lista_id, pistas)
-        lista = self.coleccion.lista(lista_id) or {}
+        self.anadir_a_listas(pistas, [lista_id])
+
+    def anadir_a_listas(self, pistas, ids, compartidas=()):
+        """Guarda las canciones en varias listas de una vez. Lo mío se guarda al instante
+        (en esta PC) y la nube se entera después; lo de las listas compartidas va en segundo plano.
+        El aviso trae «Deshacer»: quita solo lo que esta acción añadió."""
+        if isinstance(pistas, dict):
+            pistas = [pistas]
+        col = self.coleccion
+        puestas = []                   # (id de lista, nombre, [claves nuevas])
+        for lid in ids:
+            antes = col.claves_de_lista(lid)
+            nuevas = [p["clave"] for p in pistas if p.get("clave") and p["clave"] not in antes]
+            col.agregar_a_lista(lid, pistas)
+            puestas.append((lid, (col.lista(lid) or {}).get("nombre", ""), nuevas))
+        if ids:
+            col.guardar_estado("ultima_lista", ids[0])
         self.listas_cambio.emit()
-        if nuevas == 0:
-            self.aviso.emit(f"Ya estaba en «{lista.get('nombre', '')}»")
+        nube = nube_de(self) if compartidas else None
+        for c in compartidas:
+            self._anadir_a_compartida(nube, c, pistas)
+        total_nuevas = sum(len(n) for _l, _n, n in puestas)
+        todas = [x[1] for x in puestas] + [c["nombre"] for c in compartidas]
+        if len(todas) == 1:
+            nombre = todas[0]
+            if puestas and total_nuevas == 0:
+                self.aviso.emit(f"Ya estaba en «{nombre}»")
+                return
+            texto = f"Añadido a «{nombre}»"
         else:
-            self.aviso.emit(f"Añadido a «{lista.get('nombre', '')}»")
+            texto = f"Añadido a {len(todas)} listas"
+
+        def deshacer():
+            for lid, _n, nuevas in puestas:
+                for clave in nuevas:
+                    col.quitar_de_lista(lid, clave)
+            n2 = nube_de(self)
+            for c in compartidas:
+                for p in pistas:
+                    if n2 is not None and p.get("clave"):
+                        en_segundo_plano(n2.quitar, c["id"], p["clave"], error=lambda _e: None, dueno=self)
+            self.listas_cambio.emit()
+        self.avisar(texto, deshacer)
+
+    def _anadir_a_compartida(self, nube, lista, pistas):
+        if nube is None:
+            self.aviso.emit("Las listas compartidas necesitan internet.")
+            return
+        en_segundo_plano(nube.agregar, lista["id"], pistas,
+                         ok=lambda _n: self.listas_cambio.emit(),
+                         error=lambda e: self.aviso.emit(explicar_error(e)), dueno=self)
+
+    def tengo_un_codigo(self, codigo=""):
+        from .dialogos_listas import tengo_un_codigo
+        tengo_un_codigo(self, codigo, self.ventana)
+
+    def compartir_lista(self, lista_id):
+        from .dialogos_listas import compartir_lista
+        compartir_lista(self, lista_id, self.ventana)
+
+    def salir_de_lista_compartida(self, el):
+        nube = nube_de(self)
+        if nube is None:
+            self.aviso.emit("Salir de una lista necesita internet.")
+            return
+        r = QMessageBox.question(self.ventana, "Salir de la lista",
+                                 f"¿Salir de «{el.get('titulo') or el.get('nombre')}»? Dejarás de verla en tu biblioteca.")
+        if r != QMessageBox.Yes:
+            return
+
+        def listo(_r):
+            from .. import listas_compartidas as LC
+            LC._CACHE.pop("mis_compartidas", None)
+            self.coleccion.guardar_estado(LC.CLAVE_COMPARTIDAS, [x for x in LC.compartidas_guardadas(self.coleccion)
+                                                                if x.get("id") != el["id"]])
+            self.listas_cambio.emit()
+            self.aviso.emit("Saliste de la lista")
+        en_segundo_plano(nube.salir, el["id"], ok=listo,
+                         error=lambda e: self.aviso.emit(explicar_error(e, "salir de la lista")), dueno=self)
+
+    def elegir_listas(self, pistas):
+        """«Añadir a una lista…»: elegir una o varias (la última usada arriba), buscar o crear una nueva."""
+        if isinstance(pistas, dict):
+            pistas = [pistas]
+        if not pistas:
+            return
+        from .dialogos_listas import DialogoAnadirALista
+        d = DialogoAnadirALista(self, pistas, self.ventana)
+        if d.exec() and (d.ids or d.compartidas):
+            self.anadir_a_listas(pistas, d.ids, d.compartidas)
 
     def importar_de_pc(self):
         """Traer canciones que ya tienes en la PC: quedan en «En tu disco» y,
@@ -370,13 +488,18 @@ class Contexto(QObject):
 
     def _submenu_listas(self, menu, pistas):
         sub = menu.addMenu(iconos.icono("anadir_lista", 16, C["texto2"]), "Añadir a una lista")
+        sub.addAction(iconos.icono("anadir_lista", 16, C["texto2"]), "Elegir listas…   Ctrl+Mayús+A",
+                      lambda: self.elegir_listas(pistas))
         sub.addAction(iconos.icono("mas", 16, C["texto2"]), "Nueva lista…",
                       lambda: self.anadir_a_lista(pistas, None))
         listas = self.coleccion.listas()
+        ultima = self.coleccion.estado("ultima_lista")
+        listas.sort(key=lambda l: l["id"] != ultima)        # la última usada, arriba (el resto conserva su orden)
         if listas:
             sub.addSeparator()
         for l in listas[:40]:
-            sub.addAction(l["nombre"], lambda i=l["id"]: self.anadir_a_lista(pistas, i))
+            texto = l["nombre"] + ("   · la última" if l["id"] == ultima else "")
+            sub.addAction(texto, lambda i=l["id"]: self.anadir_a_lista(pistas, i))
         return sub
 
     def abrir_similares(self, pista):
@@ -476,6 +599,16 @@ class Contexto(QObject):
         menu = QMenu(self.ventana)
         menu.addAction(iconos.icono("reproducir", 16, C["texto2"]), "Reproducir",
                        lambda: self.reproducir_elemento(el))
+        if tipo == "lista_compartida":
+            menu.addAction(iconos.icono("aleatorio", 16, C["texto2"]), "Reproducir en aleatorio",
+                           lambda: self.reproducir_elemento(el, aleatorio=True))
+            menu.addAction(iconos.icono("lista", 16, C["texto2"]), "Añadir a la cola",
+                           lambda: self.pistas_de(el, self.reproductor.agregar_a_cola))
+            menu.addAction(iconos.icono("anadir_lista", 16, C["texto2"]), "Guardar todo en una de mis listas…",
+                           lambda: self.pistas_de(el, self.elegir_listas))
+            menu.addSeparator()
+            menu.addAction(iconos.icono("salir", 16, C["texto2"]), "Salir de la lista",
+                           lambda: self.salir_de_lista_compartida(el))
         if tipo in ("album", "lista", "mi_lista", "me_gusta"):
             menu.addAction(iconos.icono("aleatorio", 16, C["texto2"]), "Reproducir en aleatorio",
                            lambda: self.reproducir_elemento(el, aleatorio=True))

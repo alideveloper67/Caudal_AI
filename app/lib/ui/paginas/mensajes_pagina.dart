@@ -5,12 +5,15 @@ import 'package:flutter/material.dart';
 import '../../nucleo/chat.dart';
 import '../../nucleo/coleccion.dart';
 import '../../nucleo/nube.dart';
+import '../../nucleo/tarjeta_lista.dart';
 import '../../nucleo/social.dart';
 import '../comunes.dart';
 import '../emojis.dart';
 import '../servicios.dart';
 import '../tema.dart';
 import 'amigos_pagina.dart';
+import 'lista_compartida_pagina.dart';
+import 'lista_compartir.dart';
 import 'perfil_comun.dart';
 
 /// El chat de la cuenta (null sin sesión: se entró sin internet).
@@ -331,22 +334,23 @@ class _DialogoNuevoChatState extends State<_DialogoNuevoChat> {
   }
 }
 
-/// "Enviar en un chat" desde el menú de una canción.
-Future<void> enviarPistaAChat(BuildContext context, Json pista) async {
+/// «Enviar a…»: elige una conversación existente o a alguien nuevo (un amigo).
+/// Nulo si se cancela o no se pudo traer la lista de chats.
+Future<ResumenChat?> elegirDestinoChat(BuildContext context) async {
   final chat = chatDe(context);
   final s = Caudal.leer(context);
   if (chat == null) {
     s.avisar('Los mensajes necesitan internet.');
-    return;
+    return null;
   }
   List<ResumenChat> chats;
   try {
     chats = await chat.misChats();
   } catch (e) {
     s.avisar(_error(e));
-    return;
+    return null;
   }
-  if (!context.mounted) return;
+  if (!context.mounted) return null;
   final elegido = await showModalBottomSheet<Object>(
     context: context,
     useRootNavigator: true,
@@ -375,8 +379,19 @@ Future<void> enviarPistaAChat(BuildContext context, Json pista) async {
       ]),
     ),
   );
-  if (!context.mounted || elegido == null) return;
-  final destino = elegido is ResumenChat ? elegido : await nuevoChat(context);
+  if (!context.mounted || elegido == null) return null;
+  return elegido is ResumenChat ? elegido : await nuevoChat(context);
+}
+
+/// "Enviar en un chat" desde el menú de una canción.
+Future<void> enviarPistaAChat(BuildContext context, Json pista) async {
+  final chat = chatDe(context);
+  final s = Caudal.leer(context);
+  if (chat == null) {
+    s.avisar('Los mensajes necesitan internet.');
+    return;
+  }
+  final destino = await elegirDestinoChat(context);
   if (destino == null) return;
   try {
     await chat.enviar(destino.id, pista: pista);
@@ -398,10 +413,11 @@ class ConversacionPagina extends StatefulWidget {
 
 /// Un mensaje que ya se ve pero el servidor aún no confirmó.
 class _Pendiente {
-  _Pendiente(this.clave, this.texto, this.pista);
+  _Pendiente(this.clave, this.texto, this.pista, [this.lista]);
   final int clave;
   final String texto;
   final Json? pista;
+  final TarjetaLista? lista;
   final DateTime creado = DateTime.now();
   String? fallo; // por qué no se envió (null mientras va en camino)
 }
@@ -484,11 +500,11 @@ class _ConversacionPaginaState extends State<ConversacionPagina> {
 
   /// Se ve al momento con «Enviando…»; si falla, se toca para reintentar.
   /// El campo nunca se bloquea: se puede seguir escribiendo mientras tanto.
-  void _enviar({Json? pista}) {
-    final texto = pista == null ? _campo.text.trim() : '';
-    if (_chat == null || (texto.isEmpty && pista == null)) return;
-    if (pista == null) _campo.clear();
-    final p = _Pendiente(++_siguiente, texto, pista);
+  void _enviar({Json? pista, TarjetaLista? lista}) {
+    final texto = pista == null && lista == null ? _campo.text.trim() : '';
+    if (_chat == null || (texto.isEmpty && pista == null && lista == null)) return;
+    if (pista == null && lista == null) _campo.clear();
+    final p = _Pendiente(++_siguiente, texto, pista, lista);
     setState(() => _pendientes.add(p));
     if (_scroll.hasClients) {
       _scroll.animateTo(0, duration: const Duration(milliseconds: 200), curve: Curves.easeOut);
@@ -502,7 +518,7 @@ class _ConversacionPaginaState extends State<ConversacionPagina> {
     setState(() => p.fallo = null);
     _enCamino++;
     try {
-      final m = await c.enviar(widget.chat.id, texto: p.texto, pista: p.pista);
+      final m = await c.enviar(widget.chat.id, texto: p.texto, pista: p.pista, lista: p.lista);
       if (!mounted) return;
       setState(() {
         _pendientes.remove(p);
@@ -527,6 +543,13 @@ class _ConversacionPaginaState extends State<ConversacionPagina> {
       return;
     }
     _enviar(pista: p);
+  }
+
+  /// «Enviar una lista»: elige una de tus listas (se comparte sola si hace
+  /// falta) y se manda la tarjeta a esta conversación.
+  Future<void> _enviarLista() async {
+    final t = await hojaEnviarLista(context);
+    if (t != null && mounted) _enviar(lista: t);
   }
 
   Future<void> _mezcla() async {
@@ -587,7 +610,7 @@ class _ConversacionPaginaState extends State<ConversacionPagina> {
           if (i < _pendientes.length) {
             final p = _pendientes[_pendientes.length - 1 - i];
             return _Burbuja(
-              mensaje: Mensaje(id: -p.clave, autor: yo, texto: p.texto, pista: p.pista, creado: p.creado),
+              mensaje: Mensaje(id: -p.clave, autor: yo, texto: p.texto, pista: p.pista, lista: p.lista, creado: p.creado),
               mio: true,
               estado: p.fallo == null ? 'Enviando…' : '⚠ ${p.fallo} · Toca para reintentar',
               alTocarEstado: p.fallo == null ? null : () => _mandar(p),
@@ -649,7 +672,14 @@ class _ConversacionPaginaState extends State<ConversacionPagina> {
                     onPressed: _enviarLoQueSuena,
                   ),
                   IconButton(
+                    tooltip: 'Enviar una lista',
+                    visualDensity: VisualDensity.compact,
+                    icon: const Icon(Icons.playlist_add_rounded),
+                    onPressed: _enviarLista,
+                  ),
+                  IconButton(
                     tooltip: 'Emojis',
+                    visualDensity: VisualDensity.compact,
                     icon: const Icon(Icons.emoji_emotions_outlined),
                     onPressed: () => elegirEmoji(context, (e) => insertarEnCampo(_campo, e)),
                   ),
@@ -725,6 +755,8 @@ class _Burbuja extends StatelessWidget {
           ]),
         ),
       );
+    } else if (mensaje.lista != null) {
+      contenido = TarjetaListaChat(tarjeta: mensaje.lista!, mio: mio);
     } else {
       contenido = Text(mensaje.texto, style: TextStyle(fontSize: 15.5, color: mio ? C.acentoTexto : C.texto, height: 1.3));
     }

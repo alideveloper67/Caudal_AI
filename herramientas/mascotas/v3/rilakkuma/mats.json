@@ -1,0 +1,61 @@
+{
+ "#b8834f": {
+  "sombra": "#93603a",
+  "luz": "#d4a06a",
+  "contorno": "#5e3618",
+  "oscuro": "#24120a"
+ },
+ "#b8834e": {
+  "sombra": "#93603a",
+  "luz": "#d4a06a",
+  "contorno": "#5e3618",
+  "oscuro": "#24120a",
+  "interior": true
+ },
+ "#b8824f": {
+  "sombra": "#93603a",
+  "luz": "#d4a06a",
+  "contorno": "#5e3618",
+  "oscuro": "#24120a",
+  "interior": true
+ },
+ "#b7834f": {
+  "sombra": "#93603a",
+  "luz": "#d4a06a",
+  "contorno": "#5e3618",
+  "oscuro": "#24120a",
+  "interior": true
+ },
+ "#fbe6c0": {
+  "sombra": "#ecc898",
+  "luz": "#fff4dc",
+  "contorno": "#a8784a"
+ },
+ "#fbe6c1": {
+  "fijo": true
+ },
+ "#22140c": {
+  "fijo": true
+ },
+ "#ffffff": {
+  "fijo": true
+ },
+ "#3a2010": {
+  "fijo": true
+ },
+ "#4a2a16": {
+  "fijo": true
+ },
+ "#f4a08a": {
+  "fijo": true
+ },
+ "#c8ccd8": {
+  "fijo": true
+ },
+ "#7a7f94": {
+  "fijo": true
+ },
+ "#fbe7c0": {
+  "fijo": true
+ }
+}

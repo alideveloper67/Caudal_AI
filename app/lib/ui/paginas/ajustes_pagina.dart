@@ -15,6 +15,8 @@ import '../servicios.dart';
 import '../novedades_grandes.dart';
 import '../tema.dart';
 import '../../nucleo/fondo_app.dart';
+import '../../nucleo/mascota_app.dart';
+import 'mascota_pagina.dart';
 import 'aspecto_pagina.dart';
 import 'fondo_pagina.dart';
 import 'gustos_pagina.dart';
@@ -272,6 +274,25 @@ class _AjustesPaginaState extends State<AjustesPagina> {
                   trailing: const Icon(Icons.chevron_right_rounded, color: C.texto3),
                   onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const FondoPagina())),
                 ),
+        ),
+
+        ListenableBuilder(
+          listenable: Listenable.merge([MascotaApp.i, FondoApp.i]),
+          builder: (context, _) {
+            final m = MascotaApp.i;
+            return ListTile(
+              leading: Icon(m.puede ? Icons.pets_rounded : Icons.lock_outline_rounded,
+                  color: m.puede ? const Color(0xFFFFC857) : C.texto3),
+              title: const Text('Mascotita del reproductor'),
+              subtitle: Text(
+                  !m.puede
+                      ? 'Exclusiva para donadores y fundadores de Caudal'
+                      : (m.actual == null ? 'Un amiguito que camina por la barra de la canción · exclusivo' : 'Ahora: ${m.actual!.nombre} · exclusivo'),
+                  style: estiloSecundario),
+              trailing: const Icon(Icons.chevron_right_rounded, color: C.texto3),
+              onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MascotaPagina())),
+            );
+          },
         ),
 
         _seccion('Sonido'),

@@ -1,0 +1,11 @@
+{
+  "#a7a3b4": {"sombra": "#827d98", "luz": "#c4c0d0", "contorno": "#4e4862", "oscuro": "#1a1624"},
+  "#a7a3b5": {"sombra": "#827d98", "luz": "#c4c0d0", "contorno": "#4e4862", "oscuro": "#1a1624", "interior": true},
+  "#f4ead8": {"sombra": "#ddcdb6", "luz": "#fffaf0", "contorno": "#8a7a68", "oscuro": "#2a2018"},
+  "#6f6a80": {"fijo": true},
+  "#f2b2c4": {"fijo": true},
+  "#1b1426": {"fijo": true},
+  "#e6f0ff": {"fijo": true},
+  "#f59ab8": {"fijo": true},
+  "#3a2a3e": {"fijo": true}
+}

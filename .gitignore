@@ -56,3 +56,14 @@ Thumbs.db
 
 # estado local de Netlify
 .netlify/
+
+# --- herramientas de mascotas: capturas de prueba e imagenes de referencia (solo en esta PC)
+herramientas/mascotas/vista/
+herramientas/mascotas/referencias/
+herramientas/mascotas/pruebas_res/
+herramientas/mascotas/v4/*/recorte.png
+app/.flutter_tool_state
+salida_local/
+build_local/
+escritorio/salida_local/
+escritorio/build_local/

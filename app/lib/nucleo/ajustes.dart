@@ -30,6 +30,7 @@ class Ajustes extends ChangeNotifier {
     'traducir_letra': true, // la traduccion bajo cada linea de la letra
     'acento': 'cian', // color de la app (ver Aspecto.acentos)
     'fondo': 'oscuro', // fondo de la app (ver Aspecto.fondos)
+    'tamano_personaje': 160, // alto del personaje del fondo con personaje (se cambia pellizcándolo)
     'super_volumen': 0, // 0..4
     'ecualizador': false,
     'eq_bandas': '[0,0,0,0,0,0,0,0,0,0]',

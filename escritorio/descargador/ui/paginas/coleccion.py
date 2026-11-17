@@ -4,7 +4,7 @@
 import os
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtWidgets import (QDialog, QDialogButtonBox, QHBoxLayout, QLabel, QLineEdit, QMenu,
+from PySide6.QtWidgets import (QCheckBox, QDialog, QDialogButtonBox, QHBoxLayout, QLabel, QLineEdit, QMenu,
                                QMessageBox, QPlainTextEdit, QPushButton, QVBoxLayout, QWidget)
 
 from ... import catalogo
@@ -37,6 +37,24 @@ class DialogoEditarLista(QDialog):
         self.desc.setPlaceholderText("Añade una descripción (opcional)")
         self.desc.setFixedHeight(110)
         v.addWidget(self.desc)
+        v.addSpacing(6)
+        self.publica = QCheckBox("Lista pública")
+        self.publica.setChecked(bool(lista.get("publica")))
+        v.addWidget(self.publica)
+        ayuda_pub = QLabel("Cualquier persona de Caudal puede abrirla y escucharla. "
+                           "Si la dejas privada, solo tú la ves.")
+        ayuda_pub.setObjectName("ayuda")
+        ayuda_pub.setWordWrap(True)
+        v.addWidget(ayuda_pub)
+        self.en_perfil = QCheckBox("Mostrar en mi perfil")
+        self.en_perfil.setChecked(bool(lista.get("publica")) and bool(lista.get("en_perfil")))
+        v.addWidget(self.en_perfil)
+        self.ayuda_perfil = QLabel("")
+        self.ayuda_perfil.setObjectName("ayuda")
+        self.ayuda_perfil.setWordWrap(True)
+        v.addWidget(self.ayuda_perfil)
+        self.publica.toggled.connect(self._ajustar_perfil)
+        self._ajustar_perfil()
         b = QDialogButtonBox()
         ok = b.addButton("Guardar", QDialogButtonBox.AcceptRole)
         ok.setObjectName("principal")
@@ -44,6 +62,16 @@ class DialogoEditarLista(QDialog):
         b.accepted.connect(self.accept)
         b.rejected.connect(self.reject)
         v.addWidget(b)
+
+    def _ajustar_perfil(self):
+        """«Mostrar en mi perfil» solo tiene sentido en una lista pública."""
+        publica = self.publica.isChecked()
+        self.en_perfil.setEnabled(publica)
+        if not publica:
+            self.en_perfil.setChecked(False)
+        self.ayuda_perfil.setText(
+            "Tus amistades y quien visite tu perfil la verán junto a tus datos." if publica
+            else "Para mostrarla en tu perfil, primero hazla pública.")
 
 
 class PaginaColeccion(Pagina):
@@ -76,6 +104,11 @@ class PaginaColeccion(Pagina):
             self._pintar(self._datos_locales())
             if self.tipo == "mi_lista":
                 ctx.listas_cambio.connect(self._recargar_local)
+                # una lista compartida la editan otras personas: mientras está abierta se vuelve a traer
+                self._reloj_compartida = QTimer(self)
+                self._reloj_compartida.setInterval(20000)
+                self._reloj_compartida.timeout.connect(self._refrescar_compartida)
+                self._reloj_compartida.start()
             elif self.tipo == "me_gusta":
                 ctx.me_gusta_cambio.connect(self._recargar_local)
             elif self.tipo == "disco":
@@ -193,6 +226,7 @@ class PaginaColeccion(Pagina):
             self.bt_bajar.set_activo(True, punto=False)
             self.bt_bajar.setToolTip("Todo descargado: suena sin internet")
         if self.tipo == "mi_lista":
+            acciones.boton("compartir", "Compartir esta lista con un código", self._compartir, 24, 40)
             acciones.boton("editar", "Editar nombre y descripción", self._editar, 22, 40)
         self.bt_mas = acciones.boton("puntos", "Más opciones", self._menu_mas, 24, 40)
         acciones.h.addStretch(1)
@@ -346,6 +380,7 @@ class PaginaColeccion(Pagina):
                            lambda: os.path.isdir(carpeta) and os.startfile(carpeta))
         if self.tipo == "mi_lista":
             menu.addSeparator()
+            menu.addAction(iconos.icono("compartir", 16, C["texto2"]), "Compartir lista…", self._compartir)
             dialogo_portada.agregar_al_menu(menu, ctx, self.ident, self)
             menu.addAction(iconos.icono("papelera", 16, C["texto2"]), "Borrar la lista",
                            self._borrar_lista)
@@ -379,11 +414,27 @@ class PaginaColeccion(Pagina):
         if d.exec():
             try:
                 self.ctx.coleccion.editar_lista(self.ident, d.nombre.text(),
-                                                d.desc.toPlainText().strip())
+                                                d.desc.toPlainText().strip(),
+                                                publica=d.publica.isChecked(),
+                                                en_perfil=d.en_perfil.isChecked())
             except ValueError as e:
                 QMessageBox.warning(self, "Caudal", str(e))
                 return
             self.ctx.listas_cambio.emit()
+
+    def _compartir(self):
+        self.ctx.compartir_lista(self.ident)
+        self._recargar_local()
+
+    def _refrescar_compartida(self):
+        """Solo si esta lista está compartida y la pantalla está a la vista: se trae esa lista (una petición)."""
+        from ... import listas_compartidas as LC
+        sinc = getattr(self.ctx, "sincronizador", None)
+        if sinc is None or not self.isVisible():
+            return
+        u = (self.ctx.coleccion.lista(self.ident) or {}).get("uuid")
+        if u and u in LC.codigos_guardados(self.ctx.coleccion):
+            sinc.refrescar_lista(u)
 
     def _cambiar_portada(self, ruta=None):
         if self.tipo == "mi_lista":

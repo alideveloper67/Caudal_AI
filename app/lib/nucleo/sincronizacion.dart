@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
+import 'package:flutter/widgets.dart' show AppLifecycleState, WidgetsBinding, WidgetsBindingObserver;
 import 'package:sqflite/sqflite.dart';
 
 import 'ajustes.dart';
@@ -29,38 +31,71 @@ class Sincronizador {
   Timer? _pronto;
   bool _corriendo = false;
   bool _otraVez = false;
+  bool _traerPendiente = false;
+  DateTime? _ultimaDescarga;
+  _VidaApp? _vida;
   String estado = '';
   final _estados = StreamController<String>.broadcast();
   Stream<String> get cambios => _estados.stream;
+
+  /// Cuanto se espera, como minimo, entre dos descargas completas cuando la
+  /// app vuelve a primer plano.
+  static const esperaAlVolver = Duration(seconds: 45);
 
   Database get _db => coleccion.db;
 
   void iniciar() {
     coleccion.alHaberPendientes = pronto;
-    _reloj = Timer.periodic(const Duration(minutes: 3), (_) => ya());
-    Timer(const Duration(milliseconds: 800), ya);
+    // la descarga completa: al arrancar y cada 3 minutos
+    _reloj = Timer.periodic(const Duration(minutes: 3), (_) => ya(traer: true));
+    Timer(const Duration(milliseconds: 800), () => ya(traer: true));
+    // y al volver la app a primer plano (si ya paso un rato)
+    try {
+      _vida = _VidaApp(() {
+        final u = _ultimaDescarga;
+        if (u == null || DateTime.now().difference(u) > esperaAlVolver) ya(traer: true);
+      });
+      WidgetsBinding.instance.addObserver(_vida!);
+    } catch (_) {
+      _vida = null; // sin motor de pantalla (pruebas de consola)
+    }
   }
 
   void detener() {
     _reloj?.cancel();
     _pronto?.cancel();
+    final v = _vida;
+    if (v != null) {
+      try {
+        WidgetsBinding.instance.removeObserver(v);
+      } catch (_) {}
+    }
     coleccion.alHaberPendientes = null;
   }
 
-  /// Un cambio local: se envia en un momento (se agrupan los seguidos).
+  /// Un cambio local: en un momento se ENVIA lo pendiente (se agrupan los
+  /// seguidos). No se descarga nada: lo de la nube se trae en otros momentos.
   void pronto() {
     _pronto?.cancel();
-    _pronto = Timer(const Duration(milliseconds: 1500), ya);
+    _pronto = Timer(const Duration(milliseconds: 1500), () => ya());
   }
 
-  Future<void> ya() async {
+  /// «Refrescar ahora» (tirar para refrescar): envia lo pendiente y baja todo.
+  Future<void> refrescarAhora() => ya(traer: true);
+
+  /// Un ciclo. Con [traer] tambien se descarga lo de la nube; sin eso solo se
+  /// envian las ordenes pendientes (lo que sigue a cada cambio local).
+  Future<void> ya({bool traer = false}) async {
     if (_corriendo) {
       _otraVez = true;
+      _traerPendiente = _traerPendiente || traer;
       return;
     }
     _corriendo = true;
+    traer = traer || _traerPendiente;
+    _traerPendiente = false;
     try {
-      final cambio = await _ciclo();
+      final cambio = await _ciclo(traer: traer);
       _fijar('sincronizado');
       if (alRenovar != null) await alRenovar!();
       if (cambio) await coleccion.refrescarMemoria();
@@ -84,17 +119,37 @@ class Sincronizador {
     }
   }
 
-  Future<bool> _ciclo() async {
+  Future<bool> _ciclo({bool traer = true}) async {
     final marca = await coleccion.estado('nube_usuario');
     if (marca != sesion.userId) {
       await _subidaInicial();
       await coleccion.guardarEstado('nube_usuario', sesion.userId);
     }
     await _enviarPendientes();
-    final cambio = await _traer();
-    await _sincronizarAjustes();
+    var cambio = false;
+    if (traer) {
+      cambio = await _traer();
+      _ultimaDescarga = DateTime.now();
+    }
+    // los ajustes: en una descarga completa siempre; si no, solo si cambiaron aqui
+    if (traer || await _ajustesCambiaron()) await _sincronizarAjustes();
     return cambio;
   }
+
+  Future<bool> _ajustesCambiaron() async {
+    final a = ajustes;
+    if (a == null) return false;
+    final huella = huellaAjustes(ajustesParaNube(a.paraNube()));
+    return huella != await coleccion.estado('ajustes_huella');
+  }
+
+  /// Para las pruebas: un ciclo completo o solo de envio, sin temporizadores.
+  @visibleForTesting
+  Future<bool> cicloParaPruebas({required bool traer}) => _ciclo(traer: traer);
+
+  /// Para las pruebas: solo la descarga.
+  @visibleForTesting
+  Future<bool> traerParaPruebas() => _traer();
 
   /// Los ajustes comunes como van a la nube (eq_bandas siempre como lista).
   static Map<String, Object?> ajustesParaNube(Map<String, Object?> crudos) {
@@ -188,7 +243,9 @@ class Sincronizador {
       }
       await _upsert('listas', [
         {'id': u, 'nombre': l['nombre'], 'descripcion': l['descripcion'] ?? '',
-         'fijada': l['fijada'] == 1}
+         'fijada': l['fijada'] == 1,
+         // solo si la usa: asi la subida no se rompe mientras la nube no conozca estas columnas
+         if (l['publica'] == 1) ...{'publica': true, 'en_perfil': l['en_perfil'] == 1}}
       ], 'id');
       await _upsert('lista_items', [
         for (final f in await _db.query('lista_items', where: 'lista_id = ?', whereArgs: [l['id']]))
@@ -238,10 +295,19 @@ class Sincronizador {
       case 'me_gusta_quitar':
         await sesion.pedir('DELETE', 'me_gusta?clave=eq.${_q(d['clave'])}');
       case 'lista_poner':
-        await _upsert('listas', [
-          {'id': d['uuid'], 'nombre': d['nombre'], 'descripcion': d['descripcion'] ?? '',
-           'fijada': d['fijada'] == true, 'actualizada': _iso(null)}
-        ], 'id');
+        final fila = {'id': d['uuid'], 'nombre': d['nombre'], 'descripcion': d['descripcion'] ?? '',
+           'fijada': d['fijada'] == true, 'actualizada': _iso(null)};
+        if (d['publica'] != null) {
+          try {
+            await _upsert('listas', [
+              {...fila, 'publica': d['publica'] == true, 'en_perfil': d['publica'] == true && d['en_perfil'] == true}
+            ], 'id');
+            return;
+          } on ErrorNube {
+            // la nube aun no conoce estos ajustes: al menos se guarda lo demas
+          }
+        }
+        await _upsert('listas', [fila], 'id');
       case 'lista_borrar':
         await sesion.pedir('DELETE', 'listas?id=eq.${_q(d['uuid'])}');
       case 'items_poner':
@@ -250,6 +316,14 @@ class Sincronizador {
             {'lista_id': d['uuid'], 'clave': i['clave'], 'datos': i['datos'] ?? {},
              'orden': i['orden'] ?? 0}
         ], 'lista_id,clave');
+      case 'items_quitar':
+        final claves = [for (final c in (d['claves'] as List)) '$c'];
+        for (var i = 0; i < claves.length; i += 50) {
+          final lote = claves.sublist(i, i + 50 > claves.length ? claves.length : i + 50);
+          final lista = lote.map((c) => '"${c.replaceAll('"', '')}"').join(',');
+          await sesion.pedir('DELETE',
+              'lista_items?lista_id=eq.${_q(d['uuid'])}&clave=in.(${Uri.encodeQueryComponent(lista)})');
+        }
       case 'item_quitar':
         await sesion.pedir('DELETE',
             'lista_items?lista_id=eq.${_q(d['uuid'])}&clave=eq.${_q(d['clave'])}');
@@ -268,81 +342,214 @@ class Sincronizador {
     }
   }
 
+  /// PostgREST devuelve como mucho 1000 filas por respuesta: se pide por paginas
+  /// hasta que una venga incompleta (antes, `limit=5000` se cortaba en silencio).
+  static const tamanoPagina = 1000;
+
+  Future<List> _todas(String ruta) async {
+    final salida = <dynamic>[];
+    for (var desde = 0;; desde += tamanoPagina) {
+      final r = await sesion.pedir('GET', '$ruta&limit=$tamanoPagina&offset=$desde') as List;
+      salida.addAll(r);
+      if (r.length < tamanoPagina) break;
+    }
+    return salida;
+  }
+
+  /// Dos valores de la nube iguales, sin importar el orden de las claves.
+  static String _canonico(Object? v) {
+    if (v is Map) {
+      final k = v.keys.map((e) => '$e').toList()..sort();
+      return '{${k.map((e) => '${jsonEncode(e)}:${_canonico(v[e])}').join(',')}}';
+    }
+    if (v is List) return '[${v.map(_canonico).join(',')}]';
+    return jsonEncode(v);
+  }
+
+  /// Baja lo de la nube y lo deja en la base local **solo donde cambio**.
+  /// Devuelve si hubo un cambio que la pantalla deba notar.
   Future<bool> _traer() async {
     final n = Sqflite.firstIntValue(await _db.rawQuery('SELECT COUNT(*) FROM pendientes')) ?? 0;
     if (n > 0) return false;
-    final antes = await _huella();
 
-    final gustan = await sesion.pedir('GET', 'me_gusta?select=clave,datos,fecha&order=fecha.desc&limit=5000') as List;
-    final listas = await sesion.pedir('GET', 'listas?select=id,nombre,descripcion,fijada,creada&order=creada') as List;
-    final items = <String, List>{};
-    for (final l in listas) {
-      items['${l['id']}'] = await sesion.pedir('GET',
-          'lista_items?select=clave,datos,orden&lista_id=eq.${l['id']}&order=orden&limit=5000') as List;
+    // una peticion por tabla (los items de TODAS las listas en una sola)
+    final gustan = await _todas('me_gusta?select=clave,datos,fecha&order=fecha.desc,clave');
+    List listas;
+    try {
+      listas = await _todas('listas?select=id,nombre,descripcion,fijada,creada,publica,en_perfil&order=creada,id');
+    } on ErrorNube {
+      // la nube aun no conoce publica / en_perfil
+      listas = await _todas('listas?select=id,nombre,descripcion,fijada,creada&order=creada,id');
     }
-    final guardados = await sesion.pedir('GET', 'guardados?select=tipo,id,datos,fecha') as List;
+    final itemsNube = await _todas('lista_items?select=lista_id,clave,datos,orden&order=lista_id,orden,clave');
+    final guardados = await _todas('guardados?select=tipo,id,datos,fecha&order=tipo,id');
     final escuchas = await sesion.pedir('GET',
         'escuchas?select=id,clave,datos,contexto,fecha&order=fecha.desc&limit=300') as List;
 
+    var cambio = false;
     await _db.transaction((t) async {
-      Future<void> recordar(String clave, dynamic datos) async {
-        if (datos is Map && datos.isNotEmpty) {
-          await t.insert('pistas', {'clave': clave, 'datos': jsonEncode(datos),
-              'actualizada': _epoch(null)}, conflictAlgorithm: ConflictAlgorithm.replace);
+      final conocidas = {
+        for (final f in await t.query('pistas', columns: ['clave'])) '${f['clave']}'
+      };
+      final b = t.batch();
+      void recordar(String clave, dynamic datos) {
+        if (datos is Map && datos.isNotEmpty && !conocidas.contains(clave)) {
+          conocidas.add(clave);
+          b.insert('pistas', {'clave': clave, 'datos': jsonEncode(datos), 'actualizada': _epoch(null)},
+              conflictAlgorithm: ConflictAlgorithm.replace);
         }
       }
 
-      await t.delete('me_gusta', where: "clave LIKE 'yt:%'");
+      // ---- me gusta
+      final gLocal = {
+        for (final f in await t.query('me_gusta', where: "clave LIKE 'yt:%'")) '${f['clave']}': f['fecha']
+      };
+      final gNube = <String>{};
       for (final f in gustan) {
-        await recordar('${f['clave']}', f['datos']);
-        await t.insert('me_gusta', {'clave': f['clave'], 'fecha': _epoch(f['fecha'])},
-            conflictAlgorithm: ConflictAlgorithm.replace);
+        final clave = '${f['clave']}';
+        gNube.add(clave);
+        final fecha = _epoch(f['fecha']);
+        if (!gLocal.containsKey(clave)) {
+          recordar(clave, f['datos']);
+          b.insert('me_gusta', {'clave': clave, 'fecha': fecha}, conflictAlgorithm: ConflictAlgorithm.replace);
+          cambio = true;
+        } else {
+          final l = gLocal[clave];
+          if (l is! num || (l - fecha).abs() > 2) {
+            b.update('me_gusta', {'fecha': fecha}, where: 'clave = ?', whereArgs: [clave]);
+          }
+        }
+      }
+      for (final clave in gLocal.keys) {
+        if (!gNube.contains(clave)) {
+          b.delete('me_gusta', where: 'clave = ?', whereArgs: [clave]);
+          cambio = true;
+        }
       }
 
+      // ---- listas y sus canciones
+      final itemsPorLista = <String, List<dynamic>>{};
+      for (final i in itemsNube) {
+        itemsPorLista.putIfAbsent('${i['lista_id']}', () => []).add(i);
+      }
+      final locales = {
+        for (final l in await t.query('listas', where: 'uuid IS NOT NULL')) '${l['uuid']}': l
+      };
+      final nombres = {for (final f in await t.query('listas', columns: ['nombre'])) '${f['nombre']}'};
+      final itemsLocal = <int, Map<String, double>>{};
+      for (final f in await t.query('lista_items', where: "clave LIKE 'yt:%'")) {
+        (itemsLocal[f['lista_id'] as int] ??= {})['${f['clave']}'] = (f['orden'] as num?)?.toDouble() ?? 0;
+      }
       final uuids = <String>{};
       for (final l in listas) {
         final u = '${l['id']}';
         uuids.add(u);
-        final fila = await t.query('listas', columns: ['id'], where: 'uuid = ?', whereArgs: [u]);
+        final fijada = l['fijada'] == true ? 1 : 0;
+        final publica = l['publica'] == true ? 1 : 0;
+        final enPerfil = publica == 1 && l['en_perfil'] == true ? 1 : 0;
+        final tieneAjustes = (l as Map).containsKey('publica');
+        final descripcion = '${l['descripcion'] ?? ''}';
+        final local = locales[u];
         int lid;
-        if (fila.isNotEmpty) {
-          lid = fila.first['id'] as int;
-          await t.update('listas', {'nombre': l['nombre'], 'descripcion': l['descripcion'] ?? '',
-              'fijada': l['fijada'] == true ? 1 : 0}, where: 'id = ?', whereArgs: [lid]);
+        if (local != null) {
+          lid = local['id'] as int;
+          if (local['nombre'] != l['nombre'] || '${local['descripcion'] ?? ''}' != descripcion ||
+              (local['fijada'] ?? 0) != fijada ||
+              (tieneAjustes && ((local['publica'] ?? 0) != publica || (local['en_perfil'] ?? 0) != enPerfil))) {
+            b.update('listas', {
+              'nombre': l['nombre'], 'descripcion': descripcion, 'fijada': fijada,
+              if (tieneAjustes) ...{'publica': publica, 'en_perfil': enPerfil},
+            }, where: 'id = ?', whereArgs: [lid]);
+            cambio = true;
+          }
         } else {
           var nombre = '${l['nombre']}';
-          if ((await t.query('listas', where: 'nombre = ?', whereArgs: [nombre])).isNotEmpty) {
-            nombre = '$nombre (${u.substring(0, 4)})';
-          }
+          if (nombres.contains(nombre)) nombre = '$nombre (${u.substring(0, 4)})';
+          nombres.add(nombre);
           lid = await t.insert('listas', {
-            'nombre': nombre, 'creada': _epoch(l['creada']), 'descripcion': l['descripcion'] ?? '',
-            'fijada': l['fijada'] == true ? 1 : 0, 'uuid': u, 'tocada': _epoch(l['creada']),
+            'nombre': nombre, 'creada': _epoch(l['creada']), 'descripcion': descripcion,
+            'fijada': fijada, 'uuid': u, 'tocada': _epoch(l['creada']),
+            if (tieneAjustes) ...{'publica': publica, 'en_perfil': enPerfil},
           });
+          cambio = true;
         }
-        await t.delete('lista_items', where: "lista_id = ? AND clave LIKE 'yt:%'", whereArgs: [lid]);
-        for (final i in items[u] ?? []) {
-          await recordar('${i['clave']}', i['datos']);
-          await t.insert('lista_items', {'lista_id': lid, 'clave': i['clave'], 'orden': i['orden'],
-              'agregada': _epoch(null)}, conflictAlgorithm: ConflictAlgorithm.replace);
+        final propios = itemsLocal[lid] ?? const <String, double>{};
+        final nube = <String>{};
+        for (final i in itemsPorLista[u] ?? const []) {
+          final clave = '${i['clave']}';
+          if (!nube.add(clave)) continue;
+          final orden = (i['orden'] as num?)?.toDouble() ?? 0;
+          if (!propios.containsKey(clave)) {
+            recordar(clave, i['datos']);
+            b.insert('lista_items', {'lista_id': lid, 'clave': clave, 'orden': orden,
+                'agregada': _epoch(null)}, conflictAlgorithm: ConflictAlgorithm.replace);
+            cambio = true;
+          } else if ((propios[clave]! - orden).abs() > 1e-9) {
+            b.update('lista_items', {'orden': orden}, where: 'lista_id = ? AND clave = ?',
+                whereArgs: [lid, clave]);
+            cambio = true;
+          }
+        }
+        for (final clave in propios.keys) {
+          if (!nube.contains(clave)) {
+            b.delete('lista_items', where: 'lista_id = ? AND clave = ?', whereArgs: [lid, clave]);
+            cambio = true;
+          }
         }
       }
-      for (final l in await t.query('listas', where: 'uuid IS NOT NULL')) {
-        if (!uuids.contains(l['uuid'])) {
-          await t.delete('lista_items', where: 'lista_id = ?', whereArgs: [l['id']]);
-          await t.delete('listas', where: 'id = ?', whereArgs: [l['id']]);
+      for (final e in locales.entries) {
+        if (!uuids.contains(e.key)) {
+          b.delete('lista_items', where: 'lista_id = ?', whereArgs: [e.value['id']]);
+          b.delete('listas', where: 'id = ?', whereArgs: [e.value['id']]);
+          cambio = true;
         }
       }
 
-      await t.delete('guardados');
+      // ---- guardados
+      final sLocal = {
+        for (final f in await t.query('guardados')) '${f['tipo']}|${f['id']}': f
+      };
+      final sNube = <String>{};
       for (final g in guardados) {
-        await t.insert('guardados', {'tipo': g['tipo'], 'id': g['id'], 'datos': jsonEncode(g['datos']),
-            'fecha': _epoch(g['fecha'])}, conflictAlgorithm: ConflictAlgorithm.replace);
-      }
-
-      for (final e in escuchas) {
-        if ((await t.query('reproducciones', where: 'nube_id = ?', whereArgs: [e['id']])).isNotEmpty) {
+        final k = '${g['tipo']}|${g['id']}';
+        sNube.add(k);
+        final fecha = _epoch(g['fecha']);
+        final l = sLocal[k];
+        if (l == null) {
+          b.insert('guardados', {'tipo': g['tipo'], 'id': g['id'], 'datos': jsonEncode(g['datos']),
+              'fecha': fecha}, conflictAlgorithm: ConflictAlgorithm.replace);
+          cambio = true;
           continue;
         }
+        var igual = false;
+        try {
+          igual = _canonico(jsonDecode('${l['datos']}')) == _canonico(g['datos']);
+        } catch (_) {}
+        final lf = l['fecha'];
+        final fechaIgual = lf is num && (lf - fecha).abs() <= 2;
+        if (!igual) {
+          b.insert('guardados', {'tipo': g['tipo'], 'id': g['id'], 'datos': jsonEncode(g['datos']),
+              'fecha': fecha}, conflictAlgorithm: ConflictAlgorithm.replace);
+          cambio = true;
+        } else if (!fechaIgual) {
+          b.update('guardados', {'fecha': fecha}, where: 'tipo = ? AND id = ?', whereArgs: [g['tipo'], g['id']]);
+        }
+      }
+      for (final e in sLocal.entries) {
+        if (!sNube.contains(e.key)) {
+          b.delete('guardados', where: 'tipo = ? AND id = ?', whereArgs: [e.value['tipo'], e.value['id']]);
+          cambio = true;
+        }
+      }
+      await b.commit(noResult: true);
+
+      // ---- escuchas (solo las que aun no estan)
+      final vistas = {
+        for (final f in await t.rawQuery('SELECT nube_id FROM reproducciones WHERE nube_id IS NOT NULL'))
+          f['nube_id']
+      };
+      for (final e in escuchas) {
+        if (vistas.contains(e['id'])) continue;
         final ya = await t.rawQuery(
             'SELECT id FROM reproducciones WHERE clave = ? AND nube_id = -1 AND ABS(fecha - ?) < 5',
             [e['clave'], _epoch(e['fecha'])]);
@@ -350,29 +557,20 @@ class Sincronizador {
           await t.update('reproducciones', {'nube_id': e['id']}, where: 'id = ?', whereArgs: [ya.first['id']]);
           continue;
         }
-        await recordar('${e['clave']}', e['datos']);
+        final clave = '${e['clave']}';
+        if (e['datos'] is Map && (e['datos'] as Map).isNotEmpty && !conocidas.contains(clave)) {
+          conocidas.add(clave);
+          await t.insert('pistas', {'clave': clave, 'datos': jsonEncode(e['datos']),
+              'actualizada': _epoch(null)}, conflictAlgorithm: ConflictAlgorithm.replace);
+        }
         await t.insert('reproducciones', {
           'clave': e['clave'], 'fecha': _epoch(e['fecha']),
           'contexto': e['contexto'] == null ? '' : jsonEncode(e['contexto']), 'nube_id': e['id'],
         });
+        cambio = true;
       }
     });
-    return await _huella() != antes;
-  }
-
-  Future<String> _huella() async {
-    final partes = <String>[];
-    for (final sql in [
-      'SELECT group_concat(clave) FROM (SELECT clave FROM me_gusta ORDER BY clave)',
-      "SELECT group_concat(uuid || nombre || descripcion || fijada) FROM listas",
-      'SELECT group_concat(lista_id || clave || orden) FROM lista_items',
-      'SELECT group_concat(tipo || id) FROM guardados',
-      'SELECT COUNT(*) FROM reproducciones',
-    ]) {
-      final f = await _db.rawQuery(sql);
-      partes.add('${f.first.values.first}');
-    }
-    return partes.join('|');
+    return cambio;
   }
 
   static String _iso(Object? epoch) {
@@ -383,5 +581,16 @@ class Sincronizador {
   static double _epoch(Object? iso) {
     if (iso == null) return DateTime.now().millisecondsSinceEpoch / 1000.0;
     return (DateTime.tryParse('$iso') ?? DateTime.now()).millisecondsSinceEpoch / 1000.0;
+  }
+}
+
+/// Avisa cuando la app vuelve a primer plano.
+class _VidaApp with WidgetsBindingObserver {
+  _VidaApp(this.alVolver);
+  final void Function() alVolver;
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState estado) {
+    if (estado == AppLifecycleState.resumed) alVolver();
   }
 }

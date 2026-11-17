@@ -10,8 +10,12 @@ import 'plataforma.dart';
 class C {
   static Color fondo = const Color(0xFF06070A);
 
-  /// El fondo de las pantallas: transparente cuando hay una imagen de fondo detrás.
-  static Color get fondoVivo => FondoApp.i.activo ? Colors.transparent : fondo;
+  /// Hay algo detrás de las pantallas: la imagen de «Fondo de Caudal» o el
+  /// mosaico de un fondo con personaje.
+  static bool get hayFondo => FondoApp.i.activo || Aspecto.patron != null;
+
+  /// El fondo de las pantallas: transparente cuando hay algo detrás.
+  static Color get fondoVivo => hayFondo ? Colors.transparent : fondo;
 
   static Color panel = const Color(0xFF101217);
   static Color superficie = const Color(0xFF14171D);
@@ -64,6 +68,37 @@ class Aspecto {
       Color(0xFF33373E), Color(0xFF2E3138)]),
   };
 
+  /// Fondos con personaje: nombre, su acento (se pone al elegirlo) y sus capas
+  /// [fondo, panel, superficie, superficie2, superficie3, borde]. Detrás de toda
+  /// la app va su mosaico (`assets/fondos/<clave>.png`, densidad 2). Los mismos
+  /// que el escritorio (herramientas/mascotas/fondos_tematicos.py).
+  static const temas = <String, (String, Color, List<Color>)>{
+    'hellokitty': ('Hello Kitty', Color(0xFFFF4D6D), [Color(0xFF1C0A10), Color(0xFF241318), Color(0xFF2A191E), Color(0xFF302026), Color(0xFF3C2C31), Color(0xFF37272D)]),
+    'kuromi': ('Kuromi', Color(0xFFFF77B7), [Color(0xFF120A1C), Color(0xFF1A1324), Color(0xFF20192A), Color(0xFF272030), Color(0xFF332C3C), Color(0xFF2E2737)]),
+    'pikachu': ('Pikachu', Color(0xFFF5D142), [Color(0xFF17130A), Color(0xFF1F1B13), Color(0xFF252119), Color(0xFF2C2820), Color(0xFF37342C), Color(0xFF332F27)]),
+    'charmander': ('Charmander', Color(0xFFFF8A3D), [Color(0xFF1A0D07), Color(0xFF221510), Color(0xFF281C16), Color(0xFF2F231D), Color(0xFF3A2F2A), Color(0xFF352A25)]),
+    'squirtle': ('Squirtle', Color(0xFF5EC8E5), [Color(0xFF071420), Color(0xFF101C28), Color(0xFF16222D), Color(0xFF1D2934), Color(0xFF2A353F), Color(0xFF25303B)]),
+    'bulbasaur': ('Bulbasaur', Color(0xFF5FD3A0), [Color(0xFF061712), Color(0xFF0F1F1A), Color(0xFF152520), Color(0xFF1C2C27), Color(0xFF293733), Color(0xFF24332E)]),
+    'snoopy': ('Snoopy', Color(0xFFE8403F), [Color(0xFF111215), Color(0xFF191A1D), Color(0xFF1F2023), Color(0xFF26272A), Color(0xFF323336), Color(0xFF2E2E31)]),
+    'totoro': ('Totoro', Color(0xFF8CCB6E), [Color(0xFF0E1210), Color(0xFF161A18), Color(0xFF1C201E), Color(0xFF242726), Color(0xFF303331), Color(0xFF2B2E2D)]),
+    'mymelody': ('My Melody', Color(0xFFFF6FA5), [Color(0xFF1C0A16), Color(0xFF24131E), Color(0xFF2A1924), Color(0xFF30202B), Color(0xFF3C2C37), Color(0xFF372732)]),
+    'purin': ('Pompompurin', Color(0xFFF7C948), [Color(0xFF181306), Color(0xFF201B0F), Color(0xFF262115), Color(0xFF2D281C), Color(0xFF383429), Color(0xFF342F24)]),
+    'cinnamoroll': ('Cinnamoroll', Color(0xFF7FB8FF), [Color(0xFF0A1324), Color(0xFF131B2C), Color(0xFF192131), Color(0xFF202838), Color(0xFF2C3443), Color(0xFF272F3E)]),
+    'kirby': ('Kirby', Color(0xFFFF8FB8), [Color(0xFF1C0B16), Color(0xFF24141E), Color(0xFF2A1A24), Color(0xFF30212B), Color(0xFF3C2D37), Color(0xFF372832)]),
+    'doraemon': ('Doraemon', Color(0xFF2E8BFF), [Color(0xFF06111F), Color(0xFF0F1927), Color(0xFF151F2C), Color(0xFF1C2633), Color(0xFF29323E), Color(0xFF242E3A)]),
+    'olaf': ('Olaf', Color(0xFF8ECDF5), [Color(0xFF0A1520), Color(0xFF131D28), Color(0xFF19232D), Color(0xFF202A34), Color(0xFF2C363F), Color(0xFF27313B)]),
+    'nyan': ('Nyan Cat', Color(0xFFFF7AC8), [Color(0xFF0B0E2C), Color(0xFF141633), Color(0xFF1A1C39), Color(0xFF21243F), Color(0xFF2D304A), Color(0xFF282B45)]),
+    'capibara': ('Capibara', Color(0xFFFFA53D), [Color(0xFF1A1008), Color(0xFF221811), Color(0xFF281E17), Color(0xFF2F261E), Color(0xFF3A312B), Color(0xFF352D26)]),
+    'pochacco': ('Pochacco', Color(0xFFFF3D86), [Color(0xFF1A0A12), Color(0xFF22131A), Color(0xFF281920), Color(0xFF2F2027), Color(0xFF3A2C33), Color(0xFF35272E)]),
+    'nailong': ('Nailong', Color(0xFFFFD23F), [Color(0xFF181406), Color(0xFF201C0F), Color(0xFF262215), Color(0xFF2D291C), Color(0xFF383529), Color(0xFF343024)]),
+    'gato_negro': ('Gato negro', Color(0xFF7BD88F), [Color(0xFF0F0F12), Color(0xFF17171A), Color(0xFF1D1D20), Color(0xFF252527), Color(0xFF313133), Color(0xFF2C2C2E)]),
+  };
+
+  /// El mosaico del fondo elegido (null si no es un fondo con personaje).
+  static String? patron;
+
+  static String? patronDe(String fondo) => temas.containsKey(fondo) ? 'assets/fondos/$fondo.png' : null;
+
   /// Un color propio guardado como «#RRGGBB» (en vez de un nombre de la lista).
   static bool esPropio(String valor) => colorDe(valor) != null;
 
@@ -99,6 +134,8 @@ class Aspecto {
   static (String, List<Color>) fondoDe(String valor) {
     final lista = fondos[valor];
     if (lista != null) return lista;
+    final tema = temas[valor];
+    if (tema != null) return (tema.$1, tema.$3);
     var c = colorDe(valor);
     if (c == null) return fondos['oscuro']!;
     // el fondo siempre oscuro (el texto de la app es claro)
@@ -115,6 +152,7 @@ class Aspecto {
     C.acento = a.$2;
     C.acentoAlto = a.$3;
     C.acentoTexto = a.$4;
+    patron = patronDe(fondo);
     final f = fondoDe(fondo).$2;
     C.fondo = f[0];
     C.panel = f[1];

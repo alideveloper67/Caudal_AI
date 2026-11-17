@@ -94,6 +94,7 @@ class PaginaAjustes(Pagina):
         s = Seccion("Aspecto")
         self.selector_aspecto = SelectorAspecto(a, (ACTUAL["acento"], ACTUAL["fondo"]))
         self.selector_aspecto.aplicar.connect(self._aplicar_aspecto)
+        self.selector_aspecto.cambio.connect(self._mascota_del_fondo)
         s.v.addWidget(self.selector_aspecto)
         self.cuerpo.addWidget(s)
 
@@ -105,6 +106,10 @@ class PaginaAjustes(Pagina):
             self.seccion_fondo = SeccionFondo(gestor_fondo, self.lienzo)
             self.cuerpo.addWidget(self.seccion_fondo)
             gestor_fondo.verificar_permiso()
+        gestor_mascota = getattr(ctx, "mascota", None)
+        if gestor_mascota is not None:
+            from ..mascotas_ajuste import SeccionMascotas
+            self.cuerpo.addWidget(SeccionMascotas(gestor_mascota, self.lienzo))
 
         # ---------------- reproduccion
         s = Seccion("Reproducción")
@@ -495,6 +500,13 @@ class PaginaAjustes(Pagina):
         elif isinstance(widget, QComboBox):
             widget.currentIndexChanged.connect(
                 lambda _i: (self._poner(clave, widget.currentData()), despues and despues()))
+
+    def _mascota_del_fondo(self, _acento, fondo):
+        """Un fondo con personaje trae a su personaje caminando por la barra (si la cuenta tiene mascotas)."""
+        from ..estilos import es_tema
+        gestor = getattr(self.ctx, "mascota", None)
+        if gestor is not None and es_tema(fondo):
+            gestor.elegir(fondo)
 
     def _aplicar_aspecto(self):
         ventana = getattr(self.ctx, "ventana", None)

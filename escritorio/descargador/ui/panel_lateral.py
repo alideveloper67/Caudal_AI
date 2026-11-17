@@ -179,6 +179,17 @@ class ItemBiblioteca(QWidget):
         return False
 
 
+def _compartidas(ctx):
+    """Las listas de otras personas donde estoy: lo último que se supo (se actualiza en la Biblioteca)."""
+    from .. import listas_compartidas as LC
+    return LC.ultima_conocida("mis_compartidas") or LC.compartidas_guardadas(ctx.coleccion)
+
+
+def _quien(c):
+    from .. import listas_compartidas as LC
+    return LC.nombre_persona(c.get("dueno"))
+
+
 class PanelLateral(QWidget):
     ir = Signal(dict)
     traer_lista = Signal()
@@ -388,6 +399,8 @@ class PanelLateral(QWidget):
             return pag == "mi_lista" and str(destino.get("id")) == str(el.get("id"))
         if el.get("tipo") in ("album", "lista", "artista"):
             return pag == el["tipo"] and destino.get("id") == el.get("id")
+        if el.get("tipo") == "lista_compartida":
+            return pag == "lista_compartida" and destino.get("id") == el.get("id")
         return False
 
     def elementos(self):
@@ -415,6 +428,9 @@ class PanelLateral(QWidget):
                                "subtitulo": f"Lista • {l['n']} {'canción' if l['n'] == 1 else 'canciones'}",
                                "mosaico": col.portadas_de_lista(l["id"]),
                                "fijada": bool(l.get("fijada"))})
+            for c in _compartidas(self.ctx):
+                salida.append({"tipo": "lista_compartida", "id": c["id"], "titulo": c["nombre"],
+                               "subtitulo": "Compartida · " + _quien(c), "rol": c["rol"], "dueno": c["dueno"]})
             for g in col.guardados("lista"):
                 salida.append({**g, "subtitulo": g.get("subtitulo") or "Lista"})
         if f in (None, "albumes"):
@@ -487,7 +503,7 @@ class PanelLateral(QWidget):
                            lambda: self.ctx.reproducir_elemento(el, aleatorio=True))
             self.ctx.menu_descargar(menu, lambda cb: self.ctx.pistas_de(el, cb))
             menu.exec(pos)
-        elif tipo in ("album", "lista", "artista"):
+        elif tipo in ("album", "lista", "artista", "lista_compartida"):
             self.ctx.menu_elemento(el, pos)
 
     def _borrar_lista(self, el):

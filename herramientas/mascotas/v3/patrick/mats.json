@@ -1,0 +1,15 @@
+{
+  "#f7a3b8": {"sombra": "#e27896", "contorno": "#a83e5e"},
+  "#f7a3b9": {"sombra": "#e27896", "contorno": "#a83e5e", "interior": true},
+  "#9ccc3c": {"sombra": "#72a628", "contorno": "#3a6612", "interior": true},
+  "#8a4cc8": {"fijo": true},
+  "#f6e05a": {"fijo": true},
+  "#fffffe": {"fijo": true},
+  "#14101c": {"fijo": true},
+  "#fffffd": {"fijo": true},
+  "#1c1420": {"fijo": true},
+  "#8a1a30": {"fijo": true},
+  "#f2627e": {"fijo": true},
+  "#ec6c8e": {"fijo": true},
+  "#c8587a": {"fijo": true}
+}
