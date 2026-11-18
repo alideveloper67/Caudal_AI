@@ -12,6 +12,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:share_plus/share_plus.dart';
 
 import 'nucleo/ajustes.dart';
+import 'nucleo/avisos.dart';
 import 'nucleo/capturador_oculto.dart';
 import 'nucleo/catalogo.dart';
 import 'nucleo/coleccion.dart';
@@ -37,6 +38,7 @@ import 'nucleo/social.dart';
 import 'ui/fondo_capa.dart';
 import 'ui/paginas/acceso.dart';
 import 'ui/paginas/ajustes_pagina.dart';
+import 'ui/paginas/aviso_dialogo.dart';
 import 'ui/paginas/gustos_pagina.dart';
 import 'ui/servicios.dart';
 import 'ui/tema.dart';
@@ -288,6 +290,7 @@ class _CaudalAppState extends State<CaudalApp> {
         .catchError((_) {}));
     unawaited(MascotaApp.i.iniciar(c.id).catchError((_) {}));
     unawaited(_buscarVersion());
+    unawaited(_buscarAvisos());
     unawaited(_pedirNotificaciones());
   }
 
@@ -352,6 +355,17 @@ class _CaudalAppState extends State<CaudalApp> {
       s.reproductor.dispose();
       s.descargas.dispose();
     });
+  }
+
+  /// Los avisos que se mandan a todas las apps (nucleo/avisos.dart): cada uno sale una sola vez.
+  Future<void> _buscarAvisos() async {
+    await Future.delayed(const Duration(seconds: 4));
+    final lista = await Avisos.pendientes();
+    for (final a in lista) {
+      final ctx = _navegador.currentContext;
+      if (!mounted || ctx == null || !ctx.mounted) return;
+      await mostrarAviso(ctx, a);
+    }
   }
 
   Future<void> _buscarVersion() async {

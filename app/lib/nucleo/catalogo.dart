@@ -1905,7 +1905,10 @@ class Catalogo {
 
     var tk = token(panel);
     var vueltas = 0;
-    while (tk != null && pistas.length < limite && vueltas < 15) {
+    // las continuaciones no pueden alargar la espera sin fin: con una conexión lenta
+    // la cola se entrega con lo que ya hay
+    final reloj = Stopwatch()..start();
+    while (tk != null && pistas.length < limite && vueltas < 15 && reloj.elapsed < const Duration(seconds: 12)) {
       vueltas++;
       Map<String, dynamic> mas;
       try {
@@ -1942,20 +1945,78 @@ class Catalogo {
         explicito: _lista(v['badges']).isNotEmpty);
   }
 
+  /// ¿El fallo fue de red o de tiempo (vale la pena reintentar)?
+  static bool _fallaPorRed(String m) =>
+      m.contains('no respondió a tiempo') || m.contains('No hay conexión') || m.contains('Falló la conexión');
+
   /// La radio infinita de YouTube Music a partir de una cancion o emisora.
   /// Devuelve {pistas, letras_id, relacionados_id}.
+  ///
+  /// No se rinde a la primera: un fallo de red se reintenta, la radio de una
+  /// canción prueba también la petición sin parámetros especiales y, si lo que
+  /// falla es una emisora (la «radio del artista»), se arma con su primera
+  /// canción o, como último recurso, con las canciones de la propia lista.
   static Future<Map<String, dynamic>> radio(
       {String? videoId, String? playlistId, int limite = 50}) async {
-    try {
-      final c = await _cola(
-          videoId: videoId,
-          playlistId: playlistId,
-          limite: limite,
-          radio: (videoId != null && videoId.isNotEmpty) && (playlistId == null || playlistId.isEmpty));
-      return {'pistas': c.pistas, 'letras_id': c.letrasId, 'relacionados_id': c.relacionadosId};
-    } on CatalogoError catch (e) {
-      throw CatalogoError('No se pudo crear la radio: ${e.mensaje}');
+    final conVideo = videoId != null && videoId.isNotEmpty;
+    final conLista = playlistId != null && playlistId.isNotEmpty;
+    final soloVideo = conVideo && !conLista;
+    Map<String, dynamic> hecha(_Cola c) =>
+        {'pistas': c.pistas, 'letras_id': c.letrasId, 'relacionados_id': c.relacionadosId};
+
+    CatalogoError? ultimo;
+    Future<_Cola?> intentar({String? v, String? l, bool radio = false}) async {
+      try {
+        final c = await _cola(videoId: v, playlistId: l, limite: limite, radio: radio);
+        return c.pistas.isEmpty ? null : c;
+      } on CatalogoError catch (e) {
+        ultimo = e;
+        if (_fallaPorRed(e.mensaje)) rethrow;
+        return null;
+      } catch (e) {
+        ultimo = CatalogoError('$e');
+        return null;
+      }
     }
+
+    // 1) la petición normal; si fue la red, un segundo intento
+    for (var vez = 0; vez < 2; vez++) {
+      try {
+        final c = await intentar(v: videoId, l: playlistId, radio: soloVideo);
+        if (c != null) return hecha(c);
+        break;
+      } on CatalogoError {
+        if (vez == 1) break;
+        await Future<void>.delayed(const Duration(milliseconds: 700));
+      }
+    }
+    // 2) la radio de una canción, sin los parámetros especiales de "radio"
+    if (soloVideo) {
+      try {
+        final c = await intentar(v: videoId);
+        if (c != null) return hecha(c);
+      } on CatalogoError {/* se sigue con el mensaje del primer fallo */}
+    }
+    // 3) una emisora: con su primera canción, o con la propia lista
+    if (conLista) {
+      try {
+        final l = await lista(playlistId, limite: 60);
+        final deLista = [
+          for (final m in _lista(l['pistas']))
+            if (m is Map && '${m['video_id'] ?? ''}'.isNotEmpty) Map<String, dynamic>.from(m)
+        ];
+        if (deLista.isNotEmpty) {
+          final c = await intentar(v: '${deLista.first['video_id']}', radio: true);
+          if (c != null) return hecha(c);
+          return {'pistas': deLista.take(limite).toList(), 'letras_id': '', 'relacionados_id': ''};
+        }
+      } on CatalogoError catch (e) {
+        ultimo ??= e;
+      } catch (e) {
+        ultimo ??= CatalogoError('$e');
+      }
+    }
+    throw CatalogoError('No se pudo crear la radio: ${ultimo?.mensaje ?? 'YouTube Music no devolvió canciones'}');
   }
 
   /// Secciones "Relacionado" de una cancion (para el panel lateral).

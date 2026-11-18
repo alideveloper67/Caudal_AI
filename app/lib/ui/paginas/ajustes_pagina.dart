@@ -21,6 +21,7 @@ import 'aspecto_pagina.dart';
 import 'fondo_pagina.dart';
 import 'gustos_pagina.dart';
 import 'bateria_ajuste.dart';
+import 'donar.dart';
 import 'mezclador_ajustes.dart';
 import 'mezclador_pagina.dart';
 import 'privacidad_pagina.dart';
@@ -416,6 +417,13 @@ class _AjustesPaginaState extends State<AjustesPagina> {
         ),
 
         _seccion('Caudal'),
+        ListTile(
+          leading: const Icon(Icons.favorite_rounded, color: Color(0xFFFFC857)),
+          title: const Text('Donar a Caudal'),
+          subtitle: const Text('Con Yape · los donadores tienen fondo, GIF y mascotita exclusivos', style: estiloSecundario),
+          trailing: const Icon(Icons.chevron_right_rounded, color: C.texto3),
+          onTap: () => mostrarDonar(context),
+        ),
         ListTile(
           leading: const Icon(Icons.system_update_rounded, color: C.texto2),
           title: Text(actualizaLaTienda ? 'Versión de Caudal' : 'Buscar actualizaciones'),

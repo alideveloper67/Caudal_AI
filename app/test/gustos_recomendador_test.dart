@@ -105,6 +105,20 @@ void main() {
       expect(gl.afinidad(p('x', 'Cumbia Uno')), 0);
     });
 
+    test('las señales se combinan: escuchar y dar me gusta pesa más que cada una sola', () {
+      final h = [
+        for (var i = 0; i < 4; i++) Escucha(p('tres00000$i', 'Cumbia Tres'), hoy),
+        for (var i = 0; i < 2; i++) Escucha(p('dos000000$i', 'Cumbia Dos'), hoy),
+      ];
+      final soloEscuchas = Gusto.desde(h, {}, ahora: hoy);
+      final ambas = Gusto.desde(h, {}, ahora: hoy, megusta: [p('liked000001', 'Cumbia Dos')]);
+      final dos = p('x', 'Cumbia Dos');
+      expect(soloEscuchas.afinidad(dos), closeTo(0.5, 0.001));
+      expect(ambas.afinidad(dos), closeTo(0.8, 0.001));
+      expect(ambas.afinidad(dos), greaterThan(0.6)); // más que el me gusta solo
+      expect(ambas.afinidad(p('x', 'Cumbia Tres')), 1.0);
+    });
+
     test('diversidad: nunca más de 2 seguidas del mismo artista', () {
       final lista = Recomendador.combinar([
         [for (var i = 0; i < 8; i++) p('mismo00000$i', 'Cumbia Uno'), for (var i = 0; i < 5; i++) p('otro000000$i', 'Cumbia Dos'),

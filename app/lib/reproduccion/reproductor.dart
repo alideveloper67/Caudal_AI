@@ -573,7 +573,7 @@ class Reproductor extends ChangeNotifier {
   Future<void> reproducirRadioId(String playlistId, String titulo) async {
     _aviso('Preparando la radio…');
     try {
-      final datos = await Catalogo.radio(playlistId: playlistId);
+      final datos = await Catalogo.radio(playlistId: playlistId).timeout(const Duration(seconds: 40));
       final pistas = List<Json>.from(datos['pistas'] as List);
       if (pistas.isEmpty) return _aviso('Esa radio no tiene canciones ahora mismo.');
       await reproducirLista(pistas, contexto: {'tipo': 'radio', 'id': playlistId, 'titulo': titulo});
@@ -809,7 +809,9 @@ class Reproductor extends ChangeNotifier {
     _buscandoRadio = true;
     final gen = _gen;
     try {
-      final datos = await Catalogo.radio(videoId: '${pista['video_id']}');
+      // con tope de tiempo: si YouTube Music no contesta, la radio no se queda colgada ni deja
+      // cerrada la puerta a pedirla otra vez
+      final datos = await Catalogo.radio(videoId: '${pista['video_id']}').timeout(const Duration(seconds: 40));
       final vistos = secuencia.map((p) => p['video_id']).toSet();
       final nuevas = <Json>[];
       var candidatas = List<Json>.from(datos['pistas'] as List);
@@ -834,8 +836,11 @@ class Reproductor extends ChangeNotifier {
       notifyListeners();
       if (ySeguir && gen == _gen && nuevas.isNotEmpty) await siguiente();
       if (ySeguir && nuevas.isEmpty) await detener();
-    } catch (_) {
-      if (ySeguir) await detener();
+    } catch (e) {
+      if (ySeguir) {
+        _aviso(e is CatalogoError ? '$e' : 'No pude seguir con canciones parecidas. Revisa tu conexión.');
+        await detener();
+      }
     } finally {
       _buscandoRadio = false;
     }

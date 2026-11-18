@@ -12,6 +12,7 @@ import '../../nucleo/social.dart';
 import '../comunes.dart';
 import '../servicios.dart';
 import '../tema.dart';
+import 'donar.dart';
 import 'gif_buscador.dart';
 import 'perfil_comun.dart';
 
@@ -108,6 +109,17 @@ class _PerfilEditarPaginaState extends State<PerfilEditarPagina> {
 
   void _aviso(String t) => Caudal.leer(context).avisar(t);
 
+  /// Los GIF son de donadores: el aviso lleva un botón discreto para donar.
+  void _avisoDonar() {
+    final m = Caudal.leer(context).mensajero.currentState;
+    if (m == null) return;
+    m.hideCurrentSnackBar();
+    m.showSnackBar(SnackBar(
+      content: const Text(GifPerfil.sinPermiso),
+      action: SnackBarAction(label: 'Donar aquí', onPressed: () => mostrarDonar(context)),
+    ));
+  }
+
   Future<void> _elegirFoto() async {
     if (_procesandoFoto) return;
     try {
@@ -126,7 +138,7 @@ class _PerfilEditarPaginaState extends State<PerfilEditarPagina> {
           }
           return;
         }
-        if (mounted) _aviso(GifPerfil.sinPermiso);
+        if (mounted) _avisoDonar();
       }
       final jpeg = await ImagenSocial.foto(bytes);
       if (mounted) {
@@ -161,7 +173,7 @@ class _PerfilEditarPaginaState extends State<PerfilEditarPagina> {
           }
           return;
         }
-        if (mounted) _aviso(GifPerfil.sinPermiso);
+        if (mounted) _avisoDonar();
       }
       final jpeg = await ImagenSocial.banner(bytes);
       if (mounted) {

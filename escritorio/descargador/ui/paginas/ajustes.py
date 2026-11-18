@@ -15,6 +15,7 @@ from ...hilos import en_segundo_plano
 from ...motor import formato_bytes
 from .. import iconos, imagenes
 from ..componentes import Pagina
+from ..donar import abrir_donar
 from ..estilos import C
 
 NAVEGADORES = [("No usar cookies", "ninguno"), ("Chrome", "chrome"), ("Edge", "edge"),
@@ -437,6 +438,14 @@ class PaginaAjustes(Pagina):
         bt_datos = QPushButton("Abrir")
         bt_datos.clicked.connect(lambda: __import__("os").startfile(str(carpeta_datos())))
         s.fila("Carpeta de datos de Caudal", str(carpeta_datos()), bt_datos)
+        self.cuerpo.addWidget(s)
+
+        # ---------------- donar (para todos; discreto)
+        s = Seccion("Apoya a Caudal")
+        bt_donar = QPushButton("Donar con Yape")
+        bt_donar.clicked.connect(lambda: abrir_donar(self))
+        s.fila("Donar a Caudal", "Caudal es gratis. Los donadores tienen fondo, GIF y mascotita "
+                                 "exclusivos.", bt_donar)
         self.cuerpo.addWidget(s)
 
         # ---------------- motor

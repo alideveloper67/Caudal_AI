@@ -6,6 +6,7 @@ import '../../nucleo/nube.dart';
 import '../fondo_capa.dart';
 import '../servicios.dart';
 import '../tema.dart';
+import 'donar.dart';
 import 'perfil_comun.dart';
 
 const _oro = Color(0xFFFFC857);
@@ -294,14 +295,20 @@ class _Exclusivo extends StatelessWidget {
           padding: const EdgeInsets.all(32),
           child: ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 420),
-            child: Column(mainAxisSize: MainAxisSize.min, children: const [
-              Icon(Icons.star_rounded, size: 56, color: _oro),
-              SizedBox(height: 14),
-              Text('Exclusivo para donadores', textAlign: TextAlign.center,
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              const Icon(Icons.star_rounded, size: 56, color: _oro),
+              const SizedBox(height: 14),
+              const Text('Exclusivo para donadores', textAlign: TextAlign.center,
                   style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900)),
-              SizedBox(height: 8),
-              Text('El fondo de imagen es un detalle para quienes apoyan a Caudal con una donación.',
+              const SizedBox(height: 8),
+              const Text('El fondo de imagen es un detalle para quienes apoyan a Caudal con una donación.',
                   textAlign: TextAlign.center, style: estiloSecundario),
+              const SizedBox(height: 14),
+              FilledButton.icon(
+                onPressed: () => mostrarDonar(context),
+                icon: const Icon(Icons.favorite_rounded, size: 18),
+                label: const Text('Donar aquí'),
+              ),
             ]),
           ),
         ),

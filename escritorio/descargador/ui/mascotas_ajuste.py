@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel, QSizePo
                                QVBoxLayout, QWidget)
 
 from .. import mascotas as M
+from .donar import boton_donar
 from .estilos import C
 
 COLUMNAS = 6
@@ -96,6 +97,8 @@ class SeccionMascotas(QFrame):
         self.aviso.setObjectName("ayuda")
         self.aviso.setWordWrap(True)
         v.addWidget(self.aviso)
+        self.bt_donar = boton_donar(texto="Donar aquí")
+        v.addWidget(self.bt_donar, 0, Qt.AlignLeft)
 
         self.vista = VistaPrevia(gestor)
         v.addWidget(self.vista)
@@ -146,6 +149,7 @@ class SeccionMascotas(QFrame):
         puede = self.gestor.puede
         suyas = self.gestor.tiene_exclusivas
         self.aviso.setVisible(not puede)
+        self.bt_donar.setVisible(not puede)
         self.aviso.setText("Las demás son para donadores y fundadores de Caudal; la tuya es solo tuya."
                            if suyas else "Exclusiva para donadores y fundadores de Caudal.")
         for clave, b in self.botones.items():

@@ -178,6 +178,7 @@ class Ventana(QWidget):
         QTimer.singleShot(2500, self._avisar_novedades)
         QTimer.singleShot(1500, self.fondo.sincronizar)
         QTimer.singleShot(6000, lambda: self.buscar_version(True))
+        QTimer.singleShot(9000, self._buscar_avisos)
         QApplication.instance().installEventFilter(_Teclas(self))
         from . import arrastre
         arrastre.instalar()        # arrastrar con el ratón para desplazar, como con el dedo
@@ -1062,6 +1063,21 @@ class Ventana(QWidget):
             self._novedad_pendiente = novedad
             return
         mostrar_aviso(novedad, self)
+
+    def _buscar_avisos(self):
+        """Los avisos que se mandan a todas las apps (descargador/avisos.py): cada uno sale una vez."""
+        if self.en_completa or self._saliendo:
+            QTimer.singleShot(20000, self._buscar_avisos)
+            return
+        from .. import avisos
+        from ..hilos import en_segundo_plano
+
+        def listos(lista):
+            if lista and not self._saliendo:
+                from .aviso_caudal import mostrar_avisos
+                mostrar_avisos(lista, self)
+
+        en_segundo_plano(avisos.pendientes, ok=listos, error=lambda _e: None, dueno=self)
 
     def _avisar_novedades(self):
         """Una sola vez por versión, y sin tocar la música."""

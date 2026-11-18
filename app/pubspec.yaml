@@ -1,7 +1,7 @@
 name: caudal
 description: "Descarga musica y videos desde su propio navegador"
 publish_to: 'none'
-version: 2.3.3+39
+version: 2.3.4+40
 
 environment:
   sdk: ^3.13.0
@@ -62,3 +62,4 @@ flutter:
     - assets/logo/
     - assets/mascotas/
     - assets/fondos/
+    - assets/donar/

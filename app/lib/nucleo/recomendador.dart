@@ -173,6 +173,10 @@ class Gusto {
 
   /// Afinidad con los artistas de la pista (0..1): lo que escuchas, lo que
   /// elegiste y tus me gusta suman; los saltos restan.
+  ///
+  /// Las señales se combinan como pruebas independientes (1 − Π(1 − señal)):
+  /// con una sola señal da lo mismo que antes, pero un artista que además de
+  /// escucharlo lo marcaste con me gusta pesa más que otro con solo una de las dos.
   double afinidad(Json p) {
     var hist = 0.0;
     var salto = 0;
@@ -180,7 +184,7 @@ class Gusto {
       hist = max(hist, artistas[a.clave] ?? 0);
       salto = max(salto, saltosArtista[a.clave] ?? 0);
     }
-    final bruta = max(hist, max(0.9 * elegida(p), 0.6 * conMeGusta(p)));
+    final bruta = 1 - (1 - hist) * (1 - 0.9 * elegida(p)) * (1 - 0.6 * conMeGusta(p));
     return (bruta - min(0.5, 0.12 * salto)).clamp(0.0, 1.0);
   }
 

@@ -178,3 +178,20 @@ details p { color: var(--texto2); margin: 10px 0 0; }
 
 h1, h2, h3, .marca { font-family: "Bricolage Grotesque", "Figtree", sans-serif; }
 .documento h1 { letter-spacing: -.02em; }
+
+/* ---------- módulo Donación (al fondo de la página, antes del pie) */
+.donacion { padding: 88px 0; background: #07202F; border-top: 1px solid var(--borde); }
+.donacion-rejilla { display: grid; grid-template-columns: 1.1fr .9fr; gap: 48px; align-items: center; }
+.donacion h2 { margin: 0 0 14px; font-size: clamp(30px, 4vw, 44px); line-height: 1.05; }
+.donacion .sub { margin: 0 0 20px; }
+.donacion-pasos { margin: 0 0 24px; padding-left: 22px; color: var(--texto2); line-height: 1.6; }
+.donacion-pasos li { margin-bottom: 6px; }
+.donacion-acciones { display: flex; flex-wrap: wrap; gap: 10px; }
+.donacion-acciones button.boton { font-family: inherit; }
+.donacion-qr { margin: 0; text-align: center; }
+.donacion-qr img { display: block; margin: 0 auto; width: min(320px, 100%); height: auto; border-radius: 20px; box-shadow: 0 18px 50px rgba(0, 0, 0, .35); }
+.donacion-qr figcaption { margin-top: 12px; color: var(--texto3); font-size: 14px; }
+@media (max-width: 780px) {
+  .donacion { padding: 64px 0; }
+  .donacion-rejilla { grid-template-columns: 1fr; gap: 32px; }
+}

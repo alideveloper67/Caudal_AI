@@ -874,19 +874,51 @@ def lista(playlist_id, limite=300):
 
 
 def radio(video_id=None, playlist_id=None, limite=50):
-    """La radio infinita de YouTube Music a partir de una cancion o una emisora."""
-    try:
-        w = _yt().get_watch_playlist(videoId=video_id, playlistId=playlist_id,
-                                     limit=limite, radio=bool(video_id and not playlist_id))
-    except Exception as e:
-        raise ErrorCatalogo(f"No se pudo crear la radio: {e}") from e
-    pistas = []
-    for t in w.get("tracks") or []:
-        p = pista_de_ytm(t)
-        if p:
-            pistas.append(p)
-    return {"pistas": pistas, "letras_id": w.get("lyrics") or "",
-            "relacionados_id": w.get("related") or ""}
+    """La radio infinita de YouTube Music a partir de una cancion o una emisora.
+
+    No se rinde a la primera: un fallo de red se reintenta, la radio de una cancion prueba tambien
+    la peticion sin parametros de radio y, si falla una emisora (la «radio del artista»), se arma con
+    su primera cancion o, de ultimo, con las canciones de la propia lista."""
+    import time
+    ultimo = []
+
+    def intentar(**kw):
+        for vez in range(2):
+            try:
+                w = _yt().get_watch_playlist(limit=limite, **kw)
+            except Exception as e:                     # red, tiempo o un cambio de YouTube
+                ultimo[:] = [e]
+                texto = str(e).lower()
+                if vez == 0 and any(x in texto for x in ("timeout", "timed out", "connection", "resolve")):
+                    time.sleep(0.7)
+                    continue
+                return None
+            pistas = [p for p in (pista_de_ytm(t) for t in w.get("tracks") or []) if p]
+            if pistas:
+                return {"pistas": pistas, "letras_id": w.get("lyrics") or "",
+                        "relacionados_id": w.get("related") or ""}
+            ultimo[:] = ["YouTube Music no devolvió canciones"]
+            return None
+        return None
+
+    solo_video = bool(video_id and not playlist_id)
+    r = intentar(videoId=video_id, playlistId=playlist_id, radio=solo_video)
+    if r:
+        return r
+    if solo_video:                                      # sin los parametros especiales de «radio»
+        r = intentar(videoId=video_id)
+        if r:
+            return r
+    if playlist_id:                                     # una emisora: su primera cancion, o la propia lista
+        try:
+            de_lista = lista(playlist_id, limite=60)["pistas"]
+        except Exception as e:
+            ultimo[:] = ultimo or [e]
+            de_lista = []
+        if de_lista:
+            r = intentar(videoId=de_lista[0]["video_id"], radio=True)
+            return r or {"pistas": de_lista[:limite], "letras_id": "", "relacionados_id": ""}
+    raise ErrorCatalogo(f"No se pudo crear la radio: {ultimo[0] if ultimo else 'YouTube Music no devolvió canciones'}")
 
 
 def relacionados(video_id):

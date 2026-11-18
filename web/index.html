@@ -26,6 +26,7 @@
       <a href="#amigos">Con amigos</a>
       <a href="#descubrir">Descubrir</a>
       <a href="#descargar">Descargar</a>
+      <a href="#donacion">Donación</a>
     </nav>
     <a class="enlace-barra" href="app/">Abrir en el navegador</a>
     <a class="boton" href="#descargar">Descargar gratis</a>
@@ -197,14 +198,14 @@
       <h2>Descárgala gratis.</h2>
       <p class="sub" id="sugerencia">Una sola cuenta para el teléfono y la computadora. Sin anuncios.</p>
       <div class="plataformas">
-        <a class="plataforma" data-so="android" href="https://github.com/alideveloper67/Caudal_AI/releases/download/movil-v2.3.2/Caudal-2.3.2-arm64-v8a.apk">
+        <a class="plataforma" data-so="android" href="https://github.com/alideveloper67/Caudal_AI/releases/download/movil-v2.3.4/Caudal-2.3.4-arm64-v8a.apk">
           <span class="so">Android</span>
-          <span class="detalle">Versión 2.3.2 · Android 7 o superior · se descarga directo</span>
+          <span class="detalle">Versión 2.3.4 · Android 7 o superior · se descarga directo</span>
           <span class="ir">Descargar →</span>
         </a>
-        <a class="plataforma" data-so="windows" href="https://github.com/alideveloper67/Caudal_AI/releases/download/escritorio-v2.4.2/CaudalInstalador.exe">
+        <a class="plataforma" data-so="windows" href="https://github.com/alideveloper67/Caudal_AI/releases/download/escritorio-v2.4.4/CaudalInstalador.exe">
           <span class="so">Windows</span>
-          <span class="detalle">Versión 2.4.2 · Windows 10 y 11 · «CaudalInstalador.exe»</span>
+          <span class="detalle">Versión 2.4.4 · Windows 10 y 11 · «CaudalInstalador.exe»</span>
           <span class="ir">Descargar →</span>
         </a>
         <a class="plataforma" data-so="web" href="app/">
@@ -219,7 +220,7 @@
         </a>
       </div>
       <p class="sub" style="margin-top:18px;font-size:14px">¿Tu teléfono es muy antiguo (32 bits)?
-        <a id="apk-antiguo" href="https://github.com/alideveloper67/Caudal_AI/releases/download/movil-v2.3.2/Caudal-2.3.2-armeabi-v7a.apk">Descarga esta otra versión</a>.</p>
+        <a id="apk-antiguo" href="https://github.com/alideveloper67/Caudal_AI/releases/download/movil-v2.3.4/Caudal-2.3.4-armeabi-v7a.apk">Descarga esta otra versión</a>.</p>
     </div>
   </section>
 
@@ -247,6 +248,27 @@
       </div>
     </div>
   </section>
+  <section class="donacion" id="donacion" aria-labelledby="donacion-titulo">
+    <div class="contenedor donacion-rejilla">
+      <div class="donacion-texto">
+        <h2 id="donacion-titulo">Donación</h2>
+        <p class="sub">Caudal es gratis y no tiene anuncios. Si quieres apoyarlo, puedes donar con Yape. Quien dona recibe la etiqueta <strong>Donador de Caudal</strong>, un fondo propio en toda la app, GIF animados en su perfil y una mascotita que camina por la barra de la canción.</p>
+        <ol class="donacion-pasos">
+          <li>Escanea el QR con Yape o yapea al <strong>902464984</strong>.</li>
+          <li>Envía la captura del pago por WhatsApp a ese mismo número, con tu usuario de Caudal.</li>
+          <li>Comprobamos la donación y activamos tus beneficios.</li>
+        </ol>
+        <div class="donacion-acciones">
+          <a class="boton" href="https://wa.me/51902464984" target="_blank" rel="noopener">Enviar captura por WhatsApp</a>
+          <button class="boton secundario" type="button" id="copiar-numero">Copiar 902464984</button>
+        </div>
+      </div>
+      <figure class="donacion-qr">
+        <img src="donar-yape-qr.png" width="320" alt="Código QR de Yape para donar a Caudal" loading="lazy">
+        <figcaption>Yape · 902464984</figcaption>
+      </figure>
+    </div>
+  </section>
 </main>
 
 <footer class="pie">
@@ -254,6 +276,7 @@
     <a class="marca" href="#"><img src="icono.png" alt="">Caudal</a>
     <span>© 2026 Caudal</span>
     <nav>
+      <a href="#donacion">Donación</a>
       <a href="terminos.html">Términos y condiciones</a>
       <a href="privacidad.html">Política de privacidad</a>
       <a href="eliminar-cuenta.html">Eliminar mi cuenta</a>
@@ -327,6 +350,17 @@
   tarjeta.parentNode.prepend(tarjeta);
   document.getElementById('sugerencia').textContent =
     `Estás en ${nombres[so]}: te dejamos su versión primero. Una sola cuenta para todo, sin anuncios.`;
+})();
+</script>
+<script>
+// Donación: copiar el número de Yape.
+(function () {
+  const bt = document.getElementById('copiar-numero');
+  if (!bt) return;
+  bt.addEventListener('click', () => {
+    (navigator.clipboard ? navigator.clipboard.writeText('902464984') : Promise.reject())
+      .then(() => { bt.textContent = 'Número copiado'; }, () => { bt.textContent = 'Escribe al 902464984'; });
+  });
 })();
 </script>
 </body>

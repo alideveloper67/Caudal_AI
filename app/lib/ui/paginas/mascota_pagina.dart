@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../nucleo/fondo_app.dart';
 import '../../nucleo/mascota_app.dart';
 import '../tema.dart';
+import 'donar.dart';
 
 const _oro = Color(0xFFFFC857);
 
@@ -36,6 +37,7 @@ class _MascotaPaginaState extends State<MascotaPagina> {
             padding: const EdgeInsets.all(Esp.l),
             children: [
               _Aviso(puede: puede, titulo: FondoApp.i.titulo, suyas: suyas),
+              if (!puede) const Padding(padding: EdgeInsets.only(top: Esp.s), child: AvisoDonar()),
               const SizedBox(height: Esp.l),
               Opacity(
                 opacity: puede || suyas ? 1 : 0.45,
