@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -9,6 +10,7 @@ import 'letras_cache.dart' show lineasConTiempo;
 import 'mixes.dart' show Escucha;
 import 'nube.dart';
 import 'social.dart';
+import 'vida_app.dart';
 
 /// Lo que dice el servidor sobre los beneficios de la cuenta (`mi_premium`).
 class EstadoPremium {
@@ -129,14 +131,74 @@ class Premium extends ChangeNotifier {
 
   /// Al entrar a una cuenta: primero lo guardado en el teléfono (instantáneo) y después lo de la nube.
   Future<void> iniciar(String cuentaId, Social? social) async {
+    _pararTemporizadores();
     _cuenta = cuentaId;
     await _leerLocal();
     if (social == null) return;
     await refrescar(social);
   }
 
-  /// Vuelve a preguntar al servidor (al entrar y tras canjear un pase).
+  /// Esperas entre reintentos cuando la pregunta al servidor falla (al abrir hay mucho tráfico a la
+  /// vez). Antes era un solo intento: un donador podía quedarse sin sus beneficios toda la sesión.
+  @visibleForTesting
+  static List<Duration> esperasReintento = const [
+    Duration(seconds: 4), Duration(seconds: 10), Duration(seconds: 30),
+    Duration(minutes: 1), Duration(minutes: 2), Duration(minutes: 5),
+  ];
+
+  /// Al volver a la app, si la última respuesta buena es más vieja que esto, se pregunta de nuevo
+  /// (una donación nueva se nota sola, sin relojes gastando batería en segundo plano).
+  static const cadaCuanto = Duration(minutes: 20);
+
+  Timer? _reintento;
+  int _fallosSeguidos = 0;
+  DateTime? _ultimaBuena;
+  Social? _social;
+  bool _escuchaVida = false;
+
+  @visibleForTesting
+  int get fallosSeguidos => _fallosSeguidos;
+
+  void _programar(Social social, {required bool salioBien}) {
+    final cuenta = _cuenta;
+    _social = social;
+    _reintento?.cancel();
+    _reintento = null;
+    if (!_escuchaVida) {
+      _escuchaVida = true;
+      VidaApp.primerPlano.addListener(_alVolver);
+    }
+    if (salioBien) {
+      _fallosSeguidos = 0;
+      _ultimaBuena = DateTime.now();
+      return;
+    }
+    final espera = esperasReintento[_fallosSeguidos.clamp(0, esperasReintento.length - 1)];
+    _fallosSeguidos++;
+    _reintento = Timer(espera, () {
+      _reintento = null;
+      if (_cuenta == cuenta) unawaited(refrescar(social));
+    });
+  }
+
+  void _alVolver() {
+    final s = _social;
+    if (!VidaApp.primerPlano.value || s == null || _reintento != null || _cuenta.isEmpty) return;
+    final u = _ultimaBuena;
+    if (u == null || DateTime.now().difference(u) >= cadaCuanto) unawaited(refrescar(s));
+  }
+
+  void _pararTemporizadores() {
+    _reintento?.cancel();
+    _reintento = null;
+    _fallosSeguidos = 0;
+    _ultimaBuena = null;
+    _social = null;
+  }
+
+  /// Vuelve a preguntar al servidor (al entrar y tras canjear un pase). Si falla, se reintenta solo.
   Future<void> refrescar(Social social) async {
+    var salioBien = false;
     try {
       EstadoPremium nuevo;
       try {
@@ -164,9 +226,11 @@ class Premium extends ChangeNotifier {
         await _guardarLocal();
         notifyListeners();
       }
+      salioBien = true;
     } catch (_) {
-      // sin conexión se queda lo guardado en el teléfono
+      // sin conexión se queda lo guardado en el teléfono (y se vuelve a intentar en un rato)
     }
+    _programar(social, salioBien: salioBien);
   }
 
   /// Canjea un código de prueba. Los mensajes del servidor se devuelven tal cual.
@@ -212,6 +276,7 @@ class Premium extends ChangeNotifier {
 
   /// Al cerrar sesión: nada de la cuenta anterior se queda a la vista.
   void reiniciar() {
+    _pararTemporizadores();
     _cuenta = '';
     estado = EstadoPremium.ninguno;
     marco = efectoNombre = tema = Cosmeticos.ninguno;

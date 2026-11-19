@@ -54,7 +54,9 @@ def _nueva(padre, app, **kw):
 
 def test_edicion_y_comparaciones():
     from descargador import version
-    assert version.VERSION == "2.7.0" and version.EDICION_GRANDE == "2.7.0"
+    # la versión puede ser un parche (2.7.x) de la edición grande, que sigue siendo la 2.7.0
+    assert version.EDICION_GRANDE == "2.7.0" and version.es_de_la_edicion(version.VERSION)
+    assert version.alcanza_edicion(version.VERSION)
     assert version.alcanza_edicion("2.7.0") and version.alcanza_edicion("2.7.3") and version.alcanza_edicion("3.0.0")
     assert not version.alcanza_edicion("2.6.9")
     assert version.es_de_la_edicion("2.7.1") and not version.es_de_la_edicion("2.8.0")

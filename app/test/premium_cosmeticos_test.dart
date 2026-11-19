@@ -22,6 +22,22 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+/// Como [_Sesion], pero las primeras [veces] preguntas por `mi_premium` se quedan sin red.
+class _SesionQueFalla extends _Sesion {
+  _SesionQueFalla({required this.veces});
+  int veces;
+
+  @override
+  Future<dynamic> pedir(String metodo, String ruta,
+      {Object? cuerpo, Map<String, String> cabeceras = const {}}) async {
+    if (ruta == 'rpc/mi_premium' && veces > 0) {
+      veces--;
+      throw const SinConexion();
+    }
+    return super.pedir(metodo, ruta, cuerpo: cuerpo, cabeceras: cabeceras);
+  }
+}
+
 class _Sesion extends Sesion {
   _Sesion() : super('yo', 'token', 'r', DateTime.now().add(const Duration(hours: 1)));
 
@@ -218,6 +234,26 @@ void main() {
       await Premium.i.iniciar('yo', Social(ses));
       expect(Premium.i.activo, isTrue);
       expect(Premium.i.estado.tipo, 'donador');
+    });
+
+    test('si falla al abrir se reintenta solo hasta traer los beneficios', () async {
+      // al abrir hay mucho tráfico: un fundador no puede quedarse sin nada por un fallo de red
+      final antes = Premium.esperasReintento;
+      Premium.esperasReintento = const [Duration(milliseconds: 20)];
+      addTearDown(() {
+        Premium.esperasReintento = antes;
+        Premium.i.reiniciar();
+      });
+      final ses = _SesionQueFalla(veces: 2)..premium = {'premium': true, 'tipo': 'fundador', 'vence': null};
+      await Premium.i.iniciar('yo', Social(ses));
+      expect(Premium.i.activo, isFalse);
+      expect(Premium.i.fallosSeguidos, 1);
+      for (var i = 0; i < 50 && !Premium.i.activo; i++) {
+        await Future<void>.delayed(const Duration(milliseconds: 20));
+      }
+      expect(Premium.i.activo, isTrue);
+      expect(Premium.i.estado.tipo, 'fundador');
+      expect(Premium.i.fallosSeguidos, 0);
     });
 
     test('se recuerda en el teléfono para cuando no hay internet', () async {

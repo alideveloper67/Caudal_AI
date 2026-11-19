@@ -10,7 +10,7 @@ aquí solo se pregunta y se aplica."""
 import json
 import time
 
-from PySide6.QtCore import QObject, Signal
+from PySide6.QtCore import QObject, QTimer, Signal
 
 from . import nube
 from . import social as S
@@ -82,6 +82,19 @@ class GestorPremium(QObject):
         self._aviso_dia = ""
         self._pidiendo = False
         self._cargar_local()
+        # Si la pregunta al servidor falla (al abrir hay mucho tráfico a la vez), se reintenta con
+        # espera creciente; antes era un solo intento y un donador se quedaba sin beneficios toda la
+        # sesión. Además se vuelve a preguntar de vez en cuando (una donación nueva se nota sola).
+        self._fallos_seguidos = 0
+        self._reintento = QTimer(self)
+        self._reintento.setSingleShot(True)
+        self._reintento.timeout.connect(self.refrescar)
+        self._periodico = QTimer(self)
+        self._periodico.setInterval(self.CADA_CUANTO_MS)
+        self._periodico.timeout.connect(self.refrescar)
+
+    ESPERAS_REINTENTO_S = (4, 10, 30, 60, 120, 300)
+    CADA_CUANTO_MS = 20 * 60 * 1000
 
     # ------------------------------------------------------------ copia local
     def _cargar_local(self):
@@ -149,11 +162,18 @@ class GestorPremium(QObject):
 
         def listo(res):
             self._pidiendo = False
+            self._fallos_seguidos = 0
+            if not self._periodico.isActive():
+                self._periodico.start()
             self._aplicar_remoto(*res)
 
         def fallo(_e):
-            self._pidiendo = False      # sin red: se queda lo que ya se sabía
-        en_segundo_plano(trabajo, ok=listo, error=fallo)
+            self._pidiendo = False      # sin red: se queda lo que ya se sabía y se vuelve a intentar
+            esperas = self.ESPERAS_REINTENTO_S
+            espera = esperas[min(self._fallos_seguidos, len(esperas) - 1)]
+            self._fallos_seguidos += 1
+            self._reintento.start(espera * 1000)
+        en_segundo_plano(trabajo, ok=listo, error=fallo, dueno=self)
 
     def _aplicar_remoto(self, estado, pers):
         antes = self.estado

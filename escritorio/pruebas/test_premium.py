@@ -243,6 +243,21 @@ def test_sin_red_no_rompe_ni_borra_lo_guardado(app):
     assert g.premium and g.marco == "aurora"
 
 
+def test_si_falla_al_abrir_se_reintenta_solo_hasta_traer_los_beneficios(app, monkeypatch):
+    # al abrir hay mucho tráfico: si la primera pregunta falla, un fundador no puede quedarse sin nada
+    monkeypatch.setattr(P.GestorPremium, "ESPERAS_REINTENTO_S", (0, 0, 0))
+    ses = _sesion_prueba(tipo="fundador")
+    ses.sin_red = True
+    g = P.GestorPremium(_ctx(ses))
+    g.refrescar()
+    esperar(app, lambda: g._fallos_seguidos >= 1, "primer fallo")
+    assert not g.premium
+    ses.sin_red = False                                  # vuelve la red: el reintento lo trae solo
+    esperar(app, lambda: g.premium, "estado tras reintento")
+    assert g.tipo == "fundador" and g._fallos_seguidos == 0
+    assert g._periodico.isActive()                       # y se sigue preguntando de vez en cuando
+
+
 def test_una_prueba_vencida_no_pinta_nada_aunque_quede_guardado(app):
     g = P.GestorPremium(_ctx(SesionFalsa()))
     g.estado = D.EstadoPremium(True, "prueba", time.time() - 10)
