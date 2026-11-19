@@ -277,7 +277,7 @@ void main() {
     });
 
     testWidgets('si tocan las novedades grandes, sale en el arranque siguiente', (t) async {
-      await _montarApp(t, version: '2.4.2');
+      await _montarApp(t, version: '2.5.2');
       await t.pump(const Duration(seconds: 3));
       expect(find.text('ACTUALIZACIÓN GRANDE DE CAUDAL'), findsOneWidget);
       expect(find.text(_titulos[0]), findsNothing);
@@ -285,7 +285,7 @@ void main() {
       expect(p.getString(clavePresentacionMascotasVista), isNull);
 
       // el siguiente arranque, con lo que quedó guardado
-      await _montarApp(t, version: '2.4.2', prefs: {claveNovedadesVistas: p.getString(claveNovedadesVistas)!});
+      await _montarApp(t, version: '2.5.2', prefs: {claveNovedadesVistas: p.getString(claveNovedadesVistas)!});
       await t.pump(const Duration(seconds: 3));
       expect(find.text('ACTUALIZACIÓN GRANDE DE CAUDAL'), findsNothing);
       expect(find.text(_titulos[0]), findsOneWidget);

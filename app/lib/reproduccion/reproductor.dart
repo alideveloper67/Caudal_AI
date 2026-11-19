@@ -15,8 +15,11 @@ import '../nucleo/red.dart';
 import '../nucleo/streams.dart';
 import '../nucleo/transiciones.dart';
 import '../nucleo/vida_app.dart';
+import 'cola_ops.dart' as cola;
 import 'frenos.dart';
 import 'jugador.dart';
+import 'pausa_suave.dart';
+import 'retomar.dart';
 
 const frecuenciasEq = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
 const presetsEq = <String, List<int>>{
@@ -280,7 +283,47 @@ class Reproductor extends ChangeNotifier {
   }
 
   /// Volumen que se le da al motor (el de la app por el factor de iPhone).
-  double get _salida => volumen * _factorSalida * _factorDormir * _factorEstudio;
+  double get _salida => volumen * _factorSalida * _factorDormir * _factorEstudio * _suave.factor;
+
+  /// Play y pausa suaves (ver pausa_suave.dart): su factor multiplica el
+  /// volumen sin tocar el que guardo el usuario.
+  late final PausaSuave _suave = PausaSuave(
+    aplicar: () async {
+      if (_fundido == null && _traspaso == null && _activo.fuente != null) {
+        await _activo.player.setVolume(_salida);
+      }
+    },
+    pausarMotor: () => _activo.player.pause(),
+    reanudarMotor: () => _activo.player.play(),
+  );
+
+  /// Donde ibas en las canciones largas (sets, mixes).
+  late final MemoriaRetomar _retomar = MemoriaRetomar(
+    leer: () => coleccion.estado('retomar'),
+    escribir: (m) => coleccion.guardarEstado('retomar', m),
+  );
+  DateTime _ultimoRetomar = DateTime(2000);
+
+  String _claveRetomar(Json p) => '${p['clave'] ?? p['video_id'] ?? ''}';
+
+  /// Guarda por donde vas si la cancion es larga (cada 15 s, al pausar y al cerrar).
+  Future<void> _guardarRetomar() async {
+    _ultimoRetomar = DateTime.now();
+    final a = actual;
+    if (a == null || _traspaso != null || _fundido != null || estado == EstadoRepro.cargando) return;
+    final dur = duracion.value;
+    if (!pideRetomar(dur)) return;
+    try {
+      await _retomar.guardar(_claveRetomar(a), posicion.value, dur);
+    } catch (_) {}
+  }
+
+  /// «Desde el inicio» del aviso de retomar: vuelve al principio y lo olvida.
+  Future<void> desdeElInicio() async {
+    final a = actual;
+    if (a != null) unawaited(_retomar.olvidar(_claveRetomar(a)).catchError((_) {}));
+    await buscar(Duration.zero);
+  }
 
   /// En iPhone el VP9 no tiene decodificador por hardware y el AV1 de este
   /// libmpv tampoco: H.264 (videotoolbox) gasta mucho menos bateria.
@@ -621,6 +664,30 @@ class Reproductor extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// «Tocar después de esta»: [p] suena justo detrás de lo que suena ahora
+  /// (si ya estaba en la cola, se mueve en vez de repetirse).
+  void tocarDespues(Json p) {
+    if (actual == null) {
+      reproducirLista([p]);
+      return;
+    }
+    cola.tocarDespues(proximas, secuencia, original, pos, p);
+    notifyListeners();
+    _aviso('Sonará a continuación');
+  }
+
+  /// Mueve una canción del contexto que aún no ha sonado (índices absolutos).
+  void moverEnSecuencia(int de, int a) {
+    if (cola.moverEnSecuencia(secuencia, pos, de, a)) notifyListeners();
+  }
+
+  /// Vuelve a poner en [absoluto] una canción quitada con [quitarDeSecuencia].
+  void insertarEnSecuencia(int absoluto, Json p) {
+    secuencia.insert(absoluto.clamp(pos + 1, secuencia.length), p);
+    if (!original.any((x) => identical(x, p))) original.add(p);
+    notifyListeners();
+  }
+
   void moverProxima(int de, int a) {
     if (de < 0 || de >= proximas.length) return;
     final p = proximas.removeAt(de);
@@ -692,21 +759,42 @@ class Reproductor extends ChangeNotifier {
       await _cargar(actual!, inicio: posicion.value);
       return;
     }
-    await _activo.player.playOrPause();
+    if (_activo.player.state.playing) {
+      await pausar();
+    } else {
+      await reanudar();
+    }
   }
 
-  Future<void> pausar() async => _activo.player.pause();
+  /// En un fundido o traspaso no se suaviza (ya tienen su propio volumen).
+  bool get _puedeSuavizar => _fundido == null && _traspaso == null && _activo.fuente != null;
+
+  Future<void> pausar() async {
+    if (!_puedeSuavizar || !_activo.player.state.playing) {
+      _suave.cancelar();
+      await _activo.player.pause();
+      if (_fundido == null && _traspaso == null && _activo.fuente != null) {
+        await _activo.player.setVolume(_salida);
+      }
+      return;
+    }
+    await _suave.pausar();
+  }
 
   Future<void> reanudar() async {
     if (actual == null) return;
     if (estado == EstadoRepro.parado) {
       await _cargar(actual!, inicio: posicion.value);
-    } else {
+    } else if (!_puedeSuavizar) {
+      _suave.cancelar();
       await _activo.player.play();
+    } else {
+      await _suave.reanudar(sonaba: _activo.player.state.playing);
     }
   }
 
   Future<void> detener() async {
+    _suave.cancelar();
     _traspaso = null;
     _cortarFundido();
     _revivir?.cancel();
@@ -895,8 +983,23 @@ class Reproductor extends ChangeNotifier {
       _a.video;
       _b.video;
     }
+    _suave.cancelar();
     _cortarFundido();
     final gen = ++_gen;
+    // una cancion larga (set, mix) que dejaste a medias: se retoma desde ahi
+    if (intento == 0 && !mismo && inicio == Duration.zero && _traspaso == null && !sonandoSet && !_probando) {
+      final dur = Duration(seconds: (pista['duracion'] as num?)?.toInt() ?? 0);
+      if (pideRetomar(dur)) {
+        try {
+          final p = await _retomar.punto(_claveRetomar(pista), dur);
+          if (gen != _gen) return;
+          if (p != null) {
+            inicio = p;
+            _aviso(avisoRetomado);
+          }
+        } catch (_) {}
+      }
+    }
     final cambio = !identical(pista, actual) || !mismo;
     actual = pista;
     if (intento == 0) _reintentos = 0;
@@ -1208,6 +1311,9 @@ class Reproductor extends ChangeNotifier {
     if (DateTime.now().difference(_ultimoGuardado) > const Duration(seconds: 20)) {
       guardarSesion();
     }
+    if (estado == EstadoRepro.sonando && DateTime.now().difference(_ultimoRetomar) >= cadaGuardarRetomar) {
+      _guardarRetomar();
+    }
   }
 
   void _alDuracion(_Motor m, Duration d) {
@@ -1263,6 +1369,7 @@ class Reproductor extends ChangeNotifier {
     }
     if (_fundido != null && identical(m, _fundido!['saliente'])) return;
     if (!_esActual(m) || m.fuente == null) return;
+    if (actual != null) unawaited(_retomar.olvidar(_claveRetomar(actual!)).catchError((_) {}));
     if (_apagarAlFinal) {
       _apagarAlFinal = false;
       detener().whenComplete(() => _ponerFactorDormir(1));
@@ -1609,6 +1716,7 @@ class Reproductor extends ChangeNotifier {
   Future<void> guardarSesion() async {
     _ultimoGuardado = DateTime.now();
     if (actual == null) return;
+    unawaited(_guardarRetomar());
     final cola = Object.hashAll([
       pos, '${contexto?['tipo']}|${contexto?['id']}', '${actual!['clave']}',
       for (final p in secuencia) '${p['clave']}|${p['_auto'] == true}',

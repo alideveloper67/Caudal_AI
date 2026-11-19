@@ -183,6 +183,13 @@ class Ventana(QWidget):
         self._grande_en_sesion = False
         self._novedad_pendiente = None
         QTimer.singleShot(2500, self._avisar_novedades)
+        # «ya puedes regalar códigos de prueba»: una vez, a donadores y fundadores (cuando se sepa que lo son)
+        self._aviso_regalo = None
+        self._t_regalo = QTimer(self)
+        self._t_regalo.setSingleShot(True)
+        self._t_regalo.timeout.connect(self._avisar_regalo)
+        self.premium.cambiado.connect(lambda: self._t_regalo.start(3000))
+        self._t_regalo.start(5000)
         QTimer.singleShot(1500, self.fondo.sincronizar)
         QTimer.singleShot(6000, lambda: self.buscar_version(True))
         QTimer.singleShot(9000, self._buscar_avisos)
@@ -245,6 +252,10 @@ class Ventana(QWidget):
         from .video import MiniReproductor
         self.mini = MiniReproductor(self.ctx)
         self.mini.expandir.connect(self._mini_expandir)
+        # Modo gamer: atajos globales, ahorro al jugar, XP... (todo apagado hasta que se active)
+        from ..modo_gamer import GestorGamer
+        self.gamer = GestorGamer(self.ctx, self)
+        self.ctx.gamer = self.gamer
 
     def _barra_superior(self):
         barra = QFrame()
@@ -383,6 +394,7 @@ class Ventana(QWidget):
         self._saliendo = True
         self._guardar_estado()
         self.teclas_multimedia.soltar()
+        self.gamer.cerrar()
         self.ctx.gestor.cancelar_todo()
         self.r.cerrar()
         if self.mini:
@@ -454,6 +466,9 @@ class Ventana(QWidget):
         elif pag == "estudio":
             from .paginas.estudio import PaginaEstudio
             w = PaginaEstudio(self.ctx)
+        elif pag == "gamer":
+            from .paginas.modo_gamer import PaginaModoGamer
+            w = PaginaModoGamer(self.ctx)
         elif pag == "video":
             from .video import VistaVideo
             w = VistaVideo(self.ctx)
@@ -1113,6 +1128,33 @@ class Ventana(QWidget):
         if self._aviso_mascotas is not None:
             self._aviso_mascotas.finished.connect(self._tras_novedades)
 
+    def _avisar_regalo(self):
+        """El aviso único de los códigos de regalo: espera a que no haya otro aviso abierto."""
+        from . import aviso_regalo
+        if self._aviso_regalo is not None or not aviso_regalo.debe_mostrarse(self.ajustes, self.premium):
+            return
+        if (self.en_completa or self._saliendo or self._aviso_grande is not None
+                or self._aviso_mascotas is not None):
+            self._t_regalo.start(20000)
+            return
+        try:
+            self._aviso_regalo = aviso_regalo.mostrar_si_toca(self)
+        except Exception:  # noqa: BLE001 - un aviso nunca debe romper la app
+            self._aviso_regalo = None
+            return
+        if self._aviso_regalo is not None:
+            self._aviso_regalo.finished.connect(lambda _r=0: setattr(self, "_aviso_regalo", None))
+
+    def ir_a_regalo(self):
+        """Lleva a Ajustes, a la tarjeta «Regala una prueba a tus amigos»."""
+        self.navegar({"pagina": "ajustes"})
+        QTimer.singleShot(250, self._mostrar_tarjeta_regalo)
+
+    def _mostrar_tarjeta_regalo(self):
+        mostrar = getattr(self.pila.currentWidget(), "mostrar_regalo", None)
+        if callable(mostrar):
+            mostrar()
+
     def _tras_novedades(self, _resultado=0):
         self._aviso_grande = None
         self._aviso_mascotas = None
@@ -1173,7 +1215,8 @@ class Ventana(QWidget):
         self.capa_fondo.setVisible(self._con_capa())
         # el personaje del fondo elegido, sentado sobre la barra del reproductor
         from .fondo_capa import PersonajeEsquina
-        self.personaje_fondo = PersonajeEsquina(self, getattr(self, "barra", None))
+        self.personaje_fondo = PersonajeEsquina(self, getattr(self, "barra", None),
+                                                getattr(self.ctx, "reproductor", None))
         self.personaje_fondo.colocar()
         self.fondo.antes_de_cambiar.connect(self._fondo_antes)
         self.fondo.cambiado.connect(self._fondo_cambiado)
@@ -1543,6 +1586,10 @@ class Ventana(QWidget):
         QApplication.processEvents()
         try:
             self.teclas_multimedia.soltar()
+        except Exception:
+            pass
+        try:
+            self.gamer.cerrar()
         except Exception:
             pass
         try:

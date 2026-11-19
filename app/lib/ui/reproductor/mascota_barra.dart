@@ -11,6 +11,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../../nucleo/gamer_control.dart';
 import '../../nucleo/mascota_app.dart';
 import '../../reproduccion/reproductor.dart';
 
@@ -25,9 +26,9 @@ class MascotaEnBarra extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: MascotaApp.i,
+      listenable: Listenable.merge([MascotaApp.i, ModoGamerControl.mascotasOcultas]),
       builder: (_, _) {
-        final m = MascotaApp.i.activa ? MascotaApp.i.actual : null;
+        final m = MascotaApp.i.activa && !ModoGamerControl.mascotasOcultas.value ? MascotaApp.i.actual : null;
         if (m == null) return const SizedBox.shrink();
         return _Caminante(key: ValueKey(m.clave), r: r, mascota: m, fraccion: fraccion, cambios: cambios, margen: margen);
       },

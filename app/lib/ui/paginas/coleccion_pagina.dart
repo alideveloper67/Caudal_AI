@@ -8,6 +8,7 @@ import '../comunes.dart';
 import '../hoja_portada.dart';
 import '../servicios.dart';
 import '../tema.dart';
+import 'enriquecer_hoja.dart';
 import 'inicio.dart';
 import 'lista_compartir.dart';
 import 'lista_privacidad_hoja.dart';
@@ -301,6 +302,12 @@ class _ColeccionPaginaState extends State<ColeccionPagina> {
                           s.hojaDescargar(context, faltan);
                         },
                       ),
+                      if (_tipo == 'mi_lista')
+                        IconButton(
+                          tooltip: 'Enriquecer',
+                          icon: const Icon(Icons.auto_awesome_rounded, color: C.texto2, size: 26),
+                          onPressed: _enriquecer,
+                        ),
                       IconButton(
                         icon: const Icon(Icons.more_vert_rounded, color: C.texto2),
                         onPressed: _menu,
@@ -406,6 +413,17 @@ class _ColeccionPaginaState extends State<ColeccionPagina> {
     );
   }
 
+  void _enriquecer() {
+    final id = _idLista;
+    if (id == null) return;
+    if (_pistas.isEmpty) {
+      Caudal.leer(context).avisar('Añade primero algunas canciones y así sabré qué sugerirte');
+      return;
+    }
+    mostrarHojaEnriquecer(context, listaId: id, nombre: '${_datos?['titulo'] ?? 'tu lista'}',
+        pistas: List.of(_pistas));
+  }
+
   Future<void> _editar() async {
     final s = Caudal.leer(context);
     final id = _idLista;
@@ -470,6 +488,12 @@ class _ColeccionPaginaState extends State<ColeccionPagina> {
                 s.reproductor.reproducirRadioId('RDAMPL${_datos!['lista_id']}', 'Radio de ${_datos!['titulo']}');
               }),
         if (_tipo == 'mi_lista') ...[
+          ListTile(leading: const Icon(Icons.auto_awesome_rounded, color: C.texto2), title: const Text('Enriquecer'),
+              subtitle: const Text('Sugiere canciones nuevas parecidas a las de esta lista'),
+              onTap: () {
+                Navigator.pop(ctx);
+                _enriquecer();
+              }),
           ListTile(leading: const Icon(Icons.push_pin_outlined, color: C.texto2), title: const Text('Fijar arriba / desfijar'),
               onTap: () async {
                 Navigator.pop(ctx);

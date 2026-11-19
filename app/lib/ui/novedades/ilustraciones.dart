@@ -6,6 +6,7 @@ import '../reproductor/vinilo.dart';
 import '../tema.dart';
 
 part 'ilustraciones_v4.dart';
+part 'ilustraciones_v5.dart';
 
 /// Lo que comparten todas las ilustraciones: un reloj que da vueltas de 12 s
 /// (todo movimiento dura un divisor de 12 s, así el bucle no tiene saltos) y

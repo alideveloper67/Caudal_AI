@@ -7,7 +7,10 @@ muy suave del color de acento. La imagen ya escalada y desenfocada se guarda en 
 al pintar solo se compone, y al cambiar el tamaño se re-escala una vez, con una pausa.
 """
 
-from PySide6.QtCore import QEvent, QPoint, QRectF, QSize, Qt, QTimer
+import math
+import time
+
+from PySide6.QtCore import QElapsedTimer, QEvent, QPoint, QRectF, QSize, Qt, QTimer
 from PySide6.QtGui import (QColor, QImage, QLinearGradient, QPainter, QPixmap, QRadialGradient)
 from PySide6.QtWidgets import (QGraphicsBlurEffect, QGraphicsPixmapItem, QGraphicsScene, QWidget)
 
@@ -158,23 +161,55 @@ class PersonajeEsquina(QWidget):
     la esquina derecha. Siempre se ve entero (los paneles no lo tapan) y sigue a la barra (tamaño de la
     ventana, pantalla completa). Convive con la imagen de fondo.
 
-    Su tamaño se cambia con el ratón, sin ir a ningún ajuste: la rueda encima de él, o arrastrarlo
-    (hacia arriba/izquierda crece, hacia abajo/derecha se achica). Se recuerda en los ajustes."""
+    Con el ratón, sin ir a ningún ajuste: la rueda encima de él cambia su tamaño; arrastrarlo con el
+    botón izquierdo lo lleva a cualquier parte de la ventana (nunca se sale); doble clic lo devuelve a
+    su esquina. Tamaño y lugar se recuerdan en los ajustes (el lugar como fracción 0..1 de lo que cabe
+    en la ventana, así se respeta al cambiar el tamaño de la ventana).
+
+    Mientras suena la música baila: rebote, vaivén y un poco de squash/stretch con los pies fijos. El
+    reloj solo corre mientras suena; en pausa queda quieto."""
 
     ALTO = 124         # tamaño de partida (el dibujo mide 96 px: se agranda sin suavizar, nítido)
     MINIMO, MAXIMO = 64, 280
     MARGEN = 22        # espacio para el halo
     CLAVE = "tamano_personaje"
+    CLAVE_X, CLAVE_Y = "personaje_x", "personaje_y"
+    CLAVE_BAILE = "personaje_baila"
+    UMBRAL_ARRASTRE = 2        # px que hay que mover antes de que un clic cuente como arrastre
+    CUADRO_MS = 33             # ~30 cuadros por segundo
+    FUNDIDO_S = 0.35           # lo que tarda en entrar y salir del baile (nunca corta de golpe)
+    # baile suave, como las mascotas del reproductor (todo en fracciones del alto del personaje)
+    SALTO = 0.028              # lo que sube entre tiempo y tiempo
+    MECE = 0.012               # desplazamiento lateral
+    GIRO = 1.7                 # grados, como mucho
+    ESTIRA = 0.012             # estiramiento casi imperceptible
+    BPM_BASE = 96.0            # si la canción aún no tiene su ritmo analizado
+    BPM_MAXIMO = 130.0         # por encima se baila a la mitad
 
-    def __init__(self, padre, barra=None):
+    def __init__(self, padre, barra=None, reproductor=None):
         super().__init__(padre)
         self.setAttribute(Qt.WA_NoSystemBackground, True)
         self.setAutoFillBackground(False)
-        self.setCursor(Qt.SizeFDiagCursor)
-        self.setToolTip("Gira la rueda o arrástralo para hacerlo más grande o más chico")
+        self.setCursor(Qt.OpenHandCursor)
+        self.setToolTip("Arrástralo para moverlo, gira la rueda para cambiar su tamaño; "
+                        "doble clic lo devuelve a su esquina")
         self.barra = barra
         self.pm = None
-        self._arrastre = None            # (punto global de inicio, alto al empezar)
+        self._arrastre = None            # (punto global de inicio, posición al empezar, ¿ya se movió?)
+        self._frac = (-1.0, -1.0)        # lugar elegido como fracción 0..1; -1 = su esquina de siempre
+        self._amp = 0.0                  # 0..1: cuánto está bailando (sube y baja con el fundido)
+        self._sonando = False
+        self._quiere = False
+        self._ref = (time.monotonic(), 0.0)   # (reloj, posición de la canción) para interpolar el tiempo
+        self._ritmo = (self.BPM_BASE, 0.0)    # (bpm, segundo del primer tiempo) de la canción que suena
+        self._reloj = QElapsedTimer()
+        self._t_baile = QTimer(self)
+        self._t_baile.setInterval(self.CUADRO_MS)
+        self._t_baile.timeout.connect(self._paso_baile)
+        self._t_colocar = QTimer(self)
+        self._t_colocar.setSingleShot(True)
+        self._t_colocar.setInterval(0)
+        self._t_colocar.timeout.connect(self.colocar)
         self._t_guardar = QTimer(self)
         self._t_guardar.setSingleShot(True)
         self._t_guardar.setInterval(500)
@@ -182,9 +217,20 @@ class PersonajeEsquina(QWidget):
         if barra is not None:
             barra.installEventFilter(self)
         self.alto = self._leer_alto()
+        self._frac = self._leer_frac()
+        self.reproductor = reproductor
+        if reproductor is not None:
+            reproductor.estado_cambio.connect(self._al_estado)
+            for nombre, ranura in (("posicion_cambio", self._al_posicion), ("pista_cambio", self._al_pista)):
+                senal = getattr(reproductor, nombre, None)
+                if senal is not None:
+                    senal.connect(ranura)
+            self._sonando = getattr(reproductor, "estado", "") == "sonando"
+            self._tomar_posicion()
+            self._leer_ritmo()
         self.hide()
 
-    # ---------------------------------------------------------------- tamaño
+    # ---------------------------------------------------------------- ajustes
     def _ajustes(self):
         return getattr(self.parentWidget(), "ajustes", None)
 
@@ -195,49 +241,124 @@ class PersonajeEsquina(QWidget):
             v = self.ALTO
         return max(self.MINIMO, min(self.MAXIMO, v))
 
-    def poner_alto(self, alto):
-        alto = max(self.MINIMO, min(self.MAXIMO, int(alto)))
-        if alto != self.alto:
-            self.alto = alto
-            self.colocar()
-            self._t_guardar.start()
+    def _leer_frac(self):
+        a = self._ajustes() or {}
+        try:
+            fx, fy = float(a[self.CLAVE_X]), float(a[self.CLAVE_Y])
+        except (TypeError, ValueError, KeyError):
+            return (-1.0, -1.0)
+        if not (0.0 <= fx <= 1.0 and 0.0 <= fy <= 1.0):       # -1 (o basura) = en su esquina
+            return (-1.0, -1.0)
+        return (fx, fy)
+
+    @property
+    def en_la_esquina(self):
+        return self._frac[0] < 0
 
     def _guardar(self):
         a = self._ajustes()
         if a is not None:
             a[self.CLAVE] = self.alto
+            a[self.CLAVE_X], a[self.CLAVE_Y] = self._frac
             try:
                 a.guardar()
             except Exception:  # noqa: BLE001
                 pass
+
+    def baile_permitido(self):
+        try:
+            return bool((self._ajustes() or {})[self.CLAVE_BAILE])
+        except (TypeError, KeyError):
+            return True
+
+    # ---------------------------------------------------------------- medidas
+    def _margenes(self, alto=None):
+        """(lateral, arriba, abajo): dejan sitio al halo y a lo que se sale del dibujo al bailar."""
+        h, m = alto or self.alto, self.MARGEN
+        return m + int(h * 0.05), m + int(h * 0.08), 6
+
+    def _tamano(self, alto=None):
+        h = alto or self.alto
+        lado, arriba, abajo = self._margenes(h)
+        w = int(self.pm.width() * h / max(1, self.pm.height()))
+        return w + 2 * lado, h + arriba + abajo
+
+    def _acotar(self, x, y, ancho, alto):
+        padre = self.parentWidget()
+        return (max(0, min(int(x), max(0, padre.width() - ancho))),
+                max(0, min(int(y), max(0, padre.height() - alto))))
+
+    def _frac_de(self, x, y, ancho, alto):
+        padre = self.parentWidget()
+        libre_x, libre_y = padre.width() - ancho, padre.height() - alto
+        return (max(0.0, min(1.0, x / libre_x)) if libre_x > 0 else 0.0,
+                max(0.0, min(1.0, y / libre_y)) if libre_y > 0 else 0.0)
+
+    # ---------------------------------------------------------------- tamaño
+    def poner_alto(self, alto):
+        alto = max(self.MINIMO, min(self.MAXIMO, int(alto)))
+        if alto == self.alto:
+            return
+        if not self.en_la_esquina and self.pm is not None and self.parentWidget() is not None:
+            # en su sitio elegido, crece o se achica con la esquina de abajo a la derecha quieta
+            g = self.geometry()
+            ancho, alto_w = self._tamano(alto)
+            x, y = self._acotar(g.right() + 1 - ancho, g.bottom() + 1 - alto_w, ancho, alto_w)
+            self._frac = self._frac_de(x, y, ancho, alto_w)
+        self.alto = alto
+        self.colocar()
+        self._t_guardar.start()
 
     def wheelEvent(self, e):
         paso = 1 if e.angleDelta().y() > 0 else -1
         self.poner_alto(self.alto + paso * 10)
         e.accept()
 
+    # ---------------------------------------------------------------- mover con el ratón
     def mousePressEvent(self, e):
         if e.button() == Qt.LeftButton:
-            self._arrastre = (e.globalPosition(), self.alto)
+            self._arrastre = [e.globalPosition(), self.pos(), False]
             e.accept()
 
     def mouseMoveEvent(self, e):
-        if self._arrastre is not None:
-            inicio, alto0 = self._arrastre
-            d = e.globalPosition() - inicio
-            # la esquina de abajo a la derecha queda fija: hacia arriba/izquierda crece
-            self.poner_alto(alto0 - (d.x() + d.y()) / 2)
-            e.accept()
+        if self._arrastre is None:
+            return
+        inicio, pos0, movido = self._arrastre
+        d = e.globalPosition() - inicio
+        if not movido:
+            if abs(d.x()) < self.UMBRAL_ARRASTRE and abs(d.y()) < self.UMBRAL_ARRASTRE:
+                return
+            self._arrastre[2] = True
+            self.setCursor(Qt.ClosedHandCursor)
+        x, y = self._acotar(pos0.x() + d.x(), pos0.y() + d.y(), self.width(), self.height())
+        self._frac = self._frac_de(x, y, self.width(), self.height())
+        self.move(x, y)
+        e.accept()
 
     def mouseReleaseEvent(self, e):
         if self._arrastre is not None:
+            movido = self._arrastre[2]
             self._arrastre = None
-            self._guardar()
+            self.setCursor(Qt.OpenHandCursor)
+            if movido:
+                self._guardar()
             e.accept()
+
+    def mouseDoubleClickEvent(self, e):
+        if e.button() == Qt.LeftButton:
+            self._arrastre = None
+            self.volver_a_la_esquina()
+            e.accept()
+
+    def volver_a_la_esquina(self):
+        """Lo devuelve a su esquina de siempre, sobre la barra (y lo recuerda)."""
+        self._frac = (-1.0, -1.0)
+        self.colocar()
+        self._guardar()
 
     def eventFilter(self, obj, e):
         if obj is self.barra and e.type() in (QEvent.Move, QEvent.Resize, QEvent.Show, QEvent.Hide):
-            QTimer.singleShot(0, self.colocar)
+            self._t_colocar.start()      # un reloj propio: si el personaje se destruye, no queda nada pendiente
         return False
 
     def colocar(self):
@@ -247,25 +368,127 @@ class PersonajeEsquina(QWidget):
         barra = self.barra
         if self.pm is None or padre is None or barra is None or not barra.isVisible():
             self.hide()
+            self._actualizar_baile()
             return
-        h, m = self.alto, self.MARGEN
-        w = int(self.pm.width() * h / max(1, self.pm.height()))
-        self.resize(w + 2 * m, h + m + 6)
-        arriba = barra.mapTo(padre, QPoint(0, 0)).y()
-        # los pies apoyados en el borde de arriba de la barra, en la esquina derecha
-        self.move(padre.width() - self.width() - 8, arriba - h - m + 4)
+        h = self.alto
+        ancho, alto_w = self._tamano()
+        self.resize(ancho, alto_w)
+        lado, arriba, _abajo = self._margenes()
+        if self.en_la_esquina:
+            borde = barra.mapTo(padre, QPoint(0, 0)).y()
+            # los pies apoyados en el borde de arriba de la barra, en la esquina derecha
+            x = min(padre.width() - ancho, padre.width() - ancho - 8 + (lado - self.MARGEN))
+            y = borde - h - arriba + 4
+        else:
+            fx, fy = self._frac
+            x = fx * max(0, padre.width() - ancho)
+            y = fy * max(0, padre.height() - alto_w)
+            x, y = self._acotar(x, y, ancho, alto_w)
+        self.move(int(x), int(y))
         self.show()
         self.raise_()
         self.update()
+        self._actualizar_baile()
+
+    # ---------------------------------------------------------------- baile
+    def _al_estado(self, estado):
+        self._tomar_posicion()
+        self._sonando = estado == "sonando"
+        if self._sonando:
+            self._leer_ritmo()
+        self._actualizar_baile()
+
+    def _al_posicion(self, segundos):
+        self._ref = (time.monotonic(), float(segundos))
+
+    def _al_pista(self, *_a):
+        self._leer_ritmo()
+
+    def _tomar_posicion(self):
+        pos = getattr(self.reproductor, "_posicion", None)
+        if isinstance(pos, (int, float)):
+            self._ref = (time.monotonic(), float(pos))
+
+    def _leer_ritmo(self):
+        """El tempo y el primer tiempo salen del análisis que la app ya guardó para la canción (el del
+        mezclador DJ): aquí NO se analiza audio. Sin él, 96 bpm."""
+        bpm, fase = self.BPM_BASE, 0.0
+        r = self.reproductor
+        try:
+            an = r._analisis_de(r.actual) if r is not None and r.actual is not None else None
+            if an and float(an.get("bpm") or 0) > 0:
+                bpm, fase = float(an["bpm"]), float(an.get("fase") or 0.0)
+        except Exception:  # noqa: BLE001 - sin análisis, el ritmo de siempre
+            pass
+        self._ritmo = (bpm, fase)
+
+    def _posicion_cancion(self):
+        """Dónde va la canción ahora, interpolando entre aviso y aviso del reproductor (y quieta si no suena)."""
+        t0, p0 = self._ref
+        if not self._sonando:
+            return p0
+        vel = float(getattr(self.reproductor, "velocidad", 1.0) or 1.0)
+        return p0 + (time.monotonic() - t0) * vel
+
+    def _periodo(self):
+        """Segundos por tiempo bailado: un tempo mayor de 130 bpm se baila a la mitad."""
+        bpm = self._ritmo[0]
+        while bpm > self.BPM_MAXIMO:
+            bpm /= 2
+        return 60.0 / max(1.0, bpm)
+
+    def _actualizar_baile(self):
+        """El reloj corre mientras suena la música, está permitido y el personaje se ve; y un rato más
+        mientras el fundido de salida lo deja quieto."""
+        debe = self._sonando and self.baile_permitido() and self.isVisible()
+        self._quiere = debe
+        if debe or self._amp > 0:
+            if not self._t_baile.isActive():
+                self._reloj.start()
+                self._t_baile.start()
+        elif self._t_baile.isActive():
+            self._t_baile.stop()
+
+    def actualizar_baile(self):
+        """Para cuando cambia el ajuste «personaje_baila»."""
+        self._actualizar_baile()
+
+    def _paso_baile(self):
+        dt = self._reloj.restart() / 1000.0
+        paso = dt / self.FUNDIDO_S
+        self._amp = min(1.0, self._amp + paso) if self._quiere else max(0.0, self._amp - paso)
+        if self._amp <= 0 and not self._quiere:
+            self._t_baile.stop()
+        self.update()
+
+    def pose(self):
+        """(subida 0..1, desplazamiento en fracción del alto, giro en grados, escala_x, escala_y).
+
+        Cae en los tiempos de la canción: abajo justo EN el tiempo y arriba entre tiempos (sube = sin(pi·f)
+        con f la fracción del tiempo); se mece de lado cada 2 tiempos. Todo se multiplica por el fundido."""
+        if self._amp <= 0:
+            return 0.0, 0.0, 0.0, 1.0, 1.0
+        a = self._amp * self._amp * (3 - 2 * self._amp)             # fundido suave (smoothstep)
+        bpm, fase = self._ritmo
+        periodo = self._periodo()
+        tiempos = (self._posicion_cancion() - fase) / periodo
+        f = tiempos % 1.0
+        subida = math.sin(math.pi * f)
+        lado = math.sin(math.pi * (tiempos % 2.0))                  # un vaivén completo cada 2 tiempos
+        k = subida * 2 - 1
+        return (subida * a, self.MECE * lado * a, self.GIRO * lado * a,
+                1 - 0.5 * self.ESTIRA * k * a, 1 + self.ESTIRA * k * a)
 
     def paintEvent(self, _e):
         if self.pm is None:
             return
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
-        h, m = self.alto, self.MARGEN
-        w = self.width() - 2 * m
-        x, y = m, m
+        h = self.alto
+        lado, y, _abajo = self._margenes()
+        w = self.width() - 2 * lado
+        x = lado
+        subida, desp, giro, sx, sy = self.pose()
         p.setPen(Qt.NoPen)
         # halo suave del color del tema detrás: se nota sobre cualquier fondo, también sobre una foto
         ac = QColor(C["acento"])
@@ -277,15 +500,23 @@ class PersonajeEsquina(QWidget):
         halo.setColorAt(1.0, _con_alfa(ac, 0))
         p.setBrush(halo)
         p.drawEllipse(QRectF(cx - radio, cy - radio, radio * 2, radio * 2))
-        # sombra bajo los pies: lo «posa» sobre la barra
-        sombra = QRadialGradient(x + w / 2, y + h - 1, w * 0.48)
-        sombra.setColorAt(0.0, _con_alfa("#000000", 150))
+        # sombra bajo los pies: lo «posa» sobre la barra (se encoge un poco cuando salta)
+        enc = 1 - 0.08 * subida
+        sombra = QRadialGradient(x + w / 2, y + h - 1, w * 0.48 * enc)
+        sombra.setColorAt(0.0, _con_alfa("#000000", int(150 - 20 * subida)))
         sombra.setColorAt(1.0, _con_alfa("#000000", 0))
         p.setBrush(sombra)
-        p.drawEllipse(QRectF(x + w * 0.04, y + h - 8, w * 0.92, 15))
-        # agrandar pixel art: sin suavizado (nítido); solo se suaviza si hubiera que achicarlo
-        p.setRenderHint(QPainter.SmoothPixmapTransform, self.pm.height() > h)
+        p.drawEllipse(QRectF(x + w * (0.5 - 0.46 * enc), y + h - 8, w * 0.92 * enc, 15))
+        # el dibujo baila desde los pies (el punto de apoyo no se mueve de la barra, salvo el salto)
+        p.save()
+        p.translate(x + w / 2 + desp * h, y + h - subida * h * self.SALTO)
+        p.rotate(giro)
+        p.scale(sx, sy)
+        p.translate(-(x + w / 2), -(y + h))
+        # agrandar pixel art: sin suavizado (nítido); se suaviza si hay que achicarlo o si gira
+        p.setRenderHint(QPainter.SmoothPixmapTransform, self.pm.height() > h or self._amp > 0)
         p.drawPixmap(QRectF(x, y, w, h), self.pm, QRectF(self.pm.rect()))
+        p.restore()
         p.end()
 
 

@@ -23,6 +23,7 @@ import '../reproductor/portada_deslizable.dart';
 import '../reproductor/vinilo.dart';
 import '../servicios.dart';
 import '../tema.dart';
+import 'cola_hoja.dart';
 import 'compartir_letra.dart';
 import 'mezclador_ajustes.dart';
 import 'mezclador_pagina.dart';
@@ -479,7 +480,7 @@ class _ReproductorPaginaState extends State<ReproductorPagina> {
   Future<void> _cola(BuildContext context) => showModalBottomSheet<void>(
         context: context,
         isScrollControlled: true,
-        builder: (_) => const _HojaCola(),
+        builder: (_) => const HojaCola(),
       );
 }
 
@@ -553,91 +554,6 @@ class _VideoEnLinea extends StatelessWidget {
           ),
         ),
       );
-}
-
-// ---------------------------------------------------------------- cola
-
-class _HojaCola extends StatelessWidget {
-  const _HojaCola();
-
-  @override
-  Widget build(BuildContext context) {
-    final s = Caudal.of(context);
-    final r = s.reproductor;
-    return DraggableScrollableSheet(
-      expand: false,
-      initialChildSize: 0.75,
-      maxChildSize: 0.95,
-      builder: (_, scroll) => ListenableBuilder(
-        listenable: r,
-        builder: (context, _) {
-          final siguientes = r.siguientesDeContexto;
-          final normales = [for (var i = 0; i < siguientes.length; i++) if (siguientes[i]['_auto'] != true) i];
-          final auto = [for (var i = 0; i < siguientes.length; i++) if (siguientes[i]['_auto'] == true) i];
-          return CustomScrollView(controller: scroll, slivers: [
-            const SliverToBoxAdapter(child: Padding(padding: EdgeInsets.fromLTRB(20, 0, 20, 4),
-                child: Text('Sonando ahora', style: estiloTituloSeccion))),
-            if (r.actual != null)
-              SliverToBoxAdapter(child: FilaPista(pista: r.actual!, alPulsar: r.alternar)),
-            if (r.proximas.isNotEmpty) ...[
-              SliverToBoxAdapter(child: Padding(
-                padding: const EdgeInsets.fromLTRB(20, 14, 8, 4),
-                child: Row(children: [
-                  const Expanded(child: Text('Siguiente en tu cola', style: estiloTituloSeccion)),
-                  TextButton(onPressed: r.vaciarProximas, child: const Text('Vaciar', style: TextStyle(color: C.texto2))),
-                ]),
-              )),
-              SliverReorderableList(
-                itemCount: r.proximas.length,
-                onReorderItem: r.moverProxima,
-                onReorderStart: (_) => Haptico.firme(),
-                itemBuilder: (_, i) {
-                  final p = r.proximas[i];
-                  return ReorderableDelayedDragStartListener(
-                    key: ValueKey('prox-$i-${p['clave']}'),
-                    index: i,
-                    child: Dismissible(
-                      key: ValueKey('dis-$i-${p['clave']}'),
-                      direction: DismissDirection.endToStart,
-                      background: Container(color: C.error, alignment: Alignment.centerRight,
-                          padding: const EdgeInsets.only(right: 20), child: const Icon(Icons.delete_outline_rounded)),
-                      onDismissed: (_) {
-                        Haptico.toque();
-                        r.quitarProxima(i);
-                        s.avisar('Quitada de la cola', deshacer: () => r.insertarProxima(i, p));
-                      },
-                      child: FilaPista(pista: p, alPulsar: () => r.saltarAProxima(i)),
-                    ),
-                  );
-                },
-              ),
-            ],
-            if (normales.isNotEmpty) ...[
-              SliverToBoxAdapter(child: Padding(padding: const EdgeInsets.fromLTRB(20, 14, 20, 4),
-                  child: Text('Siguiente de: ${r.contexto?['titulo'] ?? 'la cola'}', style: estiloTituloSeccion,
-                      maxLines: 2))),
-              SliverList.builder(itemCount: normales.length, itemBuilder: (_, k) {
-                final i = normales[k];
-                return FilaPista(pista: siguientes[i], alPulsar: () => r.saltarA(r.pos + 1 + i));
-              }),
-            ],
-            if (auto.isNotEmpty) ...[
-              const SliverToBoxAdapter(child: Padding(padding: EdgeInsets.fromLTRB(20, 14, 20, 0),
-                  child: Text('Reproducción automática', style: estiloTituloSeccion))),
-              const SliverToBoxAdapter(child: Padding(padding: EdgeInsets.fromLTRB(20, 2, 20, 6),
-                  child: Text('Canciones parecidas para que la música no pare.', style: estiloSecundario))),
-              SliverList.builder(itemCount: auto.length, itemBuilder: (_, k) {
-                final i = auto[k];
-                return FilaPista(pista: siguientes[i], alPulsar: () => r.saltarA(r.pos + 1 + i));
-              }),
-            ],
-            // por encima del indicador de inicio del iPhone
-            SliverToBoxAdapter(child: SizedBox(height: 30 + MediaQuery.paddingOf(context).bottom)),
-          ]);
-        },
-      ),
-    );
-  }
 }
 
 // ---------------------------------------------------------------- letra

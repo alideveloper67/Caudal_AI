@@ -263,6 +263,32 @@ class GestorPremium(QObject):
                 ok(res)
         en_segundo_plano(trabajo, ok=listo, error=error or (lambda _e: None))
 
+    # ------------------------------------------------------------ pases de regalo (donadores y fundadores)
+    @property
+    def puede_regalar(self):
+        """Solo quien dona de verdad: la prueba no puede regalar pruebas."""
+        return self.premium and self.estado.tipo in ("donador", "fundador")
+
+    def _regalo(self, trabajo, ok, error, dueno):
+        social = self._social()
+        if social is None:
+            if error:
+                error(nube.ErrorNube("Inicia sesión para regalar códigos."))
+            return
+        en_segundo_plano(lambda: trabajo(social), ok=ok, error=error or (lambda _e: None), dueno=dueno)
+
+    def crear_regalo(self, ok=None, error=None, dueno=None):
+        """Crea un código de regalo en segundo plano. `ok(resultado)` recibe {ok, codigo, dias, caduca, mensaje}."""
+        self._regalo(lambda s: s.crear_pase_regalo(), ok, error, dueno)
+
+    def mis_regalos(self, ok=None, error=None, dueno=None):
+        """Los códigos que creé, en segundo plano. `ok(lista)`."""
+        self._regalo(lambda s: s.mis_pases_regalo(), ok, error, dueno)
+
+    def anular_regalo(self, codigo, ok=None, error=None, dueno=None):
+        """Anula un código que nadie usó. `ok(True/False)`."""
+        self._regalo(lambda s: s.anular_pase_regalo(codigo), ok, error, dueno)
+
     def guardar_personalizacion(self, marco=None, efecto=None, tema=None, alerta=None):
         """Aplica y guarda lo elegido: local al instante y en la nube en segundo plano.
         Devuelve True si el tema cambió (hay que reaplicar los colores). Sin beneficios no hace nada."""

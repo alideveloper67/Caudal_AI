@@ -559,6 +559,23 @@ def _dibujar_extra(p, nombre, e, color):
         ruta.lineTo(18 * e, 12.2 * e)
         p.drawPath(ruta)
         p.drawLine(QPointF(22 * e, 9.5 * e), QPointF(22 * e, 15.5 * e))
+    elif nombre == "mando":
+        # mando de juego (Modo gamer)
+        ruta = QPainterPath()
+        ruta.moveTo(7 * e, 7 * e)
+        ruta.lineTo(17 * e, 7 * e)
+        ruta.cubicTo(20.5 * e, 7 * e, 22 * e, 10 * e, 22.5 * e, 14 * e)
+        ruta.cubicTo(23 * e, 17.5 * e, 21.5 * e, 18.5 * e, 20 * e, 18.5 * e)
+        ruta.cubicTo(18.5 * e, 18.5 * e, 17.5 * e, 17 * e, 16.5 * e, 16 * e)
+        ruta.lineTo(7.5 * e, 16 * e)
+        ruta.cubicTo(6.5 * e, 17 * e, 5.5 * e, 18.5 * e, 4 * e, 18.5 * e)
+        ruta.cubicTo(2.5 * e, 18.5 * e, 1 * e, 17.5 * e, 1.5 * e, 14 * e)
+        ruta.cubicTo(2 * e, 10 * e, 3.5 * e, 7 * e, 7 * e, 7 * e)
+        p.drawPath(ruta)
+        p.drawLine(QPointF(7 * e, 10 * e), QPointF(7 * e, 13.4 * e))
+        p.drawLine(QPointF(5.3 * e, 11.7 * e), QPointF(8.7 * e, 11.7 * e))
+        p.drawPoint(QPointF(15.8 * e, 10.6 * e))
+        p.drawPoint(QPointF(18 * e, 12.8 * e))
     else:
         # desconocido: un punto, para no romper nada
         lleno()

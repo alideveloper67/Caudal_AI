@@ -8,10 +8,13 @@ import 'package:flutter/services.dart';
 
 import '../nucleo/importar.dart';
 import '../nucleo/legal.dart';
+import '../nucleo/pases_regalo.dart';
+import '../nucleo/premium.dart';
 import '../nucleo/resumen_anual.dart' show esTemporadaDelResumen;
 import '../nucleo/tarjeta_lista.dart';
 import '../nucleo/version.dart';
 import '../reproduccion/reproductor.dart';
+import '../reproduccion/retomar.dart' show avisoRetomado;
 import 'comunes.dart';
 import 'menu_comunidad.dart';
 import 'novedades/presentacion_mascotas.dart';
@@ -21,6 +24,8 @@ import 'paginas/mensajes_pagina.dart';
 import 'paginas/resumen.dart';
 import 'paginas/resumen_anual_pagina.dart';
 import 'paginas/ajustes_pagina.dart';
+import 'premium/personalizar_pagina.dart';
+import 'premium/regalo_pases.dart';
 import 'paginas/biblioteca.dart';
 import 'paginas/buscar.dart';
 import 'paginas/descargas_pagina.dart';
@@ -102,7 +107,14 @@ class _ArmazonState extends State<Armazon> {
       _ir(3);
       DescargasPagina.pegar(texto);
     };
-    _avisos ??= s.reproductor.avisos.listen(s.avisar);
+    _avisos ??= s.reproductor.avisos.listen((t) {
+      // al retomar una cancion larga, el aviso lleva el boton «Desde el inicio»
+      if (t == avisoRetomado) {
+        s.avisar(t, etiqueta: 'Desde el inicio', deshacer: () => s.reproductor.desdeElInicio());
+      } else {
+        s.avisar(t);
+      }
+    });
   }
 
   @override
@@ -118,6 +130,7 @@ class _ArmazonState extends State<Armazon> {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await _revisarTerminos();
       await _novedadesDeLaVersion();
+      await _avisoPasesRegalo();
     });
     WidgetsBinding.instance.addPostFrameCallback((_) => _avisoWebEnTelefono());
     WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -152,6 +165,40 @@ class _ArmazonState extends State<Armazon> {
       if (!mounted) return;
       await PresentacionMascotas.mostrar(context);
     } catch (_) {}
+  }
+
+  /// Una sola vez, a donadores y fundadores: ya pueden regalar códigos de prueba. Espera a que
+  /// el servidor diga qué tipo de cuenta es; si no llega o se cierra la app, no se marca y sale otro día.
+  Future<void> _avisoPasesRegalo() async {
+    try {
+      if (!await _esperarDonador() || !mounted) return;
+      if (!await AvisoPasesRegalo.toca(Premium.i.estado) || !mounted) return;
+      // se marca antes de enseñarlo: si la cierran o la app se cae, no vuelve a salir
+      await AvisoPasesRegalo.marcarVisto();
+      if (!mounted) return;
+      final ver = await mostrarAvisoPasesRegalo(context);
+      if (ver && mounted) {
+        await Navigator.of(context, rootNavigator: true)
+            .push(MaterialPageRoute<void>(builder: (_) => const PersonalizarPagina()));
+      }
+    } catch (_) {}
+  }
+
+  Completer<bool>? _esperaDonador;
+
+  Future<bool> _esperarDonador() async {
+    if (PasesRegalo.puedeRegalar(Premium.i.estado)) return true;
+    final c = _esperaDonador = Completer<bool>();
+    void escuchar() {
+      if (!c.isCompleted && PasesRegalo.puedeRegalar(Premium.i.estado)) c.complete(true);
+    }
+
+    Premium.i.addListener(escuchar);
+    try {
+      return await c.future;
+    } finally {
+      Premium.i.removeListener(escuchar);
+    }
   }
 
   /// En el navegador de un teléfono, YouTube pausa la música al bloquearlo:
@@ -212,6 +259,7 @@ class _ArmazonState extends State<Armazon> {
 
   @override
   void dispose() {
+    if (_esperaDonador case final c? when !c.isCompleted) c.complete(false);
     _avisos?.cancel();
     super.dispose();
   }

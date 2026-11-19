@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-"""La tercera «Actualización grande de Caudal»: una presentación a pantalla completa.
+"""La cuarta «Actualización grande de Caudal» (2.6): una presentación a pantalla completa.
 
-Nueve diapositivas con fondo de aurora animado, una ilustración propia por
+Siete diapositivas con fondo de aurora animado, una ilustración propia por
 diapositiva (todo dibujado con QPainter, sin imágenes) y una transición de
 fundido con desplazamiento en capas (parallax). Se maneja con las flechas, Enter,
 la rueda, el clic o los puntos de progreso; «Saltar» está siempre a la vista.
@@ -19,7 +19,8 @@ from PySide6.QtWidgets import QApplication, QDialog, QPushButton
 
 from .. import version as _version
 from . import ilustraciones_grandes as I
-from . import ilustraciones_v4  # noqa: F401  (registra las ilustraciones de esta edición)
+from . import ilustraciones_v4  # noqa: F401  (ilustraciones de la edición anterior)
+from . import ilustraciones_v5  # noqa: F401  (registra las ilustraciones de esta edición)
 from .componentes import fuente
 from .estilos import C
 
@@ -27,30 +28,24 @@ TITULO = "ACTUALIZACIÓN GRANDE DE CAUDAL"
 
 # clave de la ilustración, etiqueta, título, texto
 DIAPOSITIVAS = [
-    dict(clave="portada", etiqueta="EDICIÓN 2.5", titulo=TITULO,
-         texto="Más estilo, más herramientas y una app que va más suave. Esto es lo nuevo.", centrada=True, tono=0),
-    dict(clave="marcos", etiqueta="TU PERFIL", titulo="Lúcete en tu perfil",
-         texto="Marcos animados para tu foto y nombres con brillo, degradado o arcoíris. Se ven en tu perfil, tus "
-               "chats y tus amigos.", tono=30),
-    dict(clave="temas", etiqueta="DONADORES", titulo="Temas exclusivos",
-         texto="Seis paletas completas (Atardecer, Bosque, Sakura, Océano, Medianoche y Ámbar) que cambian el color "
-               "de toda la app.", tono=-20),
-    dict(clave="pase", etiqueta="PASE DE PRUEBA", titulo="Pase de prueba",
-         texto="Canjea un código y usa todos los beneficios de donador durante 7 días. Pídelo a quien te invitó a "
-               "Caudal.", tono=46),
-    dict(clave="letras", etiqueta="COMPARTE", titulo="Letras para presumir",
-         texto="Tarjetas con la carátula difuminada y estilos nuevos para donadores, listas para tus estados e "
-               "historias.", tono=18),
-    dict(clave="anio", etiqueta="TU AÑO", titulo="Tu año en Caudal",
-         texto="Tus minutos, tu canción y tus artistas del año en una imagen lista para compartir. Exclusivo de "
-               "donadores.", tono=-40),
-    dict(clave="musica", etiqueta="REPRODUCCIÓN", titulo="La música no se corta",
-         texto="Si la conexión se cae, Caudal la retoma solo y sigue justo donde iba, sin saltar de canción.",
-         tono=10),
-    dict(clave="fluido", etiqueta="RENDIMIENTO", titulo="Más fluida",
-         texto="Ajustes abre al instante, sin congelar la ventana, y la app trabaja en segundo plano para ir suave.",
-         tono=-14),
-    dict(clave="final", etiqueta="GRACIAS", titulo="Gracias por ser parte de Caudal",
+    dict(clave="v5_portada", etiqueta="EDICIÓN 2.6", titulo=TITULO,
+         texto="Modo gamer, tu personaje cobra vida y regalos para tus amigos. Esto es lo nuevo.", centrada=True,
+         tono=0),
+    dict(clave="gamer", etiqueta="MODO GAMER", titulo="Caudal se une a tu partida",
+         texto="Un mini reproductor flotante encima del juego, atajos globales de teclado, ahorro automático al "
+               "jugar a pantalla completa, sonido por tipo de juego y la música baja cuando hablas.", tono=40),
+    dict(clave="nivel", etiqueta="PROGRESO", titulo="Nivel, misiones y racha",
+         texto="Sube de nivel, cumple misiones y mantén tu racha. Listas por situación (Lobby, Concentración, "
+               "Clutch, Victoria y Derrota) y un tema RGB neón.", tono=-30),
+    dict(clave="ahora_suena", etiqueta="PARA STREAMERS", titulo="«Ahora suena» para OBS",
+         texto="Muestra en tu directo la canción que suena. Ojo: la música de YouTube no se puede usar en "
+               "directos por derechos de autor.", tono=70),
+    dict(clave="personaje", etiqueta="TU PERSONAJE", titulo="Tu personaje cobra vida",
+         texto="Arrástralo con el ratón a donde quieras y baila suave al ritmo de la música. Con doble clic "
+               "vuelve a su esquina.", tono=-14),
+    dict(clave="regalo", etiqueta="DONADORES", titulo="Regala una prueba",
+         texto="Genera códigos para que tus amigos prueben 7 días los beneficios de donador.", tono=34),
+    dict(clave="v5_final", etiqueta="GRACIAS", titulo="Gracias por escuchar con Caudal",
          texto="Todo esto es para ti. Disfruta lo nuevo.", centrada=True, tono=8),
 ]
 

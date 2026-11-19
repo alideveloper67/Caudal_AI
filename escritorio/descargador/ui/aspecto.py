@@ -6,7 +6,7 @@ música (ver Ventana.reabrir_con_aspecto)."""
 
 from PySide6.QtCore import QRectF, QSize, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QConicalGradient, QFont, QPainter, QPainterPath, QPen
-from PySide6.QtWidgets import (QAbstractButton, QColorDialog, QGridLayout, QHBoxLayout, QLabel,
+from PySide6.QtWidgets import (QAbstractButton, QCheckBox, QColorDialog, QGridLayout, QHBoxLayout, QLabel,
                                QPushButton, QVBoxLayout, QWidget)
 
 from .estilos import (ACENTOS, FONDOS, TEMAS, C, acento_de, acento_de_tema, es_color, es_premium, fondo_de,
@@ -313,8 +313,10 @@ class SelectorAspecto(QWidget):
         izq.addLayout(rejilla)
         # fondos con personaje: su paleta, su acento y su dibujito detrás de toda la app
         izq.addSpacing(10)
-        izq.addWidget(self._titulo("Con personajes", "Sus colores y el personaje a un costado; si tienes mascotas, "
-                                                    "también camina por la barra."))
+        izq.addWidget(self._titulo("Con personajes", "Sus colores y el personaje sobre la barra; si tienes mascotas, "
+                                                    "también camina por ella. Arrastra al personaje adonde "
+                                                    "quieras, gira la rueda sobre él para cambiar su tamaño y "
+                                                    "haz doble clic para devolverlo a su esquina."))
         rejilla_t = QGridLayout()
         rejilla_t.setHorizontalSpacing(8)
         rejilla_t.setVerticalSpacing(6)
@@ -325,6 +327,16 @@ class SelectorAspecto(QWidget):
             rejilla_t.addWidget(t, i // 4, i % 4)
         rejilla_t.setColumnStretch(4, 1)
         izq.addLayout(rejilla_t)
+        # uno bajo el otro: en una sola fila no cabrían con el panel derecho abierto
+        self.baila = QCheckBox("Que baile con la música")
+        self.baila.setChecked(bool(self.a.get("personaje_baila", True)))
+        self.baila.toggled.connect(self._baile_cambiado)
+        izq.addWidget(self.baila)
+        self.bt_esquina = QPushButton("Devolverlo a su esquina")
+        self.bt_esquina.setObjectName("contorno")
+        self.bt_esquina.setCursor(Qt.PointingHandCursor)
+        self.bt_esquina.clicked.connect(self._personaje_a_su_esquina)
+        izq.addWidget(self.bt_esquina, 0, Qt.AlignLeft)
         izq.addStretch(1)
         self.izq = izq
 
@@ -389,6 +401,25 @@ class SelectorAspecto(QWidget):
         if acento_de_tema(k):
             self.a["acento"] = acento_de_tema(k)
         self._guardar("fondo", k)
+
+    def _personaje(self):
+        """El personaje vivo de la ventana (None si esta pantalla se abre suelta, p. ej. en pruebas)."""
+        return getattr(self.window(), "personaje_fondo", None)
+
+    def _baile_cambiado(self, activo):
+        self.a["personaje_baila"] = bool(activo)
+        self.a.guardar()
+        pj = self._personaje()
+        if pj is not None:
+            pj.actualizar_baile()
+
+    def _personaje_a_su_esquina(self):
+        pj = self._personaje()
+        if pj is not None:
+            pj.volver_a_la_esquina()
+            return
+        self.a["personaje_x"] = self.a["personaje_y"] = -1
+        self.a.guardar()
 
     def _acento_propio(self):
         inicial = QColor(acento_de(self.a["acento"])[1])

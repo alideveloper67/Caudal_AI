@@ -15,7 +15,7 @@ class AspectoPagina extends StatefulWidget {
 }
 
 class _AspectoPaginaState extends State<AspectoPagina> {
-  Future<void> _poner(String clave, String valor) async {
+  Future<void> _poner(String clave, Object valor) async {
     await Caudal.leer(context).ajustes.poner(clave, valor);
     if (mounted) setState(() {});
   }
@@ -103,7 +103,7 @@ class _AspectoPaginaState extends State<AspectoPagina> {
         const SizedBox(height: Esp.xl),
         const Text('Con personajes', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
         const SizedBox(height: 4),
-        const Text('Sus colores y el personaje a un costado; si tienes mascotas, también camina por la barra.',
+        const Text('Sus colores y el personaje: lo arrastras a donde quieras y baila con la música. Si tienes mascotas, también camina por la barra.',
             style: estiloSecundario),
         const SizedBox(height: Esp.m),
         GridView.count(
@@ -130,6 +130,29 @@ class _AspectoPaginaState extends State<AspectoPagina> {
               ),
           ],
         ),
+        if (Aspecto.patron != null) ...[
+          const SizedBox(height: Esp.m),
+          SwitchListTile(
+            contentPadding: EdgeInsets.zero,
+            title: const Text('Que baile con la música'),
+            subtitle: const Text('Rebota y se mece al ritmo mientras suena. En pausa se queda quieto.', style: estiloSecundario),
+            value: a.sino('personaje_baila'),
+            onChanged: (v) => _poner('personaje_baila', v),
+          ),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: a.decimal('personaje_x') < 0
+                  ? null
+                  : () async {
+                      await _poner('personaje_x', -1.0);
+                      await _poner('personaje_y', -1.0);
+                    },
+              icon: const Icon(Icons.south_east_rounded),
+              label: const Text('Devolverlo a su esquina'),
+            ),
+          ),
+        ],
         const SizedBox(height: Esp.xl),
         Center(
           child: TextButton.icon(

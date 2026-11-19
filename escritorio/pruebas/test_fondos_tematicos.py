@@ -81,7 +81,7 @@ def test_el_personaje_se_sienta_sobre_la_barra(app):
         ventana.close()
 
 
-def test_el_personaje_se_agranda_con_la_rueda_y_arrastrando(app):
+def test_el_personaje_se_agranda_con_la_rueda(app):
     from PySide6.QtCore import QPoint, QPointF
     from PySide6.QtGui import QWheelEvent
     from PySide6.QtWidgets import QWidget
@@ -111,9 +111,9 @@ def test_el_personaje_se_agranda_con_la_rueda_y_arrastrando(app):
         QApplication.sendEvent(pj, rueda)
         assert pj.alto == 110 and pj.geometry().bottom() == pie  # crece y sigue sentado en la barra
         QTest.mousePress(pj, Qt.LeftButton, Qt.NoModifier, QPoint(30, 30))
-        QTest.mouseMove(pj, QPoint(30 - 40, 30 - 40))             # arrastrar hacia arriba/izquierda
+        QTest.mouseMove(pj, QPoint(30 - 40, 30 - 40))             # arrastrar: lo MUEVE, ya no cambia el tamaño
         QTest.mouseRelease(pj, Qt.LeftButton, Qt.NoModifier, QPoint(-10, -10))
-        assert pj.alto > 110
+        assert pj.alto == 110 and not pj.en_la_esquina
         pj.poner_alto(5)
         assert pj.alto == PersonajeEsquina.MINIMO                # con límites
         pj.poner_alto(9999)

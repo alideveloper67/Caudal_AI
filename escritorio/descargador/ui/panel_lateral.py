@@ -199,6 +199,7 @@ class PanelLateral(QWidget):
            ("comunidad", "Música de la comunidad", "musica"),
            ("mezclador", "Mezclador", "ecualizador"),
            ("estudio", "Modo estudio", "graduado"),
+           ("gamer", "Modo gamer", "mando"),
            ("descargas", "Descargar videos", "descargar")]
 
     def __init__(self, ctx, padre=None):

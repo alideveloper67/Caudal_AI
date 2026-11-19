@@ -496,6 +496,13 @@ class PaginaAjustes(Pagina):
 
     # ------------------------------------------------------------ guardar
 
+    def mostrar_regalo(self):
+        """Desplaza la página hasta la tarjeta «Regala una prueba a tus amigos» (si es donador)."""
+        sec = getattr(self, "seccion_personalizar", None)
+        tarjeta = getattr(sec, "tarjeta_regalo", None)
+        if tarjeta is not None and tarjeta.isVisible():
+            self.ensureWidgetVisible(tarjeta, 0, 40)
+
     def _poner(self, clave, valor):
         self.a[clave] = valor
         self.a.guardar()

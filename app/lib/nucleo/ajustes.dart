@@ -31,6 +31,10 @@ class Ajustes extends ChangeNotifier {
     'acento': 'cian', // color de la app (ver Aspecto.acentos)
     'fondo': 'oscuro', // fondo de la app (ver Aspecto.fondos)
     'tamano_personaje': 160, // alto del personaje del fondo con personaje (se cambia pellizcándolo)
+    // dónde dejó el personaje del fondo (0..1 del espacio libre; -1 = su esquina de siempre) y si baila
+    'personaje_x': -1.0,
+    'personaje_y': -1.0,
+    'personaje_baila': true,
     'super_volumen': 0, // 0..4
     'ecualizador': false,
     'eq_bandas': '[0,0,0,0,0,0,0,0,0,0]',
@@ -65,6 +69,14 @@ class Ajustes extends ChangeNotifier {
     'apagado_suave': true,
     // quita animaciones y adornos para equipos lentos; el sonido no cambia
     'modo_ligero': false,
+    // «Modo gamer» (ver gamer_control.dart): interruptor, ahorro al jugar, perfil de sonido
+    // y lo que hay que devolver al apagarlo
+    'gamer_activo': false,
+    'gamer_ahorro': true,
+    'gamer_sonido': '',
+    'gamer_ligero_previo': '',
+    'gamer_eq_previo': '',
+    'gamer_progreso': '',
   };
 
   T _valor<T>(String clave) {

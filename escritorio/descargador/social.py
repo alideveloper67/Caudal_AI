@@ -630,6 +630,21 @@ class Social:
         d = self.sesion.rpc("canjear_pase", p_codigo=str(codigo or "").strip().upper())
         return d if isinstance(d, dict) else {"ok": False, "mensaje": "No se pudo comprobar el código."}
 
+    # --- pases de regalo (solo donadores y fundadores; el servidor lo comprueba: supabase/pases_regalo.sql)
+    def crear_pase_regalo(self):
+        """Crea un código de regalo. Devuelve {ok, mensaje} o {ok, codigo, dias, caduca}."""
+        d = self.sesion.rpc("crear_pase_regalo")
+        return d if isinstance(d, dict) else {"ok": False, "mensaje": "No se pudo crear el código."}
+
+    def mis_pases_regalo(self):
+        """Mis últimos códigos de regalo: [{codigo, dias, usado, caduca, vigente}], los nuevos primero."""
+        d = self.sesion.rpc("mis_pases_regalo")
+        return [x for x in d if isinstance(x, dict)] if isinstance(d, list) else []
+
+    def anular_pase_regalo(self, codigo):
+        """Borra un código que nadie usó. True si se anuló."""
+        return self.sesion.rpc("anular_pase_regalo", p_codigo=str(codigo or "").strip().upper()) is True
+
     def leer_personalizacion(self):
         """Mi marco, efecto de nombre y tema, tal como están guardados en mi perfil."""
         filas = self.sesion.pedir(

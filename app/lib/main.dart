@@ -34,7 +34,9 @@ import 'ui/armazon.dart';
 import 'ui/comunes.dart';
 import 'nucleo/fondo_app.dart';
 import 'nucleo/premium.dart';
+import 'nucleo/ritmo_fondo.dart';
 import 'nucleo/mascota_app.dart';
+import 'nucleo/gamer_control.dart';
 import 'nucleo/social.dart';
 import 'ui/fondo_capa.dart';
 import 'ui/paginas/acceso.dart';
@@ -116,12 +118,14 @@ class _CaudalAppState extends State<CaudalApp> {
     super.initState();
     FondoApp.i.addListener(_alCambiarFondo);
     Premium.i.addListener(_alCambiarPremium);
+    ModoGamerControl.mascotasOcultas.addListener(_alCambiarFondo); // «Modo gamer»: esconde mascota y personaje
     _arrancar();
   }
 
   @override
   void dispose() {
     FondoApp.i.removeListener(_alCambiarFondo);
+    ModoGamerControl.mascotasOcultas.removeListener(_alCambiarFondo);
     Premium.i.removeListener(_alCambiarPremium);
     super.dispose();
   }
@@ -299,12 +303,26 @@ class _CaudalAppState extends State<CaudalApp> {
       });
     }
     Diagnostico.marcar('pantalla');
+    // «Modo gamer»: XP por escuchar, ahorro, sonido y listas por situación
+    final gamer = ModoGamerControl(
+      ajustes: ajustes,
+      aplicarSonido: reproductor.aplicarSonido,
+      lanzar: (pistas, contexto) => reproductor.reproducirLista(pistas, contexto: contexto),
+      alSubirNivel: (n) {
+        final m = _mensajero.currentState;
+        if (m == null) return;
+        m.hideCurrentSnackBar();
+        m.showSnackBar(SnackBar(content: Text('¡Subiste al nivel $n!'), duration: const Duration(milliseconds: 2400)));
+      },
+    );
+    reproductor.addListener(() => gamer.alReproductor(reproductor.estado == EstadoRepro.sonando, reproductor.actual));
     late final Servicios s;
     s = Servicios(
       cuenta: c, ajustes: ajustes, coleccion: coleccion, reproductor: reproductor, streams: streams,
       descargas: descargas, sincronizador: sinc,
       cerrarSesion: () => _cerrarSesion(s),
       mensajero: _mensajero,
+      gamer: gamer,
     );
     // cuenta nueva (o que aun no eligio): antes de la pantalla principal, sus artistas favoritos
     var preguntarGustos = false;
@@ -384,6 +402,8 @@ class _CaudalAppState extends State<CaudalApp> {
     FondoApp.i.reiniciar();
     Premium.i.reiniciar();
     MascotaApp.i.reiniciar();
+    s.gamer?.guardarYa();
+    ModoGamerControl.mascotasOcultas.value = false;
     Gustos.actuales = [];
     setState(() {
       _s = null;
@@ -391,6 +411,7 @@ class _CaudalAppState extends State<CaudalApp> {
     });
     // se libera despues de que la pantalla ya no lo use
     Future.delayed(const Duration(seconds: 1), () {
+      s.gamer?.dispose();
       s.reproductor.dispose();
       s.descargas.dispose();
     });
@@ -479,11 +500,22 @@ class _CaudalAppState extends State<CaudalApp> {
             const CapaFondoApp(),
             contenido,
             // el personaje del fondo con personaje, encima, en su esquina (se agranda pellizcándolo)
-            if (Aspecto.patron != null && !enVentana)
+            if (Aspecto.patron != null && !enVentana && !ModoGamerControl.mascotasOcultas.value)
               Positioned.fill(
                 child: PersonajeEncima(
                   alto: s.ajustes.entero('tamano_personaje').toDouble(),
                   alCambiar: (v) => s.ajustes.poner('tamano_personaje', v.round(), avisar: false),
+                  reproductor: s.reproductor,
+                  suena: () => s.reproductor.estado == EstadoRepro.sonando,
+                  x: s.ajustes.decimal('personaje_x'),
+                  y: s.ajustes.decimal('personaje_y'),
+                  alMover: (x, y) {
+                    s.ajustes.poner('personaje_x', x, avisar: false);
+                    s.ajustes.poner('personaje_y', y, avisar: false);
+                  },
+                  baila: s.ajustes.sino('personaje_baila') && !ligero,
+                  posicion: s.reproductor.posicion,
+                  ritmo: () => RitmoFondo.para(s.coleccion).de('${s.reproductor.actual?['clave'] ?? ''}'),
                 ),
               ),
             if (enVentana && s.reproductor.pantalla != null)

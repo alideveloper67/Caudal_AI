@@ -7,12 +7,13 @@ pase de prueba): para el resto se puede probar cómo queda, pero «Aplicar» est
 «Donar aquí» y «Tengo un código de prueba». Igual que la app del teléfono."""
 
 from PySide6.QtCore import QRectF, QSize, Qt
-from PySide6.QtGui import QColor, QIcon, QPainter, QPen, QPixmap
+from PySide6.QtGui import QColor, QGuiApplication, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QSizePolicy,
                                QToolButton, QVBoxLayout, QWidget)
 
 from ..premium_datos import (EFECTOS, MARCOS, NINGUNO, NOMBRES_EFECTO, NOMBRES_MARCO, NOMBRES_TEMA, TEMAS,
                              texto_vencimiento)
+from .. import social as S
 from .aspecto import Muestra
 from .canje_pase import boton_codigo
 from .donar import boton_donar
@@ -21,6 +22,26 @@ from .paginas import perfil_comun as PC
 from .premium_estilos import NombreEfecto, pintar_marco
 
 COLUMNAS = 4
+WEB_CAUDAL = "https://caudal-musica.netlify.app"
+
+
+def texto_para_compartir(codigo):
+    """El mensaje que el donador le manda a su amigo, con el código y la web."""
+    return (f"Te regalo una prueba de Caudal, mi app de música: 7 días con todos los beneficios de donador.\n"
+            f"1) Descárgala en {WEB_CAUDAL}\n"
+            f"2) Abre Ajustes › Personalizar › «Tengo un código de prueba»\n"
+            f"3) Escribe este código: {codigo}\n"
+            f"Sirve una sola vez.")
+
+
+def estado_de_regalo(pase):
+    """'sin_usar' | 'usado' | 'caducado' para un código de mis_pases_regalo()."""
+    if pase.get("usado"):
+        return "usado"
+    return "sin_usar" if pase.get("vigente") else "caducado"
+
+
+ETIQUETA_REGALO = {"sin_usar": "Sin usar", "usado": "Usado", "caducado": "Caducado"}
 
 
 def icono_marco(marco, lado=44):
@@ -63,6 +84,191 @@ def icono_tema(tema, ancho=64, alto=40):
     p.drawRoundedRect(QRectF(ancho * 0.42 + 10, alto * 0.42 + 10, ancho * 0.3, alto * 0.22), 4, 4)
     p.end()
     return pm
+
+
+class TarjetaRegalo(QFrame):
+    """«Regala una prueba a tus amigos»: crea códigos de un solo uso (7 días de beneficios), los lista con su
+    estado y deja copiarlos, anularlos o compartirlos con un texto listo. Solo se ve para donadores y
+    fundadores (quien solo tiene una prueba no puede regalar). Todo va en segundo plano."""
+
+    def __init__(self, ctx, padre=None):
+        super().__init__(padre)
+        self.ctx = ctx
+        self.gestor = getattr(ctx, "premium", None)
+        self.pases = []
+        self._cargado = False
+        self._ocupado = False
+        # va dentro de la tarjeta Personalizar: un fondo suave (como la vista previa), sin otra caja con borde
+        self.setObjectName("tarjeta_regalo")
+        self.setStyleSheet(f"QFrame#tarjeta_regalo{{background:{C['superficie']};border-radius:14px;}}")
+        v = QVBoxLayout(self)
+        v.setContentsMargins(16, 14, 16, 14)
+        v.setSpacing(10)
+        t = QLabel("Regala una prueba a tus amigos")
+        t.setStyleSheet("font-size:16px;font-weight:800;background:transparent;")
+        v.addWidget(t)
+        ayuda = QLabel("Crea un código y pásaselo a un amigo: tendrá 7 días de beneficios de donador. Cada código "
+                       "sirve una sola vez y vale 30 días para canjearlo. Puedes tener 3 sin usar a la vez.")
+        ayuda.setObjectName("secundario")
+        ayuda.setWordWrap(True)
+        v.addWidget(ayuda)
+        fila = QHBoxLayout()
+        self.bt_crear = QPushButton("Crear un código")
+        self.bt_crear.setCursor(Qt.PointingHandCursor)
+        self.bt_crear.clicked.connect(self._crear)
+        fila.addWidget(self.bt_crear)
+        self.msg = QLabel("")
+        self.msg.setObjectName("secundario")
+        self.msg.setWordWrap(True)
+        fila.addWidget(self.msg, 1)
+        v.addLayout(fila)
+        self.lista = QVBoxLayout()
+        self.lista.setSpacing(6)
+        v.addLayout(self.lista)
+        # el texto para compartir (del último código sin usar), listo para copiar
+        self.caja_texto = QWidget()
+        c = QVBoxLayout(self.caja_texto)
+        c.setContentsMargins(0, 4, 0, 0)
+        c.setSpacing(6)
+        et = QLabel("Para mandárselo a tu amigo")
+        et.setStyleSheet("font-size:13px;font-weight:800;")
+        c.addWidget(et)
+        self.texto = QLabel("")
+        self.texto.setWordWrap(True)
+        self.texto.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        self.texto.setStyleSheet(f"background:{C['superficie2']};border-radius:10px;padding:10px 12px;")
+        c.addWidget(self.texto)
+        self.bt_copiar_texto = QPushButton("Copiar el mensaje")
+        self.bt_copiar_texto.setObjectName("contorno")
+        self.bt_copiar_texto.setCursor(Qt.PointingHandCursor)
+        self.bt_copiar_texto.clicked.connect(self._copiar_texto)
+        c.addWidget(self.bt_copiar_texto, 0, Qt.AlignLeft)
+        v.addWidget(self.caja_texto)
+        if self.gestor is not None:
+            self.gestor.cambiado.connect(self.refrescar)
+        self.refrescar()
+
+    # ------------------------------------------------------------ quién la ve
+    def refrescar(self):
+        puede = bool(self.gestor is not None and self.gestor.puede_regalar)
+        self.setVisible(puede)
+        if puede and not self._cargado:
+            self._cargado = True
+            self.recargar()
+        self._pintar()
+
+    def recargar(self):
+        if self.gestor is None:
+            return
+        self.gestor.mis_regalos(ok=self._llegaron, error=self._fallo_lista, dueno=self)
+
+    def _llegaron(self, lista):
+        self.pases = [p for p in (lista or []) if isinstance(p, dict) and p.get("codigo")]
+        self._pintar()
+
+    def _fallo_lista(self, e):
+        self._cargado = False                    # se vuelve a intentar la próxima vez que se muestre
+        self.msg.setText(S.explicar(e, "leer tus códigos"))
+
+    # ------------------------------------------------------------ pintar
+    def _pintar(self):
+        while self.lista.count():
+            it = self.lista.takeAt(0)
+            if it.widget() is not None:
+                it.widget().deleteLater()
+            elif it.layout() is not None:
+                self._borrar_fila(it.layout())
+        sin_usar = None
+        for p in self.pases:
+            self.lista.addLayout(self._fila(p))
+            if sin_usar is None and estado_de_regalo(p) == "sin_usar":
+                sin_usar = p["codigo"]
+        self.caja_texto.setVisible(sin_usar is not None)
+        self.texto.setText(texto_para_compartir(sin_usar) if sin_usar else "")
+        self.bt_crear.setEnabled(not self._ocupado)
+
+    @staticmethod
+    def _borrar_fila(lay):
+        while lay.count():
+            it = lay.takeAt(0)
+            if it.widget() is not None:
+                it.widget().deleteLater()
+
+    def _fila(self, pase):
+        codigo, estado = pase["codigo"], estado_de_regalo(pase)
+        h = QHBoxLayout()
+        h.setSpacing(10)
+        c = QLabel(codigo)
+        c.setStyleSheet("font-size:16px;font-weight:800;letter-spacing:1px;")
+        c.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        c.setMinimumWidth(110)
+        h.addWidget(c)
+        e = QLabel(ETIQUETA_REGALO[estado])
+        e.setObjectName("secundario")
+        if estado == "sin_usar":
+            e.setStyleSheet(f"color:{C['acento']};font-weight:700;")
+        h.addWidget(e, 1)
+        if estado != "usado":
+            if estado == "sin_usar":
+                b = QPushButton("Copiar")
+                b.setObjectName("contorno")
+                b.setCursor(Qt.PointingHandCursor)
+                b.setAccessibleName(f"Copiar el código {codigo}")
+                b.clicked.connect(lambda _=False, cod=codigo: self._copiar(cod))
+                h.addWidget(b)
+            a = QPushButton("Anular")
+            a.setObjectName("contorno")
+            a.setCursor(Qt.PointingHandCursor)
+            a.setAccessibleName(f"Anular el código {codigo}")
+            a.clicked.connect(lambda _=False, cod=codigo: self._anular(cod))
+            h.addWidget(a)
+        return h
+
+    # ------------------------------------------------------------ acciones
+    def _copiar(self, codigo):
+        QGuiApplication.clipboard().setText(codigo)
+        self.msg.setText(f"Copiado: {codigo}")
+
+    def _copiar_texto(self):
+        QGuiApplication.clipboard().setText(self.texto.text())
+        self.msg.setText("Mensaje copiado. Pégalo donde le escribas a tu amigo.")
+
+    def _crear(self):
+        if self.gestor is None or self._ocupado:
+            return
+        self._ocupado = True
+        self.bt_crear.setEnabled(False)
+        self.msg.setText("Creando tu código…")
+        self.gestor.crear_regalo(ok=self._creado, error=self._fallo_accion, dueno=self)
+
+    def _creado(self, res):
+        self._ocupado = False
+        if res.get("ok") and res.get("codigo"):
+            self.msg.setText(f"Listo: {res['codigo']}. Ya puedes mandárselo a tu amigo.")
+            self._cargado = True
+            self.recargar()
+        else:
+            self.msg.setText(res.get("mensaje") or "No se pudo crear el código. Vuelve a intentarlo.")
+        self._pintar()
+
+    def _anular(self, codigo):
+        if self.gestor is None or self._ocupado:
+            return
+        self._ocupado = True
+        self.msg.setText("Anulando…")
+        self.gestor.anular_regalo(codigo, ok=lambda hecho, c=codigo: self._anulado(c, hecho),
+                                  error=self._fallo_accion, dueno=self)
+
+    def _anulado(self, codigo, hecho):
+        self._ocupado = False
+        self.msg.setText(f"Anulado: {codigo}" if hecho else "Ese código ya no se puede anular (alguien lo usó).")
+        self.recargar()
+        self._pintar()
+
+    def _fallo_accion(self, e):
+        self._ocupado = False
+        self.msg.setText(S.explicar(e, "hacerlo"))
+        self._pintar()
 
 
 class SeccionPersonalizar(QFrame):
@@ -156,6 +362,10 @@ class SeccionPersonalizar(QFrame):
         self.msg.setWordWrap(True)
         fila.addWidget(self.msg, 1)
         v.addLayout(fila)
+
+        # regalar pruebas: solo se ve para donadores y fundadores
+        self.tarjeta_regalo = TarjetaRegalo(ctx)
+        v.addWidget(self.tarjeta_regalo)
 
         if g is not None:
             g.cambiado.connect(self.refrescar)

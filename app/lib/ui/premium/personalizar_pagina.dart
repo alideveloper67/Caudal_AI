@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../nucleo/cosmeticos.dart';
 import '../../nucleo/nube.dart';
+import '../../nucleo/pases_regalo.dart';
 import '../../nucleo/premium.dart';
 import '../paginas/donar.dart';
 import '../paginas/perfil_comun.dart';
@@ -9,6 +10,7 @@ import '../servicios.dart';
 import '../tema.dart';
 import 'canje_pase.dart';
 import 'marcos.dart';
+import 'regalo_pases.dart';
 import 'temas_premium.dart';
 
 /// «Personalizar»: marco del avatar, efecto del nombre y tema de color, exclusivos de donadores.
@@ -138,6 +140,10 @@ class _PersonalizarPaginaState extends State<PersonalizarPagina> {
             const SizedBox(height: Esp.xl),
             _titulo('Tema de color'),
             _opciones([for (final c in Cosmeticos.temas) _tileTema(c, activo)]),
+            if (PasesRegalo.puedeRegalar(e)) ...[
+              const SizedBox(height: Esp.xl),
+              const TarjetaRegalo(),
+            ],
             if (!activo || e.esPrueba) ...[
               const SizedBox(height: Esp.xl),
               Center(

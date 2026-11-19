@@ -27,6 +27,7 @@ import 'bateria_ajuste.dart';
 import 'donar.dart';
 import 'mezclador_ajustes.dart';
 import 'mezclador_pagina.dart';
+import 'modo_gamer_pagina.dart';
 import 'privacidad_pagina.dart';
 import 'sonido.dart';
 
@@ -245,6 +246,21 @@ class _AjustesPaginaState extends State<AjustesPagina> {
           value: a.sino('modo_ligero'),
           onChanged: (v) => _sino('modo_ligero', v),
         ),
+        if (s.gamer != null)
+          ListTile(
+            leading: Icon(Icons.sports_esports_rounded, color: C.acento),
+            title: const Text('Modo gamer'),
+            subtitle: Text(
+                s.gamer!.activo
+                    ? 'Activo · nivel ${s.gamer!.progreso.nivel}'
+                    : 'Ahorro, sonido por juego, listas por situación y niveles',
+                style: estiloSecundario),
+            trailing: const Icon(Icons.chevron_right_rounded, color: C.texto3),
+            onTap: () async {
+              await Navigator.of(context).push(MaterialPageRoute(builder: (_) => ModoGamerPagina(control: s.gamer!)));
+              if (mounted) setState(() {});
+            },
+          ),
         ListTile(
           leading: Icon(Icons.palette_outlined, color: C.acento),
           title: const Text('Color y fondo de la app'),

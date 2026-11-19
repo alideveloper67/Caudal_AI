@@ -54,26 +54,26 @@ def _nueva(padre, app, **kw):
 
 def test_edicion_y_comparaciones():
     from descargador import version
-    assert version.EDICION_GRANDE == "2.5.0"
-    assert version.alcanza_edicion("2.5.0") and version.alcanza_edicion("2.5.3") and version.alcanza_edicion("3.0.0")
-    assert not version.alcanza_edicion("2.4.9")
-    assert version.es_de_la_edicion("2.5.1") and not version.es_de_la_edicion("2.6.0")
-    assert version.hay_novedad("2.4.4", "2.5.0")
+    assert version.EDICION_GRANDE == "2.6.0"
+    assert version.alcanza_edicion("2.6.0") and version.alcanza_edicion("2.6.3") and version.alcanza_edicion("3.0.0")
+    assert not version.alcanza_edicion("2.5.9")
+    assert version.es_de_la_edicion("2.6.1") and not version.es_de_la_edicion("2.7.0")
+    assert version.hay_novedad("2.5.4", "2.6.0")
 
 
 def test_toca_una_sola_vez(datos_aislados):
     from descargador.config import Ajustes
     from descargador.ui import novedades_grandes as ng
     a = Ajustes()
-    # quien ya vio la primera presentación (2.4.x) ve esta al llegar a 2.5
-    a["version_novedades_vista"] = "2.4.4"
-    assert ng.toca_presentacion(a, "2.5.0") and ng.debe_mostrarse(a, "2.5.0")
+    # quien ya vio la presentación anterior (2.5.x) ve esta al llegar a 2.6
+    a["version_novedades_vista"] = "2.5.0"
+    assert ng.toca_presentacion(a, "2.6.0") and ng.debe_mostrarse(a, "2.6.0")
     # antes de la edición no sale
-    assert not ng.toca_presentacion(a, "2.4.9")
-    ng.marcar_vista(a, "2.5.0")
-    assert not ng.toca_presentacion(a, "2.5.0") and not ng.debe_mostrarse(a, "2.5.0")
+    assert not ng.toca_presentacion(a, "2.5.9")
+    ng.marcar_vista(a, "2.6.0")
+    assert not ng.toca_presentacion(a, "2.6.0") and not ng.debe_mostrarse(a, "2.6.0")
     # ni con los parches siguientes
-    assert not ng.toca_presentacion(a, "2.5.1") and not ng.debe_mostrarse(a, "2.5.1")
+    assert not ng.toca_presentacion(a, "2.6.1") and not ng.debe_mostrarse(a, "2.6.1")
     # y la lógica de antes sigue igual por debajo de la edición
     a["version_novedades_vista"] = "2.4.0"
     assert ng.debe_mostrarse(a, "2.4.4") and not ng.debe_mostrarse(a, "2.4.0")
@@ -84,12 +84,12 @@ def test_mostrar_si_toca_abre_la_presentacion_y_no_repite(app, monkeypatch, padr
     from descargador.config import Ajustes
     from descargador.ui import novedades_grandes as ng
     from descargador.ui.presentacion_grande import PresentacionGrande
-    monkeypatch.setattr(version, "VERSION", "2.5.0")
+    monkeypatch.setattr(version, "VERSION", "2.6.0")
     padre.ajustes = Ajustes()
-    padre.ajustes["version_novedades_vista"] = "2.4.4"
+    padre.ajustes["version_novedades_vista"] = "2.5.0"
     d = ng.mostrar_si_toca(padre)
     assert isinstance(d, PresentacionGrande) and d.isVisible()
-    assert Ajustes()["version_novedades_vista"] == "2.5.0"
+    assert Ajustes()["version_novedades_vista"] == "2.6.0"
     d.reject()
     app.processEvents()
     assert ng.mostrar_si_toca(padre) is None                    # una sola vez
@@ -99,8 +99,8 @@ def test_aviso_antes_de_actualizar_usa_la_presentacion_solo_de_su_edicion(app, m
     from descargador import version
     from descargador.ui import novedades_grandes as ng
     from descargador.ui.presentacion_grande import PresentacionGrande
-    monkeypatch.setattr(version, "VERSION", "2.4.4")
-    nov = {"version": "2.5.0", "instalador": "https://x/i.exe", "notas": "", "grande": True}
+    monkeypatch.setattr(version, "VERSION", "2.5.4")
+    nov = {"version": "2.6.0", "instalador": "https://x/i.exe", "notas": "", "grande": True}
     d = ng.crear_aviso(padre, nov)
     assert isinstance(d, PresentacionGrande)
     d.show()
@@ -109,16 +109,16 @@ def test_aviso_antes_de_actualizar_usa_la_presentacion_solo_de_su_edicion(app, m
     d.avanzar(1)
     assert d.bt_sig.text() == "Actualizar ahora" and d.bt_saltar.text() == "Más tarde"
     d.reject()
-    sin = ng.crear_aviso(padre, {"version": "2.5.0", "instalador": "", "notas": "", "grande": True})
+    sin = ng.crear_aviso(padre, {"version": "2.6.0", "instalador": "", "notas": "", "grande": True})
     sin.show()
     sin.ir_a(sin.n - 1, animar=False)
     sin.avanzar(1)
     assert not sin.bt_sig.isEnabled()
     sin.reject()
-    # otra edición (2.6) o una instalación que ya la alcanzó: el aviso de siempre
-    assert not isinstance(ng.crear_aviso(padre, {**nov, "version": "2.6.0"}), PresentacionGrande)
-    monkeypatch.setattr(version, "VERSION", "2.5.0")
-    assert not isinstance(ng.crear_aviso(padre, {**nov, "version": "2.5.1"}), PresentacionGrande)
+    # otra edición (2.7) o una instalación que ya la alcanzó: el aviso de siempre
+    assert not isinstance(ng.crear_aviso(padre, {**nov, "version": "2.7.0"}), PresentacionGrande)
+    monkeypatch.setattr(version, "VERSION", "2.6.0")
+    assert not isinstance(ng.crear_aviso(padre, {**nov, "version": "2.6.1"}), PresentacionGrande)
 
 
 # ================================================================ manejo
@@ -127,10 +127,10 @@ def test_contenido_de_las_diapositivas(app):
     from descargador.ui import presentacion_grande as pg
     assert pg.TITULO == "ACTUALIZACIÓN GRANDE DE CAUDAL"
     assert [d["clave"] for d in pg.DIAPOSITIVAS] == [
-        "portada", "marcos", "temas", "pase", "letras", "anio", "musica", "fluido", "final"]
-    assert pg.DIAPOSITIVAS[-1]["titulo"] == "Gracias por ser parte de Caudal"
+        "v5_portada", "gamer", "nivel", "ahora_suena", "personaje", "regalo", "v5_final"]
+    assert pg.DIAPOSITIVAS[-1]["titulo"] == "Gracias por escuchar con Caudal"
     todo = " ".join(d["titulo"] + " " + d["texto"] for d in pg.DIAPOSITIVAS).lower()
-    assert "triste" not in todo and "ánimo" not in todo and "animo" not in todo
+    assert "triste" not in todo and "ánimo" not in todo and "animo" not in todo and "mood" not in todo
     from descargador.ui.ilustraciones_grandes import ILUSTRACIONES
     assert all(d["clave"] in ILUSTRACIONES for d in pg.DIAPOSITIVAS)
 
@@ -185,21 +185,21 @@ def test_clic_rueda_y_puntos(app, padre):
     assert d.indice == 1                                       # un clic cualquiera avanza
     d.avanzar(1)
     d.grab()                                                   # al pintar se calculan los puntos
-    punto = d._puntos[6].center().toPoint()
+    punto = d._puntos[5].center().toPoint()
     QTest.mouseClick(d, Qt.LeftButton, Qt.NoModifier, punto)
-    assert d.indice == 6                                       # un punto lleva a su diapositiva
+    assert d.indice == 5                                       # un punto lleva a su diapositiva
     d.avanzar(1)
     time.sleep(0.8)
     ev = QWheelEvent(QPointF(400, 400), QPointF(400, 400), QPoint(0, 0), QPoint(0, -120), Qt.NoButton,
                      Qt.NoModifier, Qt.NoScrollPhase, False)
     d.wheelEvent(ev)
-    assert d.indice == 7                                       # rueda hacia abajo avanza
+    assert d.indice == 6                                       # rueda hacia abajo avanza
     d.avanzar(1)
     time.sleep(0.8)
     ev = QWheelEvent(QPointF(400, 400), QPointF(400, 400), QPoint(0, 0), QPoint(0, 120), Qt.NoButton,
                      Qt.NoModifier, Qt.NoScrollPhase, False)
     d.wheelEvent(ev)
-    assert d.indice == 6
+    assert d.indice == 5
     d.reject()
 
 
@@ -242,7 +242,7 @@ def test_pinta_sin_errores_en_todos_los_tamanos(app):
 def test_rendimiento_de_un_fotograma(app, padre):
     d = _nueva(padre, app)
     d.avanzar(3)
-    for i in (0, 4, 7):
+    for i in (0, 3, 5):
         d.ir_a(i, animar=False)
         d.avanzar(3)
         d.grab()

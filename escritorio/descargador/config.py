@@ -120,6 +120,10 @@ DEFECTOS = {
     "acento": "cian",                # color de la app (estilos.ACENTOS)
     "fondo": "oscuro",               # fondo de la app (estilos.FONDOS)
     "tamano_personaje": 124,         # alto del personaje del fondo con personaje (se cambia con el ratón)
+    "personaje_x": -1,               # dónde está el personaje: fracción 0..1 de la ventana; -1 = su esquina
+    "personaje_y": -1,
+    "personaje_baila": True,         # el personaje baila mientras suena la música
+    "aviso_regalo_visto": False,     # ya se le avisó al donador de que puede regalar códigos de prueba
     "normalizar": True,              # mismo volumen percibido entre canciones
     "modo_noche": False,             # comprime el volumen: nada suena fuerte de golpe (ideal para dormir)
     "sonido_envolvente": False,      # ensancha el sonido en audifonos

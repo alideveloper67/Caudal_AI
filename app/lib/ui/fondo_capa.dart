@@ -1,11 +1,14 @@
+import 'dart:math' as math;
 import 'dart:math' show min;
 
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show HapticFeedback;
 
 import '../nucleo/fondo_app.dart';
 import 'horneado.dart';
+import '../nucleo/ritmo.dart';
 import 'tema.dart';
 
 /// La imagen de fondo ya compuesta: color base, la imagen tenue (con su
@@ -201,13 +204,36 @@ class CapaFondoApp extends StatelessWidget {
       );
 }
 
-/// El personaje del fondo con personaje, en la esquina de abajo a la derecha,
-/// encima de las pantallas (sobre el mini reproductor). No estorba: los toques
-/// normales pasan a lo que hay debajo. Para cambiarle el tamaño, se mantiene
-/// pulsado (vibra y se marca) y se pellizca o se desliza hacia arriba/abajo;
-/// se suelta tocando fuera. El tamaño se recuerda.
+/// El personaje del fondo con personaje, encima de las pantallas (sobre el mini reproductor).
+///
+/// - Se ARRASTRA a donde se quiera (un dedo sobre él) y se queda ahí; doble toque lo devuelve a su
+///   esquina. La posición se guarda como fracción del espacio libre, así que cae bien en cualquier
+///   pantalla y nunca se sale.
+/// - BAILA con la música: mientras suena, rebota y se mece; en pausa se queda quieto. Con el modo
+///   ligero (o «quitar animaciones» del sistema) se queda quieto siempre.
+/// - No estorba: lo que no es él deja pasar los toques. Para cambiarle el tamaño, se mantiene
+///   pulsado (vibra y se marca) y se pellizca o se desliza hacia arriba/abajo; se suelta tocando
+///   fuera. El tamaño se recuerda.
 class PersonajeEncima extends StatefulWidget {
-  const PersonajeEncima({super.key, required this.alto, required this.alCambiar});
+  const PersonajeEncima({
+    super.key,
+    required this.alto,
+    required this.alCambiar,
+    this.reproductor,
+    this.suena,
+    this.x = -1,
+    this.y = -1,
+    this.alMover,
+    this.baila = true,
+    this.posicion,
+    this.ritmo,
+  });
+
+  /// Por dónde va la canción (para que el baile caiga en los tiempos).
+  final ValueListenable<Duration>? posicion;
+
+  /// El ritmo de la canción que suena, si Caudal ya lo conoce (tempo y dónde cae el primer tiempo).
+  final AnalisisRitmo? Function()? ritmo;
 
   /// Alto guardado del personaje.
   final double alto;
@@ -215,22 +241,125 @@ class PersonajeEncima extends StatefulWidget {
   /// Se llama al soltar con el tamaño nuevo, para recordarlo.
   final ValueChanged<double> alCambiar;
 
+  /// Lo que avisa cuando cambia la música (el reproductor) y la pregunta de si suena ahora. Sin ellos, no baila.
+  final Listenable? reproductor;
+  final bool Function()? suena;
+
+  /// Dónde está, de 0 a 1 en cada eje del espacio libre (0 = izquierda/arriba). Negativo = en su esquina de siempre.
+  final double x, y;
+
+  /// Se llama al soltarlo en un sitio nuevo (o con -1, -1 al devolverlo a su esquina).
+  final void Function(double x, double y)? alMover;
+
+  /// ¿Baila con la música?
+  final bool baila;
+
   static const minimo = 80.0, maximo = 300.0;
 
   @override
   State<PersonajeEncima> createState() => _PersonajeEncimaState();
 }
 
-class _PersonajeEncimaState extends State<PersonajeEncima> {
+class _PersonajeEncimaState extends State<PersonajeEncima> with TickerProviderStateMixin {
   late double _alto = widget.alto.clamp(PersonajeEncima.minimo, PersonajeEncima.maximo);
+  late double _x = widget.x, _y = widget.y;
   bool _editando = false;
+  bool _arrastrando = false;
   double _alInicio = 0;
+
+  final _llaveArea = GlobalKey();
+  final _llaveDibujo = GlobalKey();
+
+  /// El reloj del baile (solo marca los fotogramas; el paso sale de la posición de la canción).
+  late final AnimationController _baile = AnimationController(vsync: this, duration: const Duration(seconds: 1));
+
+  /// Cuánto baila (0 quieto, 1 bailando): entra y sale suave, nunca de golpe.
+  late final AnimationController _fuerza = AnimationController(vsync: this, duration: const Duration(milliseconds: 350));
+
+  // la posición de la canción, interpolada entre avisos del reproductor
+  Duration _posBase = Duration.zero;
+  final Stopwatch _desdePos = Stopwatch()..start();
+  bool _suena = false;
+  ValueListenable<TickerModeData>? _tickers;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.reproductor?.addListener(_alCambiarMusica);
+    widget.posicion?.addListener(_alAvanzar);
+    _alAvanzar();
+  }
+
+  void _alAvanzar() {
+    _posBase = widget.posicion?.value ?? _posBase;
+    _desdePos
+      ..reset()
+      ..start();
+  }
+
+  /// Segundo de la canción ahora mismo (sin posición, un reloj propio).
+  double get _segundo => (_posBase + _desdePos.elapsed).inMicroseconds / 1e6;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // con la pantalla tapada no baila (no gasta nada)
+    final n = TickerMode.getValuesNotifier(context);
+    if (!identical(n, _tickers)) {
+      _tickers?.removeListener(_alCambiarMusica);
+      _tickers = n..addListener(_alCambiarMusica);
+    }
+    _alCambiarMusica();
+  }
 
   @override
   void didUpdateWidget(covariant PersonajeEncima old) {
     super.didUpdateWidget(old);
     if (!_editando && old.alto != widget.alto) {
       _alto = widget.alto.clamp(PersonajeEncima.minimo, PersonajeEncima.maximo);
+    }
+    if (!_arrastrando && (old.x != widget.x || old.y != widget.y)) {
+      _x = widget.x;
+      _y = widget.y;
+    }
+    if (!identical(old.posicion, widget.posicion)) {
+      old.posicion?.removeListener(_alAvanzar);
+      widget.posicion?.addListener(_alAvanzar);
+    }
+    if (!identical(old.reproductor, widget.reproductor)) {
+      old.reproductor?.removeListener(_alCambiarMusica);
+      widget.reproductor?.addListener(_alCambiarMusica);
+    }
+    _alCambiarMusica();
+  }
+
+  @override
+  void dispose() {
+    widget.reproductor?.removeListener(_alCambiarMusica);
+    _tickers?.removeListener(_alCambiarMusica);
+    widget.posicion?.removeListener(_alAvanzar);
+    _baile.dispose();
+    _fuerza.dispose();
+    super.dispose();
+  }
+
+  void _alCambiarMusica() {
+    final r = widget.reproductor;
+    final suena = widget.baila &&
+        r != null &&
+        (widget.suena?.call() ?? false) &&
+        (_tickers?.value.enabled ?? true) &&
+        !(mounted && MediaQuery.maybeDisableAnimationsOf(context) == true);
+    if (suena == _suena) return;
+    _suena = suena;
+    if (suena) {
+      if (!_baile.isAnimating) _baile.repeat();
+      _fuerza.forward();
+    } else if (_baile.isAnimating) {
+      // se va calmando hasta quedarse quieto, sin cortarse de golpe
+      _fuerza.reverse().whenComplete(() {
+        if (!_suena && mounted) _baile.stop();
+      });
     }
   }
 
@@ -239,37 +368,143 @@ class _PersonajeEncimaState extends State<PersonajeEncima> {
     widget.alCambiar(_alto);
   }
 
+  // ---------------------------------------------------------------- mover
+
+  /// Tamaño del espacio libre y del dibujo, y dónde está ahora el dibujo dentro de ese espacio.
+  ({Size area, Size dibujo, Offset sitio})? _medir() {
+    final a = _llaveArea.currentContext?.findRenderObject();
+    final d = _llaveDibujo.currentContext?.findRenderObject();
+    if (a is! RenderBox || d is! RenderBox || !a.hasSize || !d.hasSize) return null;
+    return (area: a.size, dibujo: d.size, sitio: a.globalToLocal(d.localToGlobal(Offset.zero)));
+  }
+
+  void _empezarArrastre(DragStartDetails _) {
+    final m = _medir();
+    if (m == null) return;
+    final libreX = m.area.width - m.dibujo.width, libreY = m.area.height - m.dibujo.height;
+    setState(() {
+      _arrastrando = true;
+      // desde su esquina de siempre: sigue justo donde está, sin saltos
+      if (_x < 0 || _y < 0) {
+        _x = libreX <= 0 ? 0 : (m.sitio.dx / libreX).clamp(0.0, 1.0);
+        _y = libreY <= 0 ? 0 : (m.sitio.dy / libreY).clamp(0.0, 1.0);
+      }
+    });
+    HapticFeedback.selectionClick();
+  }
+
+  void _arrastrar(DragUpdateDetails d) {
+    final m = _medir();
+    if (m == null) return;
+    final libreX = m.area.width - m.dibujo.width, libreY = m.area.height - m.dibujo.height;
+    setState(() {
+      if (libreX > 0) _x = (_x + d.delta.dx / libreX).clamp(0.0, 1.0);
+      if (libreY > 0) _y = (_y + d.delta.dy / libreY).clamp(0.0, 1.0);
+    });
+  }
+
+  void _soltar([DragEndDetails? _]) {
+    if (!_arrastrando) return;
+    setState(() => _arrastrando = false);
+    widget.alMover?.call(_x, _y);
+  }
+
+  void _alEsquina() {
+    HapticFeedback.lightImpact();
+    setState(() {
+      _x = -1;
+      _y = -1;
+    });
+    widget.alMover?.call(-1, -1);
+  }
+
+  // ---------------------------------------------------------------- dibujo
+
+  /// Un vaivén suave, como el de las mascotas del reproductor: sube un poquito entre tiempo y
+  /// tiempo, baja justo en cada tiempo y se mece de lado cada dos. Si Caudal conoce el ritmo de la
+  /// canción, los pasos caen en sus tiempos; si no, va a un paso tranquilo. Nada brusco.
+  Widget _bailando(Widget hijo) => AnimatedBuilder(
+        animation: Listenable.merge([_baile, _fuerza]),
+        child: hijo,
+        builder: (_, hijo) {
+          final f = Curves.easeInOut.transform(_fuerza.value);
+          if (f == 0) return hijo!;
+          final r = widget.ritmo?.call();
+          final conRitmo = r != null && r.valido;
+          var bpm = conRitmo ? r.bpm : 96.0;
+          // los tempos rápidos se bailan a la mitad: más bonito y menos movimiento
+          while (bpm > 130) {
+            bpm /= 2;
+          }
+          final tiempos = (_segundo - (conRitmo ? r.primerTiempo : 0)) * bpm / 60;
+          final enTiempo = tiempos - tiempos.floorToDouble(); // 0 justo en cada tiempo
+          final sube = math.sin(math.pi * enTiempo); // abajo en el tiempo, arriba entre medio
+          final mece = math.sin(math.pi * tiempos); // de un lado a otro cada dos tiempos
+          return Transform(
+            alignment: Alignment.bottomCenter,
+            transform: Matrix4.translationValues(mece * _alto * 0.012 * f, -sube * _alto * 0.028 * f, 0) *
+                Matrix4.rotationZ(mece * 0.03 * f) *
+                Matrix4.diagonal3Values(1 - sube * 0.008 * f, 1 + sube * 0.012 * f, 1),
+            child: hijo,
+          );
+        },
+      );
+
   @override
   Widget build(BuildContext context) {
     final personaje = Aspecto.patron;
     if (personaje == null) return const SizedBox.shrink();
-    final dibujo = Padding(
-      padding: const EdgeInsets.only(right: 10, bottom: 168),
-      child: AnimatedSwitcher(
-        duration: const Duration(milliseconds: 450),
-        switchInCurve: Curves.easeOutBack,
-        transitionBuilder: (hijo, a) =>
-            FadeTransition(opacity: a, child: ScaleTransition(scale: Tween(begin: 0.85, end: 1.0).animate(a), child: hijo)),
-        child: GestureDetector(
-          key: ValueKey(personaje),
-          behavior: HitTestBehavior.translucent,
-          onLongPress: () {
-            HapticFeedback.mediumImpact();
-            setState(() => _editando = true);
-          },
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: _editando ? C.acento.withValues(alpha: 0.9) : Colors.transparent, width: 2),
-            ),
-            child: Padding(
-              padding: const EdgeInsets.all(4),
-              child: PersonajeFondo(asset: personaje, alto: _alto),
+    final moviendo = _arrastrando;
+    final dibujo = AnimatedScale(
+      scale: moviendo ? 1.08 : 1,
+      duration: const Duration(milliseconds: 140),
+      curve: Curves.easeOut,
+      child: _bailando(
+        AnimatedSwitcher(
+          duration: const Duration(milliseconds: 450),
+          switchInCurve: Curves.easeOutBack,
+          transitionBuilder: (hijo, a) =>
+              FadeTransition(opacity: a, child: ScaleTransition(scale: Tween(begin: 0.85, end: 1.0).animate(a), child: hijo)),
+          child: Semantics(
+            key: ValueKey(personaje),
+            label: 'Personaje del fondo. Arrástralo para moverlo; toca dos veces para devolverlo a su esquina.',
+            child: GestureDetector(
+              // opaco: lo que toca el personaje es del personaje, y el resto de la pantalla sigue normal
+              behavior: HitTestBehavior.opaque,
+              onPanStart: _empezarArrastre,
+              onPanUpdate: _arrastrar,
+              onPanEnd: _soltar,
+              onPanCancel: _soltar,
+              onDoubleTap: _alEsquina,
+              onLongPress: () {
+                HapticFeedback.mediumImpact();
+                setState(() => _editando = true);
+              },
+              child: DecoratedBox(
+                key: _llaveDibujo,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(
+                      color: _editando || moviendo ? C.acento.withValues(alpha: 0.9) : Colors.transparent, width: 2),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(4),
+                  child: PersonajeFondo(asset: personaje, alto: _alto),
+                ),
+              ),
             ),
           ),
         ),
       ),
     );
+
+    final enSuEsquina = _x < 0 || _y < 0;
+    final pad = MediaQuery.paddingOf(context);
+    final Widget colocado = enSuEsquina
+        // donde estaba de siempre: abajo a la derecha, sobre el mini reproductor
+        ? Align(alignment: Alignment.bottomRight, child: Padding(padding: const EdgeInsets.only(right: 10, bottom: 168), child: dibujo))
+        : Align(alignment: Alignment(_x.clamp(0.0, 1.0) * 2 - 1, _y.clamp(0.0, 1.0) * 2 - 1), child: dibujo);
+
     return Stack(fit: StackFit.expand, children: [
       // mientras se ajusta: una capa que recoge el pellizco/deslizado en toda la pantalla y se va al tocar fuera
       if (_editando)
@@ -296,7 +531,11 @@ class _PersonajeEncimaState extends State<PersonajeEncima> {
             ),
           ),
         ),
-      Align(alignment: Alignment.bottomRight, child: dibujo),
+      // el espacio por el que puede andar: dentro de los bordes seguros, para que nunca quede tapado por la barra de estado o la de gestos
+      Padding(
+        padding: EdgeInsets.fromLTRB(pad.left, pad.top, pad.right, pad.bottom),
+        child: SizedBox.expand(key: _llaveArea, child: colocado),
+      ),
     ]);
   }
 }

@@ -24,7 +24,7 @@ final List<NovedadItem> novedadesDeEstaEdicion = [
 ];
 
 const _titulo = 'La nueva actualización grande de Caudal';
-const _subtitulo = 'Fondo propio, modo vinilo, modo estudio, GIF y mucho más';
+const _subtitulo = 'Modo gamer, tu personaje cobra vida, listas que se enriquecen y regalos para tus amigos';
 
 /// La actualizacion grande de Caudal. Dos usos:
 ///  * sin [actualizacion]: la presentacion a pantalla completa

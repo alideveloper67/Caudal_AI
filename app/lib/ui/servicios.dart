@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:share_plus/share_plus.dart';
 
+import '../nucleo/gamer_control.dart';
 import '../nucleo/ajustes.dart';
 import '../nucleo/catalogo.dart';
 import '../nucleo/coleccion.dart';
@@ -30,6 +31,7 @@ class Servicios {
     required this.reproductor, required this.streams, required this.descargas,
     this.sincronizador, required this.cerrarSesion,
     GlobalKey<ScaffoldMessengerState>? mensajero,
+    this.gamer,
   }) : mensajero = mensajero ?? GlobalKey<ScaffoldMessengerState>();
 
   final Cuenta cuenta;
@@ -40,6 +42,9 @@ class Servicios {
   final GestorDescargas descargas;
   final Sincronizador? sincronizador;
   final Future<void> Function() cerrarSesion;
+
+  /// El «Modo gamer» (nivel, ahorro, sonido, listas); nulo en las pruebas que no lo usan.
+  final ModoGamerControl? gamer;
 
   /// Para avisos desde cualquier sitio (la app pasa la suya, que no cambia).
   final GlobalKey<ScaffoldMessengerState> mensajero;
@@ -53,14 +58,14 @@ class Servicios {
 
   bool _reproductorAbierto = false;
 
-  void avisar(String texto, {VoidCallback? deshacer}) {
+  void avisar(String texto, {VoidCallback? deshacer, String etiqueta = 'Deshacer'}) {
     final m = mensajero.currentState;
     if (m == null) return;
     m.hideCurrentSnackBar();
     m.showSnackBar(SnackBar(
       content: Text(texto),
       duration: Duration(milliseconds: deshacer == null ? 2600 : 5000),
-      action: deshacer == null ? null : SnackBarAction(label: 'Deshacer', onPressed: deshacer),
+      action: deshacer == null ? null : SnackBarAction(label: etiqueta, onPressed: deshacer),
     ));
   }
 
@@ -379,8 +384,8 @@ class Servicios {
                   () => hacer(() => anadirALista(context, [pista]))),
               _opcion(Icons.queue_music_rounded, 'Añadir a la cola',
                   () => hacer(() => reproductor.agregarACola([pista]))),
-              _opcion(Icons.playlist_play_rounded, 'Reproducir a continuación',
-                  () => hacer(() => reproductor.reproducirDespues([pista]))),
+              _opcion(Icons.playlist_play_rounded, 'Tocar después de esta',
+                  () => hacer(() => reproductor.tocarDespues(pista))),
               if (vid.isNotEmpty)
                 _opcion(Icons.radio_rounded, 'Iniciar radio', () => hacer(() => reproductor.iniciarRadio(pista))),
               if (vid.isNotEmpty)
