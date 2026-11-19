@@ -4,16 +4,23 @@
 // queda como siempre. El reloj de animacion corre unicamente mientras suena
 // (y se ve), y solo repinta al cambiar de cuadro o de posicion.
 
-import 'dart:async';
 import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
+import '../../nucleo/coleccion.dart';
+import '../../nucleo/cumpleanos.dart';
 import '../../nucleo/gamer_control.dart';
 import '../../nucleo/mascota_app.dart';
+import '../../nucleo/ritmo.dart';
+import '../../nucleo/ritmo_fondo.dart';
+import '../../nucleo/vida_mascota.dart';
 import '../../reproduccion/reproductor.dart';
+import '../cumpleanos.dart' show pintarGorroCumple;
+import '../servicios.dart';
+import 'mascota_vida.dart';
 
 class MascotaEnBarra extends StatelessWidget {
   const MascotaEnBarra({super.key, required this.r, required this.fraccion, required this.cambios, required this.margen});
@@ -26,7 +33,7 @@ class MascotaEnBarra extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: Listenable.merge([MascotaApp.i, ModoGamerControl.mascotasOcultas]),
+      listenable: Listenable.merge([MascotaApp.i, ModoGamerControl.mascotasOcultas, Cumpleanos.i]),
       builder: (_, _) {
         final m = MascotaApp.i.activa && !ModoGamerControl.mascotasOcultas.value ? MascotaApp.i.actual : null;
         if (m == null) return const SizedBox.shrink();
@@ -51,20 +58,24 @@ class _Caminante extends StatefulWidget {
 }
 
 class _CaminanteState extends State<_Caminante> {
-  // 180 ms por cuadro (2 cuadros = 360 ms, como antes). Antes un reloj de
-  // animación pedía un fotograma entero 60 veces por segundo para cambiar de
-  // cuadro 5 veces: ahora se repinta solo al cambiar de cuadro o de posición.
-  static const _porCuadro = Duration(milliseconds: 180);
-  Timer? _reloj;
   ui.Image? _hoja, _estela;
-
-  /// Avisa de cada cuadro nuevo (lo que hace repintar a la mascota).
-  final _avisoCuadro = ValueNotifier<int>(0);
+  late final VidaMascota _vida = VidaMascota(
+    r: widget.r,
+    cuadros: widget.mascota.cuadros,
+    ritmoDe: _ritmoDeLaCancion,
+  );
   ValueListenable<TickerModeData>? _tickers;
+  bool _quieto = false;
 
-  // sube 0.9 cada vez que cambia el cuadro de caminar (igual que en el escritorio)
-  double _fase = 0;
-  int _cuadro = 0;
+  /// El ritmo de lo que suena, si Caudal ya lo conoce (así camina más rápido en canciones rápidas).
+  AnalisisRitmo? _ritmoDeLaCancion() {
+    final col = _coleccion;
+    final clave = '${widget.r.actual?['clave'] ?? ''}';
+    if (col == null || clave.isEmpty) return null;
+    return RitmoFondo.para(col).de(clave);
+  }
+
+  Coleccion? _coleccion;
 
   @override
   void initState() {
@@ -77,48 +88,36 @@ class _CaminanteState extends State<_Caminante> {
         if (mounted) setState(() => _estela = im);
       });
     }
-    widget.r.addListener(_alCambiarEstado);
+    _vida.iniciar();
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    // sin Caudal a la vista (en una prueba suelta) no hay ritmo y camina al paso de siempre
+    final el = context.getElementForInheritedWidgetOfExactType<Caudal>();
+    _coleccion = el == null ? null : (el.widget as Caudal).s.coleccion;
     // con la pantalla tapada o la pestaña oculta tampoco camina
     final n = TickerMode.getValuesNotifier(context);
     if (!identical(n, _tickers)) {
-      _tickers?.removeListener(_alCambiarEstado);
-      _tickers = n..addListener(_alCambiarEstado);
+      _tickers?.removeListener(_ajustar);
+      _tickers = n..addListener(_ajustar);
     }
-    _alCambiarEstado();
+    // «quitar animaciones» y el modo ligero la dejan quieta (en su primer cuadro)
+    _quieto = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
+    _ajustar();
   }
 
-  void _paso() {
-    _cuadro = (_cuadro + 1) % math.max(1, widget.mascota.cuadros);
-    _fase += 0.9;
-    _avisoCuadro.value++;
+  void _ajustar() {
+    if (!mounted) return;
+    _vida.ajustar(visible: _tickers?.value.enabled ?? true, quieto: _quieto);
   }
 
   @override
   void dispose() {
-    widget.r.removeListener(_alCambiarEstado);
-    _tickers?.removeListener(_alCambiarEstado);
-    _reloj?.cancel();
-    _avisoCuadro.dispose();
+    _tickers?.removeListener(_ajustar);
+    _vida.dispose();
     super.dispose();
-  }
-
-  void _alCambiarEstado() {
-    final suena = widget.r.estado == EstadoRepro.sonando && (_tickers?.value.enabled ?? true);
-    if (suena && _reloj == null) {
-      _reloj = Timer.periodic(_porCuadro, (_) => _paso());
-    } else if (!suena && _reloj != null) {
-      _reloj!.cancel();
-      _reloj = null;
-      if (widget.r.estado != EstadoRepro.sonando && _cuadro != 0) {
-        _cuadro = 0; // en pausa se queda quieta, en el primer cuadro
-        _avisoCuadro.value++;
-      }
-    }
   }
 
   @override
@@ -130,12 +129,14 @@ class _CaminanteState extends State<_Caminante> {
         painter: _PintorMascota(
           hoja: hoja,
           estela: _estela,
-          fase: () => _fase,
-          cuadro: () => _cuadro,
+          vida: _vida,
           mascota: widget.mascota,
           fraccion: widget.fraccion,
           margen: widget.margen,
-          repintar: Listenable.merge([widget.cambios, _avisoCuadro]),
+          fiesta: fiestaDe(DateTime.now()),
+          cumple: Cumpleanos.i.esMiCumple,
+          quieto: _quieto,
+          repintar: Listenable.merge([widget.cambios, _vida.aviso]),
         ),
       ),
     );
@@ -152,21 +153,27 @@ class _PintorMascota extends CustomPainter {
   _PintorMascota({
     required this.hoja,
     required this.estela,
-    required this.fase,
-    required this.cuadro,
+    required this.vida,
     required this.mascota,
     required this.fraccion,
     required this.margen,
+    required this.fiesta,
+    this.cumple = false,
+    required this.quieto,
     required Listenable repintar,
   }) : super(repaint: repintar);
 
   final ui.Image hoja;
   final ui.Image? estela;
-  final double Function() fase;
+  final VidaMascota vida;
   final Mascota mascota;
   final double Function() fraccion;
   final double margen;
-  final int Function() cuadro;
+  final Fiesta fiesta;
+
+  /// Cumpleaños de la persona: lleva SU gorrito (en vez del de la fiesta del calendario).
+  final bool cumple;
+  final bool quieto;
 
   // los dibujos ya vienen a su tamaño final (48x44): se pintan 1 a 1
   static const _escala = 1.0;
@@ -179,7 +186,7 @@ class _PintorMascota extends CustomPainter {
     final y = size.height / 2;
     // los pies quedan apoyados justo encima de la barra
     final arriba = y - 2 - h;
-    final cuadro = math.min(mascota.cuadros - 1, math.max(0, this.cuadro()));
+    final cuadro = vida.dormida ? 0 : math.min(mascota.cuadros - 1, math.max(0, vida.cuadro));
 
     if (mascota.arcoiris) {
       _arcoiris(canvas, x, arriba, w, h);
@@ -191,6 +198,13 @@ class _PintorMascota extends CustomPainter {
     final origen = Rect.fromLTWH(cuadro * fw, 0, fw, fh);
     final destino = Rect.fromLTWH(x - w / 2, arriba, w, h);
     canvas.drawImageRect(hoja, origen, destino, Paint()..filterQuality = FilterQuality.none);
+    // el gorrito de las fiestas (Navidad, Año Nuevo) y, tras dos minutos en pausa, las «z»
+    if (cumple) {
+      pintarGorroCumple(canvas, Offset(x + w * 0.05, arriba + h * 0.1), w * 0.34);
+    } else {
+      pintarGorro(canvas, fiesta, Offset(x + w * 0.05, arriba + h * 0.1), w * 0.42);
+    }
+    if (vida.dormida) pintarZzz(canvas, Offset(x + w * 0.22, arriba + h * 0.12), h * 0.34, vida.fotoSueno, quieta: quieto);
   }
 
   /// El arcoíris de Nyan Cat: seis franjas con un vaivén suave, desde el inicio de la barra.
@@ -198,7 +212,7 @@ class _PintorMascota extends CustomPainter {
     final fino = 3 * _escala;
     final base = arriba + h * 0.30;
     final fin = x - w / 2 + w * 0.25;
-    final f = fase();
+    final f = vida.fase;
     final p = Paint();
     for (var xi = margen; xi < fin; xi += 2 * _escala) {
       final onda = _escala * (((xi - margen) / (5 * _escala) + f).floor() % 2 == 0 ? 0 : 1);
@@ -216,7 +230,7 @@ class _PintorMascota extends CustomPainter {
     const n = 7;
     final paso = 21 * _escala;
     final centro = x - w * 0.32;
-    final f = fase();
+    final f = vida.fase;
     final ancho = mascota.estelaAncho.toDouble(), alto = mascota.estelaAlto.toDouble();
     for (var i = 0; i < n; i++) {
       final px = centro - (i + 1) * paso;
@@ -235,5 +249,5 @@ class _PintorMascota extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(covariant _PintorMascota old) => old.hoja != hoja || old.mascota != mascota || old.estela != estela;
+  bool shouldRepaint(covariant _PintorMascota old) => old.hoja != hoja || old.mascota != mascota || old.estela != estela || old.fiesta != fiesta || old.cumple != cumple || old.quieto != quieto;
 }

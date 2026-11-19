@@ -213,7 +213,7 @@ class _SolicitudesVistaState extends State<SolicitudesVista> {
                 indice: i,
                 child: ListTile(
                   contentPadding: const EdgeInsets.symmetric(horizontal: Esp.lado, vertical: 4),
-                  leading: AvatarPerfil(nombre: c.visible, fotoUrl: c.fotoUrl, marco: c.marco, radio: 25),
+                  leading: AvatarPerfil(nombre: c.visible, fotoUrl: c.fotoUrl, marco: c.marco, userId: c.id, radio: 25),
                   title: NombreEfecto(c.visible, efecto: c.efectoNombre, estilo: const TextStyle(fontWeight: FontWeight.w800)),
                   subtitle: Text('@${c.usuario} · ${_desde(c.fecha)}', maxLines: 1, overflow: TextOverflow.ellipsis, style: estiloSecundario),
                   onTap: () => abrirPerfil(context, c.usuario),
@@ -415,7 +415,7 @@ class _AmigosVistaState extends State<AmigosVista> {
                 for (final c in ctl.enviadas)
                   ListTile(
                     contentPadding: const EdgeInsets.symmetric(horizontal: Esp.lado),
-                    leading: AvatarPerfil(nombre: c.visible, fotoUrl: c.fotoUrl, marco: c.marco, radio: 22),
+                    leading: AvatarPerfil(nombre: c.visible, fotoUrl: c.fotoUrl, marco: c.marco, userId: c.id, radio: 22),
                     title: NombreEfecto(c.visible, efecto: c.efectoNombre),
                     subtitle: Text('@${c.usuario} · esperando respuesta', style: estiloSecundario),
                     onTap: () => abrirPerfil(context, c.usuario),
@@ -447,7 +447,7 @@ class _AmigosVistaState extends State<AmigosVista> {
                   indice: i,
                   child: ListTile(
                     contentPadding: const EdgeInsets.symmetric(horizontal: Esp.lado, vertical: 2),
-                    leading: AvatarPerfil(nombre: c.visible, fotoUrl: c.fotoUrl, marco: c.marco, radio: 24),
+                    leading: AvatarPerfil(nombre: c.visible, fotoUrl: c.fotoUrl, marco: c.marco, userId: c.id, radio: 24),
                     title: NombreEfecto(c.visible, efecto: c.efectoNombre, estilo: const TextStyle(fontWeight: FontWeight.w700)),
                     subtitle: Text('@${c.usuario}', style: estiloSecundario),
                     onTap: () => abrirPerfil(context, c.usuario),
@@ -481,7 +481,7 @@ class _AmigosVistaState extends State<AmigosVista> {
                       for (final c in ctl.bloqueados)
                         ListTile(
                           contentPadding: const EdgeInsets.symmetric(horizontal: Esp.lado),
-                          leading: AvatarPerfil(nombre: c.visible, fotoUrl: c.fotoUrl, marco: c.marco, radio: 20),
+                          leading: AvatarPerfil(nombre: c.visible, fotoUrl: c.fotoUrl, marco: c.marco, userId: c.id, radio: 20),
                           title: Text(c.visible),
                           subtitle: Text('@${c.usuario}', style: estiloSecundario),
                           trailing: OutlinedButton(onPressed: () => _desbloquear(c), child: const Text('Desbloquear')),
@@ -538,7 +538,7 @@ class _AmigosVistaState extends State<AmigosVista> {
                   child: Row(children: [
                     InkWell(
                       onTap: () => abrirPerfil(context, h.usuario),
-                      child: AvatarPerfil(nombre: h.visible, fotoUrl: h.fotoUrl, marco: h.marco, radio: 24),
+                      child: AvatarPerfil(nombre: h.visible, fotoUrl: h.fotoUrl, marco: h.marco, userId: h.id, radio: 24),
                     ),
                     const SizedBox(width: 12),
                     Expanded(

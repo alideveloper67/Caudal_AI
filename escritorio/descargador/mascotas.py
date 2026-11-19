@@ -238,7 +238,7 @@ class GestorMascota(QObject):
 COLORES_ARCOIRIS = ("#ff0000", "#ff9900", "#ffff00", "#33ff00", "#0099ff", "#6633ff")
 
 
-def pintar(p, datos, x, y, margen, ancho_total, cuadro, fase, escala=1):
+def pintar(p, datos, x, y, margen, ancho_total, cuadro, fase, escala=1, gorro=False):
     """Dibuja la mascota con los pies sobre la línea `y`, centrada en `x`.
 
     La usan la barra del reproductor y la vista previa de Ajustes, para que se vean igual.
@@ -275,6 +275,12 @@ def pintar(p, datos, x, y, margen, ancho_total, cuadro, fase, escala=1):
     p.drawPixmap(QRectF(izq, arriba, w, h), pm, QRectF(pm.rect()))
     if reducir:
         p.setRenderHint(QPainter.SmoothPixmapTransform, False)
+    if gorro:
+        # cumpleaños de la persona: gorrito de fiesta sobre la cabeza
+        from .ui.cumpleanos_ui import pintar_gorro
+        p.setOpacity(1.0)
+        pintar_gorro(p, izq + w / 2 + w * 0.05, arriba + h * 0.1, w * 0.34)
+        p.setRenderHint(QPainter.Antialiasing, False)
 
 
 def _pintar_estela(p, clave, x, y, margen, w, h, fase, escala):

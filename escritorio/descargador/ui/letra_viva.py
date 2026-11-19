@@ -213,6 +213,7 @@ class LienzoLetra(QWidget):
         self.setMouseTracking(True)
         self.setMinimumSize(200, 200)
         self.margen_arriba = 0       # la pagina completa deja sitio a su cabecera
+        self.margen_abajo = 0        # y el karaoke, a su franja de controles
         self.clave = None
         self.pista = None
         self.datos = None
@@ -476,7 +477,7 @@ class LienzoLetra(QWidget):
                     self._pulso = 1.0
                 self._actual = i
             # el desplazamiento sigue a la linea actual (o a la rueda)
-            alto_vista = self.height() - self.margen_arriba
+            alto_vista = self.height() - self.margen_arriba - self.margen_abajo
             ancla = self.margen_arriba + alto_vista * (0.30 if not self.compacto else 0.28)
             if self.sincronizada and 0 <= self._actual < len(self._items):
                 it = self._items[self._actual]
@@ -544,7 +545,7 @@ class LienzoLetra(QWidget):
         f, ft = self._fuentes()
         x0 = self._margen_x()
         ms = self.ahora_ms()
-        alto = self.height()
+        alto = self.height() - self.margen_abajo
         arriba = self.margen_arriba
         for k, it in enumerate(self._items):
             y = it["yv"] if it["yv"] is not None else it["y"] - self._scroll

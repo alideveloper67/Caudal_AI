@@ -10,6 +10,8 @@ import '../../nucleo/gustos.dart';
 import '../../nucleo/mixes.dart';
 import '../../nucleo/version.dart';
 import '../comunes.dart';
+import '../cumpleanos.dart';
+import '../../nucleo/cumpleanos.dart';
 import '../plataforma.dart';
 import '../servicios.dart';
 import '../novedades_grandes.dart';
@@ -171,9 +173,10 @@ class _AjustesPaginaState extends State<AjustesPagina> {
             padding: const EdgeInsets.all(Esp.lado),
             decoration: BoxDecoration(color: C.superficie2, borderRadius: BorderRadius.circular(12)),
             child: Row(children: [
-              CircleAvatar(radius: 26, backgroundColor: C.acento,
-                  child: Text(s.cuenta.inicial,
-                      style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: C.acentoTexto))),
+              ConGorro(radio: 26, userId: Cumpleanos.i.miId.isEmpty ? s.cuenta.id : Cumpleanos.i.miId,
+                  child: CircleAvatar(radius: 26, backgroundColor: C.acento,
+                      child: Text(s.cuenta.inicial,
+                          style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: C.acentoTexto)))),
               const SizedBox(width: 14),
               Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Text(s.cuenta.nombre, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),

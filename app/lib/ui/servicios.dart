@@ -13,6 +13,7 @@ import '../nucleo/descargas.dart';
 import '../nucleo/modelos.dart';
 import '../nucleo/recomendador.dart';
 import '../nucleo/sincronizacion.dart';
+import '../nucleo/sonidos_interfaz.dart';
 import '../nucleo/streams.dart';
 import '../reproduccion/reproductor.dart';
 import 'comunes.dart';
@@ -218,6 +219,7 @@ class Servicios {
     final ahora = await coleccion.alternarMeGusta(pista);
     if (!avisar_) return;
     if (ahora) {
+      SonidosInterfaz.i.meGusta().ignore(); // el sonidito de donadores (solo si lo activó)
       avisar('Añadida a Tus me gusta');
     } else {
       avisar('Quitada de Tus me gusta', deshacer: () => alternarMeGusta(pista, avisar_: false));

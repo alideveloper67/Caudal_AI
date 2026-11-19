@@ -21,6 +21,7 @@ class LineaKaraoke extends StatefulWidget {
     required this.hecho,
     required this.falta,
     this.adelanto = 250,
+    this.alineacion = TextAlign.start,
   });
 
   final String texto;
@@ -35,6 +36,9 @@ class LineaKaraoke extends StatefulWidget {
 
   /// Lo mismo que adelanta la letra al cambiar de linea.
   final int adelanto;
+
+  /// Alineación del texto dentro de su bloque (el karaoke a pantalla completa va centrado).
+  final TextAlign alineacion;
 
   @override
   State<LineaKaraoke> createState() => _LineaKaraokeState();
@@ -100,11 +104,13 @@ class _LineaKaraokeState extends State<LineaKaraoke> with SingleTickerProviderSt
             final resto = TextPainter(
               text: TextSpan(text: widget.texto, style: widget.estilo.copyWith(color: widget.falta)),
               textDirection: direccion,
+              textAlign: widget.alineacion,
               textWidthBasis: TextWidthBasis.longestLine,
             )..layout(maxWidth: c.maxWidth);
             final cantada = TextPainter(
               text: TextSpan(text: widget.texto, style: widget.estilo.copyWith(color: widget.hecho)),
               textDirection: direccion,
+              textAlign: widget.alineacion,
               textWidthBasis: TextWidthBasis.longestLine,
             )..layout(maxWidth: c.maxWidth);
             final filas = resto.computeLineMetrics();
@@ -123,7 +129,7 @@ class _LineaKaraokeState extends State<LineaKaraoke> with SingleTickerProviderSt
   /// El barrido de una sola pieza (solo si no hay ancho para medir las filas).
   Widget _barridoSimple() => AnimatedBuilder(
         animation: _c,
-        child: Text(widget.texto, style: widget.estilo.copyWith(color: Colors.white),
+        child: Text(widget.texto, style: widget.estilo.copyWith(color: Colors.white), textAlign: widget.alineacion,
             textWidthBasis: TextWidthBasis.longestLine),
         builder: (_, hijo) {
           final f = _c.value;

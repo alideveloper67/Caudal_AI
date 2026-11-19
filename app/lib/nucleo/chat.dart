@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'coleccion.dart';
 import 'cosmeticos.dart';
+import 'dedicatorias.dart';
 import 'nube.dart';
 import 'social.dart' show Relacion;
 import 'tarjeta_lista.dart';
@@ -41,6 +42,7 @@ class ResumenChat {
   String get vistaPrevia {
     final quien = ultimoMio ? 'Tú: ' : '';
     if (ultimaPista != null) {
+      if (Dedicatoria.esDedicatoria(ultimaPista)) return '$quien${Dedicatoria.vistaPrevia(ultimaPista!)}';
       return '$quien♪ ${ultimaPista!['titulo'] ?? 'Una canción'}';
     }
     if (ultimaLista != null) return '$quien${ultimaLista!.vistaPrevia}';

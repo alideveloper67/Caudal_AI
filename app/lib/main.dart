@@ -12,6 +12,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:share_plus/share_plus.dart';
 
 import 'nucleo/ajustes.dart';
+import 'nucleo/cumpleanos.dart';
 import 'nucleo/avisos.dart';
 import 'nucleo/capturador_oculto.dart';
 import 'nucleo/catalogo.dart';
@@ -24,6 +25,7 @@ import 'nucleo/gustos.dart';
 import 'nucleo/motor_local.dart';
 import 'nucleo/red.dart';
 import 'nucleo/sincronizacion.dart';
+import 'nucleo/sonidos_interfaz.dart';
 import 'nucleo/streams.dart';
 import 'nucleo/version.dart';
 import 'nucleo/vida_app.dart';
@@ -341,10 +343,13 @@ class _CaudalAppState extends State<CaudalApp> {
         .iniciar(c.id, c.sesion != null && c.sesion!.acceso.isNotEmpty ? Social(c.sesion!) : null)
         .catchError((_) {}));
     unawaited(MascotaApp.i.iniciar(c.id).catchError((_) {}));
+    // «Feliz cumpleaños»: mi fecha y qué amigos cumplen hoy (la celebración la lanza el armazón)
+    unawaited(Cumpleanos.i.iniciar(c.id, c.sesion).catchError((_) {}));
     // beneficios de donador (marco, efecto del nombre, tema): lo guardado primero, lo de la nube después
     unawaited(Premium.i
         .iniciar(c.id, c.sesion != null && c.sesion!.acceso.isNotEmpty ? Social(c.sesion!) : null)
         .catchError((_) {}));
+    unawaited(SonidosInterfaz.i.alAbrir().catchError((_) {})); // el sonidito al abrir (donadores, si lo activó)
     unawaited(_buscarVersion());
     unawaited(_buscarAvisos());
     unawaited(_pedirNotificaciones());
@@ -402,6 +407,7 @@ class _CaudalAppState extends State<CaudalApp> {
     FondoApp.i.reiniciar();
     Premium.i.reiniciar();
     MascotaApp.i.reiniciar();
+    Cumpleanos.i.reiniciar();
     s.gamer?.guardarYa();
     ModoGamerControl.mascotasOcultas.value = false;
     Gustos.actuales = [];

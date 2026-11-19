@@ -39,7 +39,7 @@ def fila_persona(p, compacto=False, acciones=(), al_abrir=None, detalle=""):
     h.setContentsMargins(10, 8, 10, 8)
     h.setSpacing(10)
     h.addWidget(PC.Avatar(40 if compacto else 46, S.nombre_visible(p), None, p.get("foto_url"),
-                          marco=p.get("marco")))
+                          marco=p.get("marco"), persona_id=p.get("id")))
     col = QVBoxLayout()
     col.setSpacing(0)
     n = nombre_efecto(S.nombre_visible(p), "font-size:13.5px;font-weight:700;", p.get("efecto_nombre"), False)

@@ -338,8 +338,9 @@ class DialogoEditarPerfil(QDialog):
         h = QHBoxLayout(self.previa)
         h.setContentsMargins(18, 16, 18, 16)
         h.setSpacing(14)
+        from ... import cumpleanos as _cu
         self.av = PC.Avatar(72, self.p.get("nombre") or "", PC.color_de(self.p), self.p.get("foto_url"),
-                            animar=True)
+                            animar=True, persona_id=_cu.ESTADO.mi_id or None)
         h.addWidget(self.av)
         col = QVBoxLayout()
         col.setSpacing(2)

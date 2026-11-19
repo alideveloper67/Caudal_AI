@@ -7,6 +7,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show HapticFeedback;
 
 import '../nucleo/fondo_app.dart';
+import '../nucleo/cumpleanos.dart';
+import 'cumpleanos.dart';
 import 'horneado.dart';
 import '../nucleo/ritmo.dart';
 import 'tema.dart';
@@ -134,9 +136,12 @@ class FondoPatron extends StatelessWidget {
 /// mini reproductor), con una sombra suave bajo los pies. Va encima de la
 /// imagen de «Fondo de Caudal» si la hay, sin taparla.
 class PersonajeFondo extends StatelessWidget {
-  const PersonajeFondo({super.key, required this.asset, this.alto = 160});
+  const PersonajeFondo({super.key, required this.asset, this.alto = 160, this.gorro = false});
   final String asset;
   final double alto;
+
+  /// Cumpleaños: gorrito de fiesta sobre la cabeza.
+  final bool gorro;
 
   @override
   Widget build(BuildContext context) => Stack(alignment: Alignment.bottomCenter, clipBehavior: Clip.none, children: [
@@ -168,6 +173,7 @@ class PersonajeFondo extends StatelessWidget {
             ),
           ),
           Image.asset(asset, height: alto, filterQuality: FilterQuality.none, excludeFromSemantics: true),
+          if (gorro) Positioned(top: alto * 0.02, child: GorroFiesta(ancho: alto * 0.26)),
         ]);
 }
 
@@ -489,7 +495,10 @@ class _PersonajeEncimaState extends State<PersonajeEncima> with TickerProviderSt
                 ),
                 child: Padding(
                   padding: const EdgeInsets.all(4),
-                  child: PersonajeFondo(asset: personaje, alto: _alto),
+                  child: ListenableBuilder(
+                    listenable: Cumpleanos.i,
+                    builder: (_, _) => PersonajeFondo(asset: personaje, alto: _alto, gorro: Cumpleanos.i.esMiCumple),
+                  ),
                 ),
               ),
             ),

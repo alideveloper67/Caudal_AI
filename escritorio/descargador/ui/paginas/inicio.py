@@ -64,6 +64,8 @@ class PaginaInicio(Pagina):
         cab.addWidget(t)
         cab.addStretch(1)
         self.cuerpo.addLayout(cab)
+        from ..cumpleanos_ui import AvisoCumple      # «Hoy es tu cumple» y los amigos que cumplen hoy
+        self.cuerpo.addWidget(AvisoCumple(ctx))
 
         chips = QHBoxLayout()
         chips.setSpacing(8)

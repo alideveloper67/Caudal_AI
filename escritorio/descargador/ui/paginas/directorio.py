@@ -44,7 +44,7 @@ class TarjetaPerfil(QFrame):
         v.addWidget(banda)
         # la foto «sube» sobre la banda
         self.avatar = PC.Avatar(72, S.nombre_visible(p), color, p["foto_url"], anillo=C["panel"], padre=self,
-                                marco=p.get("marco"))
+                                marco=p.get("marco"), persona_id=p.get("id"))
         self.avatar.move(16, 46)
         cuerpo = QVBoxLayout()
         cuerpo.setContentsMargins(16, 0, 16, 0)

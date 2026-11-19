@@ -6,8 +6,12 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart' show MethodChannel;
 
 import '../nucleo/coleccion.dart';
+import '../nucleo/letra_bloqueo.dart';
+import '../nucleo/letras_cache.dart';
 import '../nucleo/plataforma.dart';
+import '../nucleo/premium_letras.dart';
 import 'biblioteca_auto.dart';
+import 'eq_adaptable_control.dart';
 import 'frenos.dart';
 import 'reproductor.dart';
 import 'widget_inicio.dart';
@@ -36,6 +40,9 @@ class ServicioAudio extends BaseAudioHandler with SeekHandler {
   void _enganchar() {
     r.addListener(_publicar);
     r.posicion.addListener(_publicarPosicion);
+    LetrasCache.i.vincular(r.coleccion);
+    // el ecualizador que toca según la salida, el género o el artista (donadores)
+    unawaited(ControlEqAdaptable.i.enlazar(r));
     _publicar();
   }
 
@@ -47,6 +54,8 @@ class ServicioAudio extends BaseAudioHandler with SeekHandler {
     r = nuevo;
     auto.coleccion = coleccion ?? nuevo.coleccion;
     _ultimaClave = '';
+    _letra.cambiarCancion('');
+    _letraPedida = '';
     _freno.reiniciar();
     _enganchar();
   }
@@ -196,6 +205,9 @@ class ServicioAudio extends BaseAudioHandler with SeekHandler {
     final p = r.actual;
     if (p != null && '${p['clave']}' != _ultimaClave) {
       _ultimaClave = '${p['clave']}';
+      // la línea de letra de la canción anterior no se queda en el subtítulo
+      _letra.cambiarCancion(_ultimaClave);
+      _letraPedida = '';
       final mini = '${p['miniatura'] ?? ''}';
       mediaItem.add(MediaItem(
         id: _ultimaClave,
@@ -223,7 +235,57 @@ class ServicioAudio extends BaseAudioHandler with SeekHandler {
     );
   }
 
+  // ------------------------------------------------------------ letra en la pantalla de bloqueo
+
+  final _letra = LetraBloqueo();
+  String _letraPedida = '';
+
+  static bool get _letraActiva {
+    try {
+      return esPremiumLetras();
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// La línea de la letra que toca va en el subtítulo de la notificación (donadores). Solo se
+  /// vuelve a publicar cuando cambia de línea, no a cada tic de la posición.
+  void _actualizarLetra() {
+    if (!_letraActiva) {
+      final t = _letra.apagar();
+      if (t != null) _subtitulo(t);
+      return;
+    }
+    final p = r.actual;
+    if (p != null && _letraPedida != _ultimaClave && _ultimaClave.isNotEmpty) {
+      _letraPedida = _ultimaClave;
+      unawaited(_cargarLetra(Map<String, dynamic>.from(p)));
+    }
+    final t = _letra.alMoverse(r.posicion.value);
+    if (t != null) _subtitulo(t);
+  }
+
+  Future<void> _cargarLetra(Json p) async {
+    final clave = '${p['clave']}';
+    try {
+      final l = await LetrasCache.i.obtener(p);
+      if (l == null || clave != _ultimaClave) return;
+      _letra.ponerLetra(clave, lineasConTiempo(l));
+      final t = _letra.alMoverse(r.posicion.value);
+      if (t != null) _subtitulo(t);
+    } catch (_) {
+      // sin letra, el subtítulo se queda como estaba
+    }
+  }
+
+  void _subtitulo(String texto) {
+    final item = mediaItem.value;
+    if (item == null || item.id != _ultimaClave || item.displaySubtitle == texto) return;
+    mediaItem.add(item.copyWith(displaySubtitle: texto));
+  }
+
   void _publicarPosicion() {
+    _actualizarLetra();
     final s = r.posicion.value.inSeconds;
     if (s == _ultimoSegundo) return;
     _ultimoSegundo = s;

@@ -69,6 +69,10 @@ String mensajeCompartirLista(String nombre, String codigo) {
       'O entra a Caudal › Biblioteca › «Tengo un código» y escribe: $c';
 }
 
+/// Cuántas personas caben en una lista compartida (lo hace cumplir `unirse_a_lista` en la base, ver
+/// supabase/listas_colaboradores.sql). Es igual para todos: no es un beneficio de donadores.
+const maxMiembrosLista = 50;
+
 /// Permisos de una lista compartida.
 const rolColaborador = 'colaborador';
 const rolOyente = 'oyente';

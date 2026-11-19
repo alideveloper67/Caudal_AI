@@ -1,13 +1,19 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit_video/media_kit_video.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../../nucleo/ajustes.dart';
 import '../../nucleo/catalogo.dart';
+import '../../nucleo/calidad_sonido.dart';
 import '../../nucleo/coleccion.dart';
+import '../../nucleo/estilo_reproductor.dart';
+import '../../nucleo/premium_letras.dart';
+import '../../nucleo/ritmo.dart';
+import '../../nucleo/ritmo_fondo.dart';
+import '../../nucleo/letras_cache.dart';
 import '../../nucleo/pantalla.dart';
 import '../../nucleo/traductor.dart';
 import '../../reproduccion/frenos.dart';
@@ -17,14 +23,20 @@ import '../comunes.dart';
 import '../plataforma.dart';
 import '../reproductor/animaciones.dart';
 import '../reproductor/barra_progreso.dart';
+import '../reproductor/estilos_portada.dart';
 import '../reproductor/fondo_ambiente.dart';
+import '../reproductor/insignia_calidad.dart';
+import '../reproductor/paleta_portada.dart';
+import '../reproductor/personalizar_hoja.dart';
 import '../reproductor/linea_karaoke.dart';
 import '../reproductor/portada_deslizable.dart';
 import '../reproductor/vinilo.dart';
+import '../premium/tarjetas_del_dia.dart' show MenuMasEscucha;
 import '../servicios.dart';
 import '../tema.dart';
 import 'cola_hoja.dart';
 import 'compartir_letra.dart';
+import 'karaoke_pagina.dart';
 import 'mezclador_ajustes.dart';
 import 'mezclador_pagina.dart';
 import 'sonido.dart';
@@ -36,7 +48,7 @@ class ReproductorPagina extends StatefulWidget {
   State<ReproductorPagina> createState() => _ReproductorPaginaState();
 }
 
-class _ReproductorPaginaState extends State<ReproductorPagina> {
+class _ReproductorPaginaState extends State<ReproductorPagina> with SingleTickerProviderStateMixin {
   Color _color = C.superficie3;
   String _url = '';
   // cuanto se ha bajado la pantalla con el dedo (sin reconstruir la pagina)
@@ -49,21 +61,92 @@ class _ReproductorPaginaState extends State<ReproductorPagina> {
   int _direccion = 1;
   String _claveVista = '';
 
-  // modo vinilo: la portada es el disco de un tocadiscos y la pantalla se queda
-  // encendida mientras suena (en pausa el sistema puede apagarla como siempre)
-  bool _vinilo = false;
+  // el estilo de la pantalla (Clasico, Vinilo, Casete, Neon, Flotante) y los colores de la
+  // caratula; con el vinilo la pantalla se queda encendida mientras suena (en pausa el
+  // sistema puede apagarla como siempre)
+  final _prefs = PreferenciasReproductor.i;
+  bool get _vinilo => _prefs.estiloEfectivo == EstiloReproductor.vinilo;
   Reproductor? _rPantalla;
   bool? _pantallaPedida;
+
+  // la paleta que se ve (animada) y de donde sale
+  late final AnimationController _anim =
+      AnimationController(vsync: this, duration: const Duration(milliseconds: 700))..addListener(_pasoPaleta);
+  final _vista = ValueNotifier<PaletaPortada>(PaletaPortada.neutra);
+  PaletaPortada _desde = PaletaPortada.neutra, _hasta = PaletaPortada.neutra;
+  PaletaPortada? _paleta;
+  String _urlPaleta = '';
+  bool _vistaLista = false;
 
   @override
   void initState() {
     super.initState();
-    SharedPreferences.getInstance().then((p) {
-      if (mounted && p.getBool('modo_vinilo') == true) {
-        setState(() => _vinilo = true);
-        _revisarPantalla();
+    _prefs.addListener(_alCambiarPrefs);
+    _prefs.cargar();
+  }
+
+  void _alCambiarPrefs() {
+    if (!mounted) return;
+    setState(() {});
+    _revisarPantalla();
+  }
+
+  void _pasoPaleta() =>
+      _vista.value = PaletaPortada.lerp(_desde, _hasta, Curves.easeInOut.transform(_anim.value));
+
+  /// La paleta que toca mostrar: la de la caratula (donadores) o el color de siempre.
+  PaletaPortada _objetivo() {
+    final p = _paleta;
+    if (_prefs.coloresActivos && p != null) return p;
+    return PaletaPortada(fondo: _color, acento: C.acento, contraste: Color.lerp(_color, C.fondo, 0.5)!);
+  }
+
+  /// Lleva la paleta que se ve hacia la que toca, con una transicion suave (sin ella con
+  /// "quitar animaciones" o el modo ligero). Nunca se llama durante un build.
+  void _irA(PaletaPortada p) {
+    if (!mounted || (_vistaLista && p == _hasta)) return;
+    final animar = _vistaLista && !(MediaQuery.maybeDisableAnimationsOf(context) ?? false);
+    _vistaLista = true;
+    _desde = _vista.value;
+    _hasta = p;
+    if (animar) {
+      _anim.forward(from: 0);
+    } else {
+      _anim.stop();
+      _vista.value = p;
+    }
+  }
+
+  /// En cada build: si lo que toca mostrar cambio, se lleva hacia alli despues del fotograma.
+  void _sincronizarPaleta(String url) {
+    if (url != _urlPaleta) {
+      _urlPaleta = url;
+      _paleta = paletaEnCache(url);
+      if (_prefs.coloresActivos && _paleta == null) {
+        paletaDe(url).then((p) {
+          if (mounted && _urlPaleta == url) {
+            _paleta = p;
+            _irA(_objetivo());
+          }
+        });
       }
-    }).catchError((_) {});
+    } else if (_prefs.coloresActivos && _paleta == null) {
+      // se encendieron los colores con esta cancion ya puesta
+      paletaDe(url).then((p) {
+        if (mounted && _urlPaleta == url) {
+          _paleta = p;
+          _irA(_objetivo());
+        }
+      });
+    }
+    final obj = _objetivo();
+    if (!_vistaLista) {
+      _vistaLista = true;
+      _desde = _hasta = obj;
+      _vista.value = obj;
+    } else if (obj != _hasta) {
+      scheduleMicrotask(() => _irA(_objetivo()));
+    }
   }
 
   /// Pantalla encendida solo con el vinilo puesto y la musica sonando (o
@@ -74,12 +157,6 @@ class _ReproductorPaginaState extends State<ReproductorPagina> {
     if (quiere == _pantallaPedida) return;
     _pantallaPedida = quiere;
     PantallaEncendida.mantener(quiere);
-  }
-
-  void _alternarVinilo() {
-    setState(() => _vinilo = !_vinilo);
-    _revisarPantalla();
-    SharedPreferences.getInstance().then((p) => p.setBool('modo_vinilo', _vinilo)).catchError((_) => false);
   }
 
   // el contenido aparece un poco despues de que la portada empieza a volar
@@ -105,9 +182,21 @@ class _ReproductorPaginaState extends State<ReproductorPagina> {
   @override
   void dispose() {
     _rPantalla?.removeListener(_revisarPantalla);
+    _prefs.removeListener(_alCambiarPrefs);
+    _anim.dispose();
+    _vista.dispose();
     PantallaEncendida.mantener(false); // al salir de la pantalla del reproductor, el sistema vuelve a apagarla
     _arrastre.dispose();
     super.dispose();
+  }
+
+  /// El ritmo de la cancion si Caudal ya lo conoce (sin analizar nada ni gastar datos).
+  AnalisisRitmo? _ritmoDe(Servicios s, String clave) {
+    try {
+      return RitmoFondo.para(s.coleccion).de(clave);
+    } catch (_) {
+      return null;
+    }
   }
 
   void _colorDe(String url) {
@@ -201,6 +290,8 @@ class _ReproductorPaginaState extends State<ReproductorPagina> {
             }
             final url = '${p['miniatura'] ?? ''}';
             _colorDe(url);
+            _sincronizarPaleta(url);
+            final estilo = _prefs.estiloEfectivo;
             final clave = '${p['clave']}';
             if (clave != _claveVista) {
               // la primera vez no hay de donde venir; luego, de donde se pidio
@@ -214,8 +305,25 @@ class _ReproductorPaginaState extends State<ReproductorPagina> {
             return Stack(children: [
               // ---- modo ambiente: la portada desenfocada, moviendose despacio
               Positioned.fill(
-                child: FondoAmbiente(url: url, color: _color,
-                    enMovimiento: !video && r.estado == EstadoRepro.sonando),
+                child: ValueListenableBuilder<PaletaPortada>(
+                  valueListenable: _vista,
+                  builder: (_, pal, _) => Stack(fit: StackFit.expand, children: [
+                    FondoAmbiente(url: url, color: pal.fondo, enMovimiento: !video && r.estado == EstadoRepro.sonando),
+                    // con los colores de la caratula, el fondo se funde hacia su segundo tono
+                    if (_prefs.coloresActivos)
+                      IgnorePointer(
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [pal.contraste.withValues(alpha: 0), pal.contraste.withValues(alpha: 0.38)],
+                            ),
+                          ),
+                        ),
+                      ),
+                  ]),
+                ),
               ),
               Scaffold(
                 backgroundColor: Colors.transparent,
@@ -239,9 +347,10 @@ class _ReproductorPaginaState extends State<ReproductorPagina> {
                         ])),
                         if (!Jugador.esWeb)
                           IconButton(
-                            tooltip: _vinilo ? 'Quitar el vinilo' : 'Reproducir con vinilo',
-                            icon: Icon(Icons.album_rounded, color: _vinilo ? C.acento : null),
-                            onPressed: _alternarVinilo,
+                            tooltip: 'Personalizar el reproductor',
+                            icon: Icon(Icons.style_rounded,
+                                color: estilo != EstiloReproductor.clasico || _prefs.coloresActivos ? C.acento : null),
+                            onPressed: () => mostrarPersonalizarReproductor(context),
                           ),
                         IconButton(icon: const Icon(Icons.more_vert_rounded), onPressed: () => s.hojaPista(context, p)),
                       ]),
@@ -255,22 +364,17 @@ class _ReproductorPaginaState extends State<ReproductorPagina> {
                           ? const _HuecoVideoWeb()
                           : video
                           ? _VideoEnLinea(r: r)
-                          : _vinilo
-                          ? Center(
-                              child: GestureDetector(
-                                onDoubleTap: () => _meGustaDobleToque(s, p),
-                                onHorizontalDragEnd: (d) {
-                                  final v = d.primaryVelocity ?? 0;
-                                  if (v < -300) _siguiente(r);
-                                  if (v > 300) _anterior(r);
-                                },
-                                child: VinilVista(
-                                  url: url,
-                                  color: _color,
-                                  sonando: r.estado == EstadoRepro.sonando,
-                                  lado: ladoPortadaGrande(ancho),
-                                ),
-                              ),
+                          : estilo != EstiloReproductor.clasico
+                          ? _PortadaDeEstilo(
+                              estilo: estilo,
+                              url: url,
+                              r: r,
+                              vista: _vista,
+                              lado: ladoPortadaGrande(ancho),
+                              ritmoDe: () => _ritmoDe(s, clave),
+                              alDobleToque: () => _meGustaDobleToque(s, p),
+                              alSiguiente: () => _siguiente(r),
+                              alAnterior: () => _anterior(r),
                             )
                           : PortadaDeslizable(
                               pista: p,
@@ -309,14 +413,27 @@ class _ReproductorPaginaState extends State<ReproductorPagina> {
                                     _cerrando = true;
                                     s.irAArtista(context, arts.first);
                                   },
-                                  child: Text('${p['artista'] ?? ''}', maxLines: 1, overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(fontSize: 15, color: Color(0xCCFFFFFF))),
+                                  child: Row(children: [
+                                    Flexible(
+                                      child: Text('${p['artista'] ?? ''}', maxLines: 1, overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(fontSize: 15, color: Color(0xCCFFFFFF))),
+                                    ),
+                                    // la calidad de lo que suena: codec y tasa, discreta y para todos
+                                    if (calidadDe(r.fuente, enVideo: video) case final cal?) ...[
+                                      const SizedBox(width: 8),
+                                      ValueListenableBuilder<PaletaPortada>(
+                                        valueListenable: _vista,
+                                        builder: (_, pal, _) => InsigniaCalidad(calidad: cal, color: pal.acento),
+                                      ),
+                                    ],
+                                  ]),
                                 ),
                               ]),
                             ),
                           ),
                         ),
                         CorazonAnimado(gusta: gusta, tamano: 28, alPulsar: () => s.alternarMeGusta(p)),
+                        const MenuMasEscucha(), // Modo auto, modos de escucha, ¿qué canción era?, ecualizador adaptable
                       ]),
                     ),
                     const SizedBox(height: 4),
@@ -324,11 +441,13 @@ class _ReproductorPaginaState extends State<ReproductorPagina> {
                     Padding(padding: const EdgeInsets.symmetric(horizontal: 10),
                         child: RepaintBoundary(child: BarraProgreso(r: r))),
                     // ---- controles
-                    Padding(
+                    ValueListenableBuilder<PaletaPortada>(
+                      valueListenable: _vista,
+                      builder: (_, pal, _) => Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 14),
                       child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
                         IconButton(
-                          icon: Icon(Icons.shuffle_rounded, color: r.aleatorio ? C.acento : C.texto),
+                          icon: Icon(Icons.shuffle_rounded, color: r.aleatorio ? pal.acento : C.texto),
                           onPressed: () async {
                             Haptico.seleccion();
                             s.avisar(await r.alternarAleatorio() ? 'Aleatorio activado' : 'Aleatorio desactivado');
@@ -351,7 +470,7 @@ class _ReproductorPaginaState extends State<ReproductorPagina> {
                         ),
                         IconButton(
                           icon: Icon(r.repetir == 'una' ? Icons.repeat_one_rounded : Icons.repeat_rounded,
-                              color: r.repetir == 'no' ? C.texto : C.acento),
+                              color: r.repetir == 'no' ? C.texto : pal.acento),
                           onPressed: () async {
                             Haptico.seleccion();
                             final m = await r.ciclarRepetir();
@@ -361,20 +480,13 @@ class _ReproductorPaginaState extends State<ReproductorPagina> {
                         ),
                       ]),
                     ),
+                    ),
                     // ---- extras
-                    Padding(
+                    ValueListenableBuilder<PaletaPortada>(
+                      valueListenable: _vista,
+                      builder: (_, pal, _) => Padding(
                       padding: const EdgeInsets.fromLTRB(14, 4, 14, 0),
                       child: Row(children: [
-                        if (r.fuente != null)
-                          Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
-                            decoration: BoxDecoration(
-                              border: Border.all(color: C.acento.withValues(alpha: 0.5)),
-                              borderRadius: BorderRadius.circular(4),
-                            ),
-                            child: Text(r.fuente!.insignia,
-                                style: TextStyle(fontSize: 10.5, fontWeight: FontWeight.w800, color: C.acento)),
-                          ),
                         const Spacer(),
                         if ('${p['video_id'] ?? ''}'.isNotEmpty || (p['archivo'] != null && p['es_audio'] != true))
                           // en un telefono estrecho se encoge en vez de desbordar la fila
@@ -399,14 +511,14 @@ class _ReproductorPaginaState extends State<ReproductorPagina> {
                         const Spacer(),
                         IconButton(
                           tooltip: 'Temporizador',
-                          icon: Icon(Icons.bedtime_outlined, color: r.restanteApagado != null ? C.acento : C.texto),
+                          icon: Icon(Icons.bedtime_outlined, color: r.restanteApagado != null ? pal.acento : C.texto),
                           onPressed: () => _temporizador(context, r),
                         ),
                         ListenableBuilder(
                           listenable: s.ajustes,
                           builder: (_, _) => IconButton(
                             tooltip: 'Mezcla DJ',
-                            icon: Icon(Icons.album_rounded, color: s.ajustes.sino('mezcla_dj') ? C.acento : C.texto),
+                            icon: Icon(Icons.album_rounded, color: s.ajustes.sino('mezcla_dj') ? pal.acento : C.texto),
                             onPressed: () => mostrarMezclaDj(context, alAbrirMezclador: () {
                               // la mesa se abre en la pestaña: antes se cierra el reproductor grande
                               Navigator.of(context, rootNavigator: true).maybePop();
@@ -417,7 +529,7 @@ class _ReproductorPaginaState extends State<ReproductorPagina> {
                         IconButton(
                           tooltip: 'Sonido',
                           icon: Icon(Icons.graphic_eq_rounded,
-                              color: s.ajustes.entero('super_volumen') > 0 || s.ajustes.sino('ecualizador') ? C.acento : C.texto),
+                              color: s.ajustes.entero('super_volumen') > 0 || s.ajustes.sino('ecualizador') ? pal.acento : C.texto),
                           onPressed: () => mostrarSonido(context),
                         ),
                         IconButton(
@@ -427,11 +539,15 @@ class _ReproductorPaginaState extends State<ReproductorPagina> {
                         ),
                       ]),
                     ),
+                    ),
                     const SizedBox(height: 16),
                     // ---- letra
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 14),
-                      child: _TarjetaLetra(pista: p, color: _color),
+                      child: ValueListenableBuilder<PaletaPortada>(
+                        valueListenable: _vista,
+                        builder: (_, pal, _) => _TarjetaLetra(pista: p, color: pal.fondo),
+                      ),
                     ),
                     const SizedBox(height: 24),
                   ]),
@@ -483,6 +599,103 @@ class _ReproductorPaginaState extends State<ReproductorPagina> {
         builder: (_) => const HojaCola(),
       );
 }
+
+/// La portada del reproductor en un estilo de donadores (Vinilo, Casete, Neon o Flotante), con los
+/// mismos gestos que la clasica: doble toque para me gusta y deslizar para cambiar de cancion.
+class _PortadaDeEstilo extends StatelessWidget {
+  const _PortadaDeEstilo({
+    required this.estilo,
+    required this.url,
+    required this.r,
+    required this.vista,
+    required this.lado,
+    required this.ritmoDe,
+    required this.alDobleToque,
+    required this.alSiguiente,
+    required this.alAnterior,
+  });
+
+  final EstiloReproductor estilo;
+  final String url;
+  final Reproductor r;
+  final ValueListenable<PaletaPortada> vista;
+  final double lado;
+  final AnalisisRitmo? Function() ritmoDe;
+  final VoidCallback alDobleToque, alSiguiente, alAnterior;
+
+  @override
+  Widget build(BuildContext context) {
+    final sonando = r.estado == EstadoRepro.sonando;
+    final Widget c = ValueListenableBuilder<PaletaPortada>(
+      valueListenable: vista,
+      builder: (_, pal, _) => switch (estilo) {
+        EstiloReproductor.vinilo => VinilVista(url: url, color: pal.fondo, sonando: sonando, lado: lado),
+        EstiloReproductor.casete => CaseteVista(url: url, color: pal.fondo, r: r, sonando: sonando, lado: lado),
+        EstiloReproductor.neon => NeonVista(
+            url: url,
+            luz: brillante(pal.acento),
+            luz2: colorSecundarioNeon(pal.acento, pal.contraste),
+            sonando: sonando,
+            lado: lado,
+            ritmo: ritmoDe()),
+        EstiloReproductor.flotante =>
+          FlotanteVista(url: url, color: pal.acento, r: r, sonando: sonando, lado: lado, ritmoDe: ritmoDe),
+        EstiloReproductor.clasico => const SizedBox.shrink(),
+      },
+    );
+    return Center(
+      child: GestureDetector(
+        onDoubleTap: alDobleToque,
+        onHorizontalDragEnd: (d) {
+          final v = d.primaryVelocity ?? 0;
+          if (v < -300) alSiguiente();
+          if (v > 300) alAnterior();
+        },
+        child: c,
+      ),
+    );
+  }
+}
+
+/// El botoncito del modo karaoke (donadores). Sin los beneficios avisa de que es de donadores.
+class BotonKaraoke extends StatelessWidget {
+  const BotonKaraoke({super.key, required this.pista, required this.letra, this.grande = false});
+
+  final Json pista;
+  final Map<String, dynamic>? letra;
+  final bool grande;
+
+  @override
+  Widget build(BuildContext context) {
+    void abrir() {
+      if (!esPremiumLetras()) {
+        Caudal.leer(context).avisar('El modo karaoke es para donadores de Caudal');
+        return;
+      }
+      KaraokePagina.abrir(context, pista, letra: letra);
+    }
+
+    if (grande) {
+      return IconButton(tooltip: 'Modo karaoke', icon: const Icon(Icons.mic_external_on_rounded), onPressed: abrir);
+    }
+    return Semantics(
+      button: true,
+      label: 'Modo karaoke',
+      child: GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: abrir,
+        child: const Padding(padding: EdgeInsets.all(4), child: Icon(Icons.mic_external_on_rounded, size: 20)),
+      ),
+    );
+  }
+}
+
+/// Lo que usa el modo karaoke: la letra (con su cache), sus lineas con tiempos y el desfase
+/// que dejo el boton «Sincronia».
+Future<Map<String, dynamic>> letraDeCancion(Json p) => _letraDe(p);
+List<(int, String)> lineasDeLetra(Map<String, dynamic> l) => _lineas(l);
+int desfaseDeLetra(String clave) => _desfaseDe(clave);
+Listenable get avisoDesfaseLetra => _desfaseCambio;
 
 /// El boton redondo de play/pausa: el icono se transforma y el boton se
 /// hunde un poco bajo el dedo.
@@ -577,7 +790,10 @@ Future<Map<String, dynamic>> _letraDe(Json p) async {
   final l = Map<String, dynamic>.from(await Catalogo.letras(p));
   final vacia = (l['lineas'] as List? ?? const []).isEmpty && '${l['texto'] ?? ''}'.isEmpty;
   // una letra vacía puede ser un fallo de red: no se guarda, se vuelve a intentar
-  if (!vacia) _cacheLetras[clave] = l;
+  if (!vacia) {
+    _cacheLetras[clave] = l;
+    LetrasCache.i.guardar(clave, l); // también queda en el teléfono (búsqueda y pantalla de bloqueo)
+  }
   return l;
 }
 
@@ -645,6 +861,8 @@ class _TarjetaLetraState extends State<_TarjetaLetra> {
               BotonSincronia(clave: '${widget.pista['clave']}', compacto: true),
               const SizedBox(width: 6),
               const BotonTraducir(compacto: true),
+              const SizedBox(width: 4),
+              BotonKaraoke(pista: widget.pista, letra: l),
             ],
             if (hay) const SizedBox(width: 10),
             if (hay) const Icon(Icons.open_in_full_rounded, size: 18),
@@ -766,6 +984,7 @@ class _LetraCompletaState extends State<LetraCompleta> {
               onPressed: _compartir,
               icon: const Icon(Icons.ios_share_rounded),
             ),
+          if (hayLineas) BotonKaraoke(pista: _pista, letra: l, grande: true),
           BotonSincronia(clave: '${_pista['clave']}'),
           const SizedBox(width: 8),
           const BotonTraducir(),

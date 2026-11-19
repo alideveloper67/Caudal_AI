@@ -178,6 +178,19 @@ class PaginaAjustes(Pagina):
                                                   "a pantalla completa, con la carátula girando. "
                                                   "También lo abres con el botón del disco.",
                self.vinilo)
+        self.colores_c = _interruptor(a["colores_caratula"])
+        self._conectar(self.colores_c, "colores_caratula", self._refrescar_colores_caratula)
+        s.fila("Colores que siguen la carátula", "La barra del reproductor, el visualizador y el karaoke "
+                                                 "toman los colores de la carátula que suena (donadores).",
+               self.colores_c)
+        self.sonidos_ui = _interruptor(a["sonidos_ui"])
+        self._conectar(self.sonidos_ui, "sonidos_ui")
+        s.fila("Sonidos de Caudal", "Un sonidito suave al dar me gusta y al abrir Caudal (donadores).",
+               self.sonidos_ui)
+        from ...sonidos_ui import SONIDOS
+        self.sonido_tipo = _combo([(n, k) for k, n in SONIDOS.items()], a["sonido_ui_tipo"], 160)
+        self._conectar(self.sonido_tipo, "sonido_ui_tipo", self._probar_sonido_ui)
+        s.fila("Cuál sonido", "Burbuja, moneda o campana. Siempre con el volumen bajito.", self.sonido_tipo)
         self.suave = _interruptor(a["apagado_suave"])
         self._conectar(self.suave, "apagado_suave")
         s.fila("Apagar la música poco a poco", "Con el temporizador para dormir, el volumen va "
@@ -468,6 +481,15 @@ class PaginaAjustes(Pagina):
             bt_anio.clicked.connect(lambda: abrir_anio(ctx, self))
             s.fila("Tu año en Caudal", "Un resumen en imagen de lo que escuchaste este año, para tus estados "
                                        "(donadores).", bt_anio)
+            from ..tarjeta_semanal import abrir_semana
+            from ..dialogo_que_cancion import abrir_que_cancion
+            bt_semana = QPushButton("Ver mi semana")
+            bt_semana.clicked.connect(lambda: abrir_semana(ctx, self))
+            s.fila("Tu semana en Caudal", "La tarjeta de los últimos 7 días, lista para compartir (donadores).",
+                   bt_semana)
+            bt_que = QPushButton("Buscar")
+            bt_que.clicked.connect(lambda: abrir_que_cancion(ctx, self))
+            s.fila("¿Qué canción era?", "Busca en lo que escuchaste por fecha y por texto (donadores).", bt_que)
         self.cuerpo.addWidget(s)
 
         # ---------------- motor
@@ -538,6 +560,18 @@ class PaginaAjustes(Pagina):
         elif isinstance(widget, QComboBox):
             widget.currentIndexChanged.connect(
                 lambda _i: (self._poner(clave, widget.currentData()), despues and despues()))
+
+    def _refrescar_colores_caratula(self):
+        g = getattr(self.ctx, "colores_caratula", None)
+        if g is not None:
+            g.refrescar()
+
+    def _probar_sonido_ui(self):
+        """Al cambiar de sonido se oye una vez (si la cuenta es de donador)."""
+        premium = getattr(self.ctx, "premium", None)
+        if premium is not None and premium.premium:
+            from ...sonidos_ui import tocar
+            tocar(self.a["sonido_ui_tipo"])
 
     def _mascota_del_fondo(self, _acento, fondo):
         """Un fondo con personaje trae a su personaje caminando por la barra (si la cuenta tiene mascotas)."""

@@ -9,13 +9,16 @@ import 'package:flutter/services.dart';
 import '../nucleo/importar.dart';
 import '../nucleo/legal.dart';
 import '../nucleo/pases_regalo.dart';
+import '../nucleo/capsula_tiempo.dart';
 import '../nucleo/premium.dart';
 import '../nucleo/resumen_anual.dart' show esTemporadaDelResumen;
 import '../nucleo/tarjeta_lista.dart';
 import '../nucleo/version.dart';
 import '../reproduccion/reproductor.dart';
 import '../reproduccion/retomar.dart' show avisoRetomado;
+import '../nucleo/cumpleanos.dart';
 import 'comunes.dart';
+import 'cumpleanos.dart';
 import 'menu_comunidad.dart';
 import 'novedades/presentacion_mascotas.dart';
 import 'novedades_grandes.dart';
@@ -25,6 +28,7 @@ import 'paginas/resumen.dart';
 import 'paginas/resumen_anual_pagina.dart';
 import 'paginas/ajustes_pagina.dart';
 import 'premium/personalizar_pagina.dart';
+import 'premium/capsula_ui.dart';
 import 'premium/regalo_pases.dart';
 import 'paginas/biblioteca.dart';
 import 'paginas/buscar.dart';
@@ -130,7 +134,9 @@ class _ArmazonState extends State<Armazon> {
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       await _revisarTerminos();
       await _novedadesDeLaVersion();
+      await _capsulasDelTiempo();
       await _avisoPasesRegalo();
+      await _celebrarCumple();
     });
     WidgetsBinding.instance.addPostFrameCallback((_) => _avisoWebEnTelefono());
     WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -167,6 +173,17 @@ class _ArmazonState extends State<Armazon> {
     } catch (_) {}
   }
 
+  /// Cápsulas del tiempo (guardadas en este teléfono, por cuenta): las que ya llegaron a su día se enseñan
+  /// al abrir la app, una vez cada una. Se abren aunque el premium ya no esté vigente.
+  Future<void> _capsulasDelTiempo() async {
+    try {
+      final cuenta = Caudal.leer(context).cuenta.id;
+      if (CapsulasTiempo.i.cuenta != cuenta) await CapsulasTiempo.i.iniciar(cuenta);
+      if (!mounted) return;
+      await mostrarCapsulasPendientes(context);
+    } catch (_) {}
+  }
+
   /// Una sola vez, a donadores y fundadores: ya pueden regalar códigos de prueba. Espera a que
   /// el servidor diga qué tipo de cuenta es; si no llega o se cierra la app, no se marca y sale otro día.
   Future<void> _avisoPasesRegalo() async {
@@ -181,6 +198,17 @@ class _ArmazonState extends State<Armazon> {
         await Navigator.of(context, rootNavigator: true)
             .push(MaterialPageRoute<void>(builder: (_) => const PersonalizarPagina()));
       }
+    } catch (_) {}
+  }
+
+  /// El día de su cumpleaños, una sola vez: la pantalla de celebración. Se marca antes de enseñarla.
+  Future<void> _celebrarCumple() async {
+    try {
+      if (!await Cumpleanos.i.esperarPerfil() || !mounted) return;
+      if (!await Cumpleanos.i.tocaCelebrar() || !mounted) return;
+      await Cumpleanos.i.marcarCelebrado();
+      if (!mounted) return;
+      await PantallaCumple.mostrar(context, nombre: Cumpleanos.i.nombre, edad: Cumpleanos.i.edad);
     } catch (_) {}
   }
 
@@ -466,8 +494,9 @@ class _BarraLateral extends StatelessWidget {
           Padding(
             padding: const EdgeInsets.fromLTRB(22, 10, 16, 8),
             child: Row(children: [
-              CircleAvatar(radius: 15, backgroundColor: C.acento,
-                  child: Text(s.cuenta.inicial, style: TextStyle(color: C.acentoTexto, fontWeight: FontWeight.w900))),
+              ConGorro(radio: 15, userId: Cumpleanos.i.miId.isEmpty ? s.cuenta.id : Cumpleanos.i.miId,
+                  child: CircleAvatar(radius: 15, backgroundColor: C.acento,
+                      child: Text(s.cuenta.inicial, style: TextStyle(color: C.acentoTexto, fontWeight: FontWeight.w900)))),
               const SizedBox(width: 10),
               Expanded(child: Text(s.cuenta.nombre, maxLines: 1, overflow: TextOverflow.ellipsis,
                   style: const TextStyle(fontWeight: FontWeight.w700))),

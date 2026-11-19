@@ -78,7 +78,7 @@ void main() {
     test('una sola vez: si ya se vio no vuelve, ni con versiones nuevas', () {
       expect(tocaPresentacionMascotas('2.3.2', '2.3.2'), isFalse);
       expect(tocaPresentacionMascotas('2.3.2', '2.3.3'), isFalse);
-      expect(tocaPresentacionMascotas('2.3.4', '2.5.0'), isFalse);
+      expect(tocaPresentacionMascotas('2.3.4', '2.6.0'), isFalse);
     });
 
     test('antes de la 2.3.2 no sale', () {
@@ -277,7 +277,7 @@ void main() {
     });
 
     testWidgets('si tocan las novedades grandes, sale en el arranque siguiente', (t) async {
-      await _montarApp(t, version: '2.5.2');
+      await _montarApp(t, version: '2.6.2');
       await t.pump(const Duration(seconds: 3));
       expect(find.text('ACTUALIZACIÓN GRANDE DE CAUDAL'), findsOneWidget);
       expect(find.text(_titulos[0]), findsNothing);
@@ -285,7 +285,7 @@ void main() {
       expect(p.getString(clavePresentacionMascotasVista), isNull);
 
       // el siguiente arranque, con lo que quedó guardado
-      await _montarApp(t, version: '2.5.2', prefs: {claveNovedadesVistas: p.getString(claveNovedadesVistas)!});
+      await _montarApp(t, version: '2.6.2', prefs: {claveNovedadesVistas: p.getString(claveNovedadesVistas)!});
       await t.pump(const Duration(seconds: 3));
       expect(find.text('ACTUALIZACIÓN GRANDE DE CAUDAL'), findsNothing);
       expect(find.text(_titulos[0]), findsOneWidget);

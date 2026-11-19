@@ -341,7 +341,7 @@ class _InterruptorPermiso extends StatelessWidget {
             style: const TextStyle(fontWeight: FontWeight.w700)),
         subtitle: Text(
             colaborativa
-                ? 'Quien entre podrá poner música en esta lista.'
+                ? 'Quien entre podrá poner música en esta lista. Caben hasta $maxMiembrosLista personas, gratis.'
                 : 'Quien entre solo podrá escucharla.',
             style: estiloDetalle),
       );

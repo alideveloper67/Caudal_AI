@@ -285,6 +285,7 @@ class Deslizador(QWidget):
         self.setCursor(Qt.PointingHandCursor)
         self.setMouseTracking(True)
         self._x_raton = None
+        self.color_relleno = None     # QColor que sustituye al de lo ya recorrido (colores de la carátula)
         self._alto_base = alto
         self._mascota = None          # GestorMascota (solo la barra del reproductor la usa)
         self._reproductor = None
@@ -427,7 +428,7 @@ class Deslizador(QWidget):
             p.setBrush(QColor(255, 255, 255, 34))
             p.drawRoundedRect(QRectF(margen, y - grosor / 2, ancho * self.buffer, grosor), 2, 2)
         activo = self._encima or self.arrastrando
-        p.setBrush(QColor(C["acento"]) if activo else QColor(C["texto"]))
+        p.setBrush(self.color_relleno or (QColor(C["acento"]) if activo else QColor(C["texto"])))
         p.drawRoundedRect(QRectF(margen, y - grosor / 2, ancho * self.valor, grosor), 2, 2)
         if self.marcas:
             p.setBrush(QColor(C["panel"]))
@@ -441,7 +442,9 @@ class Deslizador(QWidget):
 
     def _pintar_mascota(self, p, datos, x, y, margen):
         from .. import mascotas
-        mascotas.pintar(p, datos, x, y, margen, self.width(), self._cuadro, self._fase, self.ESCALA_MASCOTA)
+        from ..cumpleanos import ESTADO as _cumple
+        mascotas.pintar(p, datos, x, y, margen, self.width(), self._cuadro, self._fase, self.ESCALA_MASCOTA,
+                        gorro=_cumple.es_mio_hoy)
 
 
 # ---------------------------------------------------------------- filas

@@ -224,6 +224,22 @@ class Reproductor extends ChangeNotifier {
   /// Se enciende si un filtro de sonido no existe en este telefono (ver [_alError]):
   /// desde ahi suena sin filtros en vez de no sonar.
   bool _sinFiltros = false;
+
+  /// «Bajar la voz» del modo karaoke: baja unos 20 dB lo que suena igual en los dos lados del
+  /// estéreo (donde suele ir la voz) con el filtro `stereotools` de mpv. No es un separador de
+  /// voz: también atenúa un poco bombo y bajo. No va en iPhone (sin filtros) ni en la web.
+  bool bajarVoz = false;
+  // La libmpv del móvil solo trae equalizer, aresample y scaletempo (comprobado): sin `stereotools`
+  // pedirlo tumbaría TODOS los filtros de la sesión (ecualizador incluido). Queda apagado hasta
+  // que el motor lo traiga; la pantalla de karaoke ya esconde el botón cuando esto es false.
+  bool get puedeBajarVoz => false;
+
+  Future<void> ponerBajarVoz(bool v) async {
+    if (v == bajarVoz) return;
+    bajarVoz = v;
+    if (puedeBajarVoz) await aplicarSonido();
+  }
+
   final _silencioFinal = DetectorSilencio();
   final _silencioEntrada = DetectorSilencio(umbralDb: -50, minimo: const Duration(milliseconds: 300));
   final Set<_Motor> _midiendo = {};
@@ -353,6 +369,7 @@ class Reproductor extends ChangeNotifier {
       final maximo = bandas.fold<int>(0, max);
       if (maximo > 0) partes.insert(0, 'volume=-${(maximo * 0.6).toStringAsFixed(1)}dB');
     }
+    if (bajarVoz) partes.add('stereotools=mlev=0.1');
     final nivel = ajustes.entero('super_volumen');
     if (nivel > 0) {
       partes.add('loudnorm=I=${nivelesSuperVolumen[nivel] ?? -9}:TP=-1.0:LRA=7');
@@ -616,7 +633,9 @@ class Reproductor extends ChangeNotifier {
   Future<void> reproducirRadioId(String playlistId, String titulo) async {
     _aviso('Preparando la radio…');
     try {
-      final datos = await Catalogo.radio(playlistId: playlistId).timeout(const Duration(seconds: 40));
+      final nombre = titulo.replaceFirst(RegExp(r'^Radio de\s+', caseSensitive: false), '').trim();
+      final datos = await Catalogo.radio(playlistId: playlistId, respaldo: nombre == 'Radio' ? '' : nombre)
+          .timeout(const Duration(seconds: 40));
       final pistas = List<Json>.from(datos['pistas'] as List);
       if (pistas.isEmpty) return _aviso('Esa radio no tiene canciones ahora mismo.');
       await reproducirLista(pistas, contexto: {'tipo': 'radio', 'id': playlistId, 'titulo': titulo});
@@ -899,7 +918,8 @@ class Reproductor extends ChangeNotifier {
     try {
       // con tope de tiempo: si YouTube Music no contesta, la radio no se queda colgada ni deja
       // cerrada la puerta a pedirla otra vez
-      final datos = await Catalogo.radio(videoId: '${pista['video_id']}').timeout(const Duration(seconds: 40));
+      final datos = await Catalogo.radio(videoId: '${pista['video_id']}', respaldo: '${pista['artista'] ?? ''}'.trim())
+          .timeout(const Duration(seconds: 40));
       final vistos = secuencia.map((p) => p['video_id']).toSet();
       final nuevas = <Json>[];
       var candidatas = List<Json>.from(datos['pistas'] as List);

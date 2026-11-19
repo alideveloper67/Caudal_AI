@@ -5,11 +5,13 @@ import 'package:flutter/material.dart';
 import '../../nucleo/vida_app.dart';
 import '../../nucleo/chat.dart';
 import '../../nucleo/coleccion.dart';
+import '../../nucleo/dedicatorias.dart';
 import '../../nucleo/nube.dart';
 import '../../nucleo/tarjeta_lista.dart';
 import '../../nucleo/social.dart';
 import '../comunes.dart';
 import '../emojis.dart';
+import '../premium/dedicatoria_ui.dart';
 import '../premium/marcos.dart';
 import '../servicios.dart';
 import '../tema.dart';
@@ -162,7 +164,7 @@ class _MensajesPaginaState extends State<MensajesPagina> {
                         final c = chats[i];
                         return ListTile(
                           contentPadding: const EdgeInsets.symmetric(horizontal: Esp.lado, vertical: 4),
-                          leading: AvatarPerfil(nombre: c.visible, fotoUrl: c.fotoUrl, marco: c.marco, radio: 24),
+                          leading: AvatarPerfil(nombre: c.visible, fotoUrl: c.fotoUrl, marco: c.marco, userId: c.otro, radio: 24),
                           title: NombreEfecto(c.visible, efecto: c.efectoNombre,
                               estilo: TextStyle(fontWeight: c.sinLeer > 0 ? FontWeight.w900 : FontWeight.w700)),
                           subtitle: Text(c.vistaPrevia, maxLines: 1, overflow: TextOverflow.ellipsis,
@@ -318,7 +320,7 @@ class _DialogoNuevoChatState extends State<_DialogoNuevoChat> {
                                   final c = lista[i];
                                   return ListTile(
                                     contentPadding: EdgeInsets.zero,
-                                    leading: AvatarPerfil(nombre: c.visible, fotoUrl: c.fotoUrl, marco: c.marco, radio: 22),
+                                    leading: AvatarPerfil(nombre: c.visible, fotoUrl: c.fotoUrl, marco: c.marco, userId: c.id, radio: 22),
                                     title: Text(c.visible, maxLines: 1, overflow: TextOverflow.ellipsis,
                                         style: const TextStyle(fontWeight: FontWeight.w700)),
                                     subtitle: Text('@${c.usuario}', style: estiloSecundario),
@@ -383,7 +385,7 @@ Future<ResumenChat?> elegirDestinoChat(BuildContext context) async {
         ),
         for (final c in chats)
           ListTile(
-            leading: AvatarPerfil(nombre: c.visible, fotoUrl: c.fotoUrl, marco: c.marco, radio: 20),
+            leading: AvatarPerfil(nombre: c.visible, fotoUrl: c.fotoUrl, marco: c.marco, userId: c.otro, radio: 20),
             title: Text(c.visible),
             subtitle: Text('@${c.usuario}', style: estiloSecundario),
             onTap: () => Navigator.pop(ctx, c),
@@ -568,6 +570,12 @@ class _ConversacionPaginaState extends State<ConversacionPagina> {
     _enviar(pista: p);
   }
 
+  /// «Dedicar una canción» (donadores): tarjeta con mensaje; al abrirla suena un fragmento.
+  Future<void> _dedicar() async {
+    final p = await hojaDedicar(context, para: widget.chat.visible);
+    if (p != null && mounted) _enviar(pista: p);
+  }
+
   /// «Enviar una lista»: elige una de tus listas (se comparte sola si hace
   /// falta) y se manda la tarjeta a esta conversación.
   Future<void> _enviarLista() async {
@@ -635,12 +643,13 @@ class _ConversacionPaginaState extends State<ConversacionPagina> {
             return _Burbuja(
               mensaje: Mensaje(id: -p.clave, autor: yo, texto: p.texto, pista: p.pista, lista: p.lista, creado: p.creado),
               mio: true,
+              otro: widget.chat.visible,
               estado: p.fallo == null ? 'Enviando…' : '⚠ ${p.fallo} · Toca para reintentar',
               alTocarEstado: p.fallo == null ? null : () => _mandar(p),
             );
           }
           final m = _mensajes[_mensajes.length - 1 - (i - _pendientes.length)];
-          return _Burbuja(mensaje: m, mio: m.autor == yo);
+          return _Burbuja(mensaje: m, mio: m.autor == yo, otro: widget.chat.visible);
         },
       );
     }
@@ -651,7 +660,7 @@ class _ConversacionPaginaState extends State<ConversacionPagina> {
           InkWell(
             borderRadius: BorderRadius.circular(999),
             onTap: () => abrirPerfil(context, widget.chat.usuario),
-            child: AvatarPerfil(nombre: widget.chat.visible, fotoUrl: widget.chat.fotoUrl, marco: widget.chat.marco, radio: 17),
+            child: AvatarPerfil(nombre: widget.chat.visible, fotoUrl: widget.chat.fotoUrl, marco: widget.chat.marco, userId: widget.chat.otro, radio: 17),
           ),
           const SizedBox(width: 10),
           Expanded(
@@ -663,11 +672,20 @@ class _ConversacionPaginaState extends State<ConversacionPagina> {
           ),
         ]),
         actions: [
-          TextButton.icon(
-            onPressed: _mezcla,
-            icon: const Icon(Icons.join_inner_rounded),
-            label: const Text('Mezcla'),
+          IconButton(
+            tooltip: 'Dedicar una canción',
+            icon: const Icon(Icons.mail_outline_rounded),
+            onPressed: _dedicar,
           ),
+          // en pantallas angostas solo el icono, para que el nombre siga cabiendo
+          if (MediaQuery.sizeOf(context).width < 380)
+            IconButton(tooltip: 'Mezcla', icon: const Icon(Icons.join_inner_rounded), onPressed: _mezcla)
+          else
+            TextButton.icon(
+              onPressed: _mezcla,
+              icon: const Icon(Icons.join_inner_rounded),
+              label: const Text('Mezcla'),
+            ),
         ],
       ),
       body: Column(children: [
@@ -745,9 +763,12 @@ class _ConversacionPaginaState extends State<ConversacionPagina> {
 }
 
 class _Burbuja extends StatelessWidget {
-  const _Burbuja({required this.mensaje, required this.mio, this.estado, this.alTocarEstado});
+  const _Burbuja({required this.mensaje, required this.mio, this.otro = '', this.estado, this.alTocarEstado});
   final Mensaje mensaje;
   final bool mio;
+
+  /// El nombre de la otra persona de la conversación (para las tarjetas de dedicatoria).
+  final String otro;
   final String? estado; // «Enviando…» o el fallo, en lugar de la hora
   final VoidCallback? alTocarEstado;
 
@@ -757,7 +778,15 @@ class _Burbuja extends StatelessWidget {
     final p = mensaje.pista;
     final ancho = MediaQuery.sizeOf(context).width * 0.78;
     Widget contenido;
-    if (p != null) {
+    if (p != null && Dedicatoria.esDedicatoria(p)) {
+      // una dedicatoria (donadores): tarjeta que se abre y suena un fragmento
+      contenido = DedicatoriaEnChat(
+        pista: p,
+        mia: mio,
+        otro: otro,
+        alAbrir: () => abrirDedicatoria(context, pista: p, otro: otro, mia: mio),
+      );
+    } else if (p != null) {
       contenido = GestureDetector(
         onTap: () => s.reproducirPista(context, p),
         onLongPress: () => s.hojaPista(context, p),

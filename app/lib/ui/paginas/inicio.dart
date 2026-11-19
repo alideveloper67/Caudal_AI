@@ -8,10 +8,13 @@ import '../../nucleo/catalogo.dart';
 import '../../nucleo/coleccion.dart';
 import '../../nucleo/gustos.dart';
 import '../comunes.dart';
+import '../cumpleanos.dart';
+import '../../nucleo/cumpleanos.dart';
 import '../menu_comunidad.dart';
 import '../plataforma.dart';
 import '../servicios.dart';
 import '../tema.dart';
+import '../premium/tarjetas_del_dia.dart';
 import '../tu_mes_pasado.dart';
 import 'ajustes_pagina.dart';
 import 'estudio_pagina.dart';
@@ -191,6 +194,7 @@ class _InicioPaginaState extends State<InicioPagina> with AutomaticKeepAliveClie
             slivers: [
               SliverToBoxAdapter(child: _Cabecera(saludo: nombre.isEmpty ? _saludo() : '${_saludo()}, $nombre',
                   inicial: s.cuenta.inicial, filtro: _filtro, alFiltrar: (f) => setState(() => _filtro = f))),
+              const SliverToBoxAdapter(child: CumpleInicio()),
               if (!_localListo && verAtajos)
                 const SliverToBoxAdapter(child: Esqueleto(forma: FormaEsqueleto.atajos))
               else if (verAtajos && _atajos.length > 1)
@@ -208,6 +212,8 @@ class _InicioPaginaState extends State<InicioPagina> with AutomaticKeepAliveClie
                 ),
               // acceso al Modo estudio (música sin letra, sonidos y temporizador)
               if (verAtajos) const SliverToBoxAdapter(child: TarjetaEstudio()),
+              // lo nuevo para ti, la semana del domingo y los accesos a los modos
+              if (verAtajos) const SliverToBoxAdapter(child: TarjetasDelDia()),
               SliverList(
                 // otro filtro: todo vuelve a entrar en su turno
                 key: ValueKey(_filtro),
@@ -298,9 +304,12 @@ class _Cabecera extends StatelessWidget {
               escala: 0.9,
               child: GestureDetector(
                 onTap: () => _ajustes(context),
-                child: CircleAvatar(
-                  radius: 17, backgroundColor: C.acento,
-                  child: Text(inicial, style: TextStyle(color: C.acentoTexto, fontWeight: FontWeight.w900)),
+                child: ConGorro(
+                  radio: 17, userId: Cumpleanos.i.miId.isEmpty ? null : Cumpleanos.i.miId,
+                  child: CircleAvatar(
+                    radius: 17, backgroundColor: C.acento,
+                    child: Text(inicial, style: TextStyle(color: C.acentoTexto, fontWeight: FontWeight.w900)),
+                  ),
                 ),
               ),
             ),

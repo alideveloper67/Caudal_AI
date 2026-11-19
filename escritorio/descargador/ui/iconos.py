@@ -340,6 +340,9 @@ def _dibujar_extra(p, nombre, e, color):
         for (x, y, dx, dy) in ((9, 9, -1, -1), (15, 9, 1, -1), (9, 15, -1, 1), (15, 15, 1, 1)):
             p.drawPolyline([QPointF((x + 5 * dx) * e, y * e), QPointF(x * e, y * e),
                             QPointF(x * e, (y + 5 * dy) * e)])
+    elif nombre == "visualizador":
+        for x, alto in ((4.5, 6), (9.5, 14), (14.5, 9), (19.5, 17)):
+            p.drawLine(QPointF(x * e, (12 - alto / 2) * e), QPointF(x * e, (12 + alto / 2) * e))
     elif nombre == "ecualizador":
         for x, y in ((6, 9), (12, 15), (18, 7)):
             p.drawLine(QPointF(x * e, 3.5 * e), QPointF(x * e, 20.5 * e))

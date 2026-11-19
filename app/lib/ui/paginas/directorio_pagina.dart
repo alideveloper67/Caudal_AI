@@ -294,7 +294,7 @@ class TarjetaPerfil extends StatelessWidget {
                   child: Container(
                     padding: const EdgeInsets.all(3),
                     decoration: BoxDecoration(shape: BoxShape.circle, color: C.superficie),
-                    child: AvatarPerfil(nombre: p.visible, fotoUrl: p.fotoUrl, marco: p.marco, color: color, radio: 32),
+                    child: AvatarPerfil(nombre: p.visible, fotoUrl: p.fotoUrl, marco: p.marco, userId: p.id, color: color, radio: 32),
                   ),
                 ),
                 const SizedBox(height: 6),

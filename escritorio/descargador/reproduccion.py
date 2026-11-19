@@ -286,6 +286,9 @@ class Motor(QObject):
         self._ignorar_fin = 0
         self._cargando = False
         self.fuente = None
+        self._af_base = ""
+        self._espectro = False
+        self._nivel = None                 # (RMS, pico) en dB: lo deja mpv por su aviso, nunca se lee a mano
 
         self.mpv.observe_property("time-pos", lambda _n, v: self._emitir(self.posicion, v))
         self.mpv.observe_property("duration", lambda _n, v: self._emitir(self.duracion, v))
@@ -442,13 +445,76 @@ class Motor(QObject):
             pass
 
     def fijar_filtros(self, af):
+        self._af_base = af or ""
+        self._poner_cadena()
+
+    # El visualizador mide el nivel del audio con un filtro de medición (astats, sin tocar el sonido)
+    # que se añade al final de la cadena solo mientras el visualizador está abierto.
+    MEDIDOR = ("@vis:lavfi=[astats=metadata=1:reset=1:length=0.05:measure_perchannel=none:"
+               "measure_overall=RMS_level+Peak_level]")
+
+    def _poner_cadena(self):
+        af = self._af_base
+        if self._espectro and not self.es_video:
+            af = f"{af},{self.MEDIDOR}" if af else self.MEDIDOR
         try:
             self.mpv.af = af
         except Exception:
+            self._espectro = False
             try:
-                self.mpv.af = ""
+                self.mpv.af = self._af_base
             except Exception:
-                pass
+                try:
+                    self.mpv.af = ""
+                except Exception:
+                    pass
+
+    def fijar_espectro(self, si):
+        si = bool(si)
+        if si == self._espectro:
+            return
+        self._espectro = si
+        self._nivel = None
+        # El nivel llega por el aviso de mpv (una copia hecha por el propio mpv). Leer
+        # "af-metadata" a mano mientras se rehace la cadena de filtros (al tocar el ecualizador o el
+        # volumen) lee memoria ya liberada y tumba la app.
+        try:
+            if si:
+                self.mpv.observe_property("af-metadata/vis", self._al_medir)
+            else:
+                self.mpv.unobserve_property("af-metadata/vis", self._al_medir)
+        except Exception:
+            pass
+        self._poner_cadena()
+
+    def _al_medir(self, _nombre, md):
+        """Hilo de mpv: solo guarda el número (nada de señales ni lecturas desde aquí)."""
+        if not self._espectro or self._cerrado or not md:
+            return
+        try:
+            self._nivel = (float(md["lavfi.astats.Overall.RMS_level"]),
+                           float(md["lavfi.astats.Overall.Peak_level"]))
+        except (KeyError, TypeError, ValueError):
+            pass
+
+    def nivel_audio(self):
+        """(RMS, pico) en dB del último trozo de audio, o None si el medidor no está puesto o aún no midió."""
+        if not self._espectro or self._cerrado:
+            return None
+        return self._nivel
+
+    def info_audio(self):
+        """Lo que mpv sabe del audio que suena: códec, tasa, formato y tasa de bits (o {})."""
+        if self._cerrado:
+            return {}
+        datos = {}
+        for clave, prop in (("codec", "audio-codec-name"), ("params", "audio-params"),
+                            ("bitrate", "audio-bitrate")):
+            try:
+                datos[clave] = self.mpv._get_property(prop)
+            except Exception:
+                datos[clave] = None
+        return datos
 
     def fijar_aceleracion(self, si):
         if self.es_video:
@@ -535,6 +601,7 @@ class Reproductor(QObject):
     cola_cambio = Signal()
     modo_cambio = Signal(str)              # audio | video
     calidad_cambio = Signal(object)        # datos del stream que suena
+    audio_real_cambio = Signal(object)     # códec y tasa del audio que mpv decodifica de verdad
     aviso = Signal(str)
     error = Signal(str)
     temporizador_cambio = Signal(object)   # segundos restantes o None
@@ -655,6 +722,29 @@ class Reproductor(QObject):
 
     def _todos(self):
         return list(self.audio) + list(self.videos.values())
+
+    # ------------------------------------------------------------ calidad real y nivel (visualizador)
+
+    def _al_audio_real(self, m):
+        """Lee en el hilo de la interfaz qué audio decodifica mpv (se llama al cargar la canción).
+        Nada de esto corre en el hilo de eventos de mpv: leer o avisar desde ahí puede chocar con
+        el motor y tumbar la app."""
+        if getattr(m, "_cerrado", True):
+            return
+        if m is self.motor_actual() and not self._traspaso:
+            datos = m.info_audio()
+            if datos.get("codec") or datos.get("params"):
+                self.audio_real_cambio.emit(datos)
+
+    def activar_espectro(self, si):
+        """Pone o quita el medidor de nivel en los motores de audio (el visualizador lo pide al abrirse)."""
+        for m in self.audio:
+            m.fijar_espectro(si)
+
+    def nivel_audio(self):
+        """(RMS, pico) en dB de lo que suena ahora, o None (sin medidor, en pausa o sin motor)."""
+        m = self.motor_actual()
+        return m.nivel_audio() if m is not None and m in self.audio else None
 
     # ------------------------------------------------------------ sonido
 
@@ -1579,6 +1669,9 @@ class Reproductor(QObject):
         self.duracion_cambio.emit(self._duracion)
 
     def _al_cargar(self, m):
+        # el códec y la tasa reales, cuando mpv ya abrió el audio (una segunda mirada por si tarda)
+        for espera in (400, 1500):
+            QTimer.singleShot(espera, self, lambda m=m: self._al_audio_real(m))
         t = self._traspaso
         if t:
             if m is self.motor_actual():

@@ -141,7 +141,8 @@ class DialogoNuevoChat(QDialog):
                         f"QPushButton:hover{{background:{C['superficie2']};}}")
         h = QHBoxLayout(b)
         h.setContentsMargins(10, 6, 10, 6)
-        h.addWidget(Avatar(42, S.nombre_visible(p), C["acento"], p.get("foto_url"), marco=p.get("marco")))
+        h.addWidget(Avatar(42, S.nombre_visible(p), C["acento"], p.get("foto_url"), marco=p.get("marco"),
+                        persona_id=p.get("id")))
         col = QVBoxLayout()
         col.setSpacing(0)
         n = nombre_efecto(S.nombre_visible(p), "font-weight:700;", p.get("efecto_nombre"), False)
@@ -612,7 +613,8 @@ class PaginaMensajes(QWidget):
                         f"QPushButton:hover{{background:{C['superficie3'] if activo else C['superficie']};}}")
         h = QHBoxLayout(b)
         h.setContentsMargins(10, 6, 10, 6)
-        h.addWidget(Avatar(40, c["visible"] or "?", C["acento"], c.get("foto_url"), marco=c.get("marco")))
+        h.addWidget(Avatar(40, c["visible"] or "?", C["acento"], c.get("foto_url"), marco=c.get("marco"),
+                        persona_id=c.get("otro")))
         col = QVBoxLayout()
         col.setSpacing(0)
         n = QLabel(c["visible"])

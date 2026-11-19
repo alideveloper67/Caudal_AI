@@ -101,6 +101,8 @@ class Nube {
       'ese código no existe o la lista': 'Ese código no existe o la lista ya no se comparte. Revisa que esté bien escrito.',
       'no te puedes unir': 'No puedes unirte a esta lista.',
       'ya tiene 20 personas': 'Esta lista ya está llena (20 personas). Pídele a su dueño que haga lugar.',
+      // listas_colaboradores.sql subió el tope a 50 personas
+      'ya tiene 50 personas': 'Esta lista ya está llena (50 personas). Pídele a su dueño que haga lugar.',
       'esa lista no existe o no es tuya': 'Esa lista ya no existe o no es tuya. Si la acabas de crear, espera unos segundos a que se envíe y vuelve a probar.',
       'no tienes acceso a esa lista': 'Ya no tienes acceso a esa lista. Puede que su dueño haya dejado de compartirla.',
       'solo puedes escuchar': 'En esta lista solo puedes escuchar: no puedes añadir ni quitar canciones.',

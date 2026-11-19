@@ -6,6 +6,7 @@ import '../../nucleo/nube.dart';
 import '../../nucleo/social.dart';
 import '../comunes.dart';
 import '../plataforma.dart';
+import '../cumpleanos.dart';
 import '../premium/marcos.dart';
 import '../servicios.dart';
 import '../tema.dart';
@@ -37,7 +38,10 @@ String textoSinConexion(BuildContext context) =>
 /// Con [marco] (un donador) lleva un aro de color; el tamaño total no cambia.
 class AvatarPerfil extends StatelessWidget {
   const AvatarPerfil({super.key, required this.nombre, this.fotoUrl = '', this.color, this.radio = 24, this.marca,
-      this.marco = 'ninguno', this.animar = false});
+      this.marco = 'ninguno', this.animar = false, this.userId});
+
+  /// Si esta persona cumple hoy, lleva gorrito de fiesta.
+  final String? userId;
 
   final String nombre;
   final String fotoUrl;
@@ -52,7 +56,9 @@ class AvatarPerfil extends StatelessWidget {
   final Object? marca;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ConGorro(radio: radio, userId: userId, child: _avatar(context));
+
+  Widget _avatar(BuildContext context) {
     if (!AvatarMarco.tiene(marco)) return _foto(context, radio);
     return AvatarMarco(
       marco: marco,

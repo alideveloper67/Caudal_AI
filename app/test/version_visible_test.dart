@@ -309,10 +309,10 @@ void main() {
     const titulo = 'ACTUALIZACIÓN GRANDE DE CAUDAL';
 
     testWidgets('sale una sola vez por version y se guarda la vista', (t) async {
-      await _montar(t, const Size(360, 640), version: '2.5.0');
+      await _montar(t, const Size(360, 640), version: '2.6.0');
       await t.pump(const Duration(seconds: 3));
       expect(find.text(titulo), findsOneWidget);
-      expect((await SharedPreferences.getInstance()).getString(claveNovedadesVistas), '2.5.0');
+      expect((await SharedPreferences.getInstance()).getString(claveNovedadesVistas), '2.6.0');
 
       await t.tap(find.text('Saltar'));
       await t.pump();
@@ -322,25 +322,25 @@ void main() {
     });
 
     testWidgets('si ya se vio esa version no vuelve a salir', (t) async {
-      await _montar(t, const Size(360, 640), version: '2.5.0', prefs: {claveNovedadesVistas: '2.5.0'});
+      await _montar(t, const Size(360, 640), version: '2.6.0', prefs: {claveNovedadesVistas: '2.6.0'});
       await t.pump(const Duration(seconds: 3));
       expect(find.text(titulo), findsNothing);
     });
 
     testWidgets('un parche de la misma edicion tampoco lo repite', (t) async {
-      await _montar(t, const Size(360, 640), version: '2.5.1', prefs: {claveNovedadesVistas: '2.5.0'});
+      await _montar(t, const Size(360, 640), version: '2.6.1', prefs: {claveNovedadesVistas: '2.6.0'});
       await t.pump(const Duration(seconds: 3));
       expect(find.text(titulo), findsNothing);
     });
 
     testWidgets('una version anterior a la edicion no lo muestra', (t) async {
-      await _montar(t, const Size(360, 640), version: '2.4.9');
+      await _montar(t, const Size(360, 640), version: '2.5.9');
       await t.pump(const Duration(seconds: 3));
       expect(find.text(titulo), findsNothing);
     });
 
     testWidgets('no interrumpe la musica: sigue sonando debajo', (t) async {
-      final s = await _montar(t, const Size(360, 640), version: '2.5.0');
+      final s = await _montar(t, const Size(360, 640), version: '2.6.0');
       await t.pump(const Duration(seconds: 3));
       expect(find.text(titulo), findsOneWidget);
       expect(s.reproductor.estado, EstadoRepro.sonando);

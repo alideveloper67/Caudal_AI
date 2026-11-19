@@ -138,7 +138,7 @@ class PaginaPerfil(Pagina):
         v.addLayout(fila_acc)
         v.addStretch(1)
         av = PC.Avatar(148, S.nombre_visible(p), color, p["foto_url"], anillo=C["panel"], padre=cont,
-                       animar=True, marco=marco, marco_siempre=True)
+                       animar=True, marco=marco, marco_siempre=True, persona_id=p.get("id"))
         av.move(26, alto_fondo - 78)
         av.raise_()
         return cont

@@ -232,8 +232,9 @@ class Avatar(QWidget):
     """Foto redonda de una persona; sin foto, su inicial sobre el color del perfil."""
 
     def __init__(self, lado=48, nombre="", color=None, foto_url=None, anillo=None, padre=None, animar=False,
-                 marco=None, marco_siempre=False):
+                 marco=None, marco_siempre=False, persona_id=None):
         super().__init__(padre)
+        self.persona_id = persona_id           # si esa persona cumple hoy, lleva gorrito de fiesta
         self.animar = animar          # un GIF se anima solo donde se pide (perfil, editor); en listas, 1.er cuadro
         self.marco = marco_valido(marco)       # marco premium alrededor de la foto (animado, ver premium_estilos)
         self.siempre = bool(marco_siempre)     # el marco se anima aunque haya muchos avatares a la vista
@@ -247,6 +248,9 @@ class Avatar(QWidget):
         self.pm = None
         self.setFixedSize(lado, lado)
         self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        if persona_id:
+            from ... import cumpleanos as _cu
+            _cu.ESTADO.cambiado.connect(self.update)
         self.set_foto(foto_url)
 
     def _margen(self):
@@ -327,7 +331,17 @@ class Avatar(QWidget):
             self.pm = imagenes.pedir(url, interior, interior, "redonda", 0, listo)
         self.update()
 
-    def paintEvent(self, _e):
+    def paintEvent(self, e):
+        self._pintar_foto(e)
+        if self.persona_id:
+            from ... import cumpleanos as _cu
+            if _cu.ESTADO.es_de(self.persona_id):
+                from ..cumpleanos_ui import pintar_gorro_en_avatar
+                p = QPainter(self)
+                pintar_gorro_en_avatar(p, self.lado)
+                p.end()
+
+    def _pintar_foto(self, _e):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
         margen = self._margen()

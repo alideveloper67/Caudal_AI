@@ -16,7 +16,7 @@ class NovedadItem {
   final Color color;
 }
 
-/// Lo que trae la segunda actualizacion grande (Android 2.3.0), una tarjeta por
+/// Lo que trae la quinta actualizacion grande (2.6.0), una tarjeta por
 /// diapositiva (sin la portada ni el final). Es lo que muestra el aviso previo
 /// a actualizar; la presentacion usa las diapositivas completas.
 final List<NovedadItem> novedadesDeEstaEdicion = [
@@ -24,7 +24,7 @@ final List<NovedadItem> novedadesDeEstaEdicion = [
 ];
 
 const _titulo = 'La nueva actualización grande de Caudal';
-const _subtitulo = 'Modo gamer, tu personaje cobra vida, listas que se enriquecen y regalos para tus amigos';
+const _subtitulo = 'Tu reproductor, tu perfil y tus celebraciones';
 
 /// La actualizacion grande de Caudal. Dos usos:
 ///  * sin [actualizacion]: la presentacion a pantalla completa

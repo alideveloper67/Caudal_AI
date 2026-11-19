@@ -10,6 +10,7 @@ import '../../nucleo/gif_perfil.dart';
 import '../../nucleo/nube.dart';
 import '../../nucleo/social.dart';
 import '../comunes.dart';
+import '../../nucleo/cumpleanos.dart';
 import '../../nucleo/premium.dart';
 import '../premium/marcos.dart';
 import '../premium/personalizar_pagina.dart';
@@ -516,7 +517,7 @@ class _PerfilEditarPaginaState extends State<PerfilEditarPagina> {
               child: _fotoNueva != null
                   ? ClipOval(child: Image.memory(_fotoNueva!, width: 104, height: 104, fit: BoxFit.cover))
                   : AvatarPerfil(nombre: _nombre.text.isEmpty ? p.nombre : _nombre.text, fotoUrl: p.fotoUrl, color: color, radio: 52,
-                      marco: Premium.i.marcoEfectivo),
+                      marco: Premium.i.marcoEfectivo, userId: Cumpleanos.i.miId),
             ),
             Container(
               padding: const EdgeInsets.all(8),

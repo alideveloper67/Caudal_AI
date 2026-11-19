@@ -15,6 +15,7 @@ import 'perfil_editar_pagina.dart';
 import 'perfil_listas.dart';
 import '../../nucleo/premium.dart';
 import '../premium/marcos.dart';
+import '../premium/portada_perfil_ui.dart';
 
 /// El perfil de una persona. Sin [usuario] abre el perfil propio (con el
 /// botón para editarlo); con un usuario, el de esa persona (con amistad,
@@ -270,6 +271,10 @@ class _PerfilPaginaState extends State<PerfilPagina> {
         marca: _marcaFoto,
         acciones: _acciones(p, propio),
       ),
+      // portada de donadores: la ve la propia persona y sus amigos (si no hay nada, no ocupa lugar)
+      if (!p.privado || p.esMio)
+        PortadaDePerfil(
+            usuario: p.usuario, propia: propio, esAmiga: p.relacion == Relacion.amigo, color: color, social: _social),
       if (p.privado) _Privado(perfil: p, color: color),
       if (!p.privado) ...[
         if (!propio && p.afinidad != null) _Afinidad(valor: p.afinidad!, nombre: p.visible, color: color),
@@ -405,7 +410,7 @@ class _Cabecera extends StatelessWidget {
                   ),
                   child: AvatarPerfil(
                       nombre: p.visible, fotoUrl: p.fotoUrl, color: color, radio: 54, marca: marca,
-                      marco: marco, animar: true),
+                      marco: marco, animar: true, userId: p.id),
                 );
               },
             ),

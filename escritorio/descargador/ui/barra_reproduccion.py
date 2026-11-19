@@ -2,6 +2,7 @@
 """La barra de abajo: lo que suena, los controles y el volumen."""
 
 from PySide6.QtCore import QPoint, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QLinearGradient, QPainter
 from PySide6.QtWidgets import (QHBoxLayout, QLabel, QMenu, QPushButton, QVBoxLayout, QWidget,
                                QFrame)
 
@@ -39,6 +40,8 @@ class BarraReproduccion(QFrame):
     pidio_vinilo = Signal()           # el modo vinilo a pantalla completa
     pidio_mini = Signal()
     pidio_ecualizador = Signal()
+    pidio_visualizador = Signal(str)  # ondas | particulas | barras (a pantalla completa, donadores)
+    pidio_karaoke = Signal()          # karaoke y letras a pantalla completa (donadores)
 
     def __init__(self, ctx, padre=None):
         super().__init__(padre)
@@ -148,6 +151,9 @@ class BarraReproduccion(QFrame):
         self.bt_video = BotonIcono("video", 18, "Ver el video", 32)
         self.bt_video.clicked.connect(self._video)
         der.addWidget(self.bt_video)
+        self.bt_visual = BotonIcono("visualizador", 18, "Visualizador y karaoke", 32)
+        self.bt_visual.clicked.connect(self._menu_visual)
+        der.addWidget(self.bt_visual)
         self.bt_vinilo = BotonIcono("disco", 18, "Modo vinilo", 32)
         self.bt_vinilo.clicked.connect(self.pidio_vinilo.emit)
         der.addWidget(self.bt_vinilo)
@@ -198,6 +204,14 @@ class BarraReproduccion(QFrame):
         self._pintar_modos()
         self._pintar_super()
         ctx.sonido_cambio.connect(self._pintar_super)
+        # colores que siguen la carátula (donadores), insignia de calidad real y sonidos de interfaz
+        from ..paleta_caratula import colores_de
+        from ..sonidos_ui import instalar
+        self._colores = colores_de(ctx)
+        self._colores.cambio.connect(self._pintar_colores)
+        if hasattr(self.r, "audio_real_cambio"):     # un reproductor sin ese aviso (simulado) no rompe la barra
+            self.r.audio_real_cambio.connect(self._audio_real)
+        instalar(ctx)
         self._pista(None)
 
     # ------------------------------------------------------------ eventos del motor
@@ -270,6 +284,25 @@ class BarraReproduccion(QFrame):
         self.et_calidad.setToolTip(ayuda)
         self.et_calidad.setVisible(bool(texto))
         self.et_descargado.setVisible(bool(info.get("local")))
+        if not info.get("alto"):
+            self._pedir_audio_real()
+
+    def _audio_real(self, datos):
+        """Códec y tasa del audio que el motor decodifica de verdad (reemplaza lo que decía la plataforma)."""
+        from .. import calidad_real
+        if self.r.modo != "audio" or self.r.actual is None:
+            return
+        texto = calidad_real.etiqueta(datos)
+        if texto:
+            self.et_calidad.setText(texto)
+            self.et_calidad.setToolTip(calidad_real.ayuda(datos))
+            self.et_calidad.show()
+
+    def _pedir_audio_real(self):
+        m = getattr(self.r, "motor_actual", lambda: None)()
+        f = getattr(m, "info_audio", None)
+        if f is not None:
+            self._audio_real(f())
 
     def _modo(self, modo):
         self.bt_video.set_activo(modo == "video", punto=True)
@@ -431,6 +464,48 @@ class BarraReproduccion(QFrame):
         s = g.sala
         self.bt_juntos.set_activo(s is not None)
         self.bt_juntos.setToolTip(f"Escuchar juntos · sala {s.codigo}" if s else "Escuchar juntos")
+
+    def _menu_visual(self):
+        from .visualizador import ESTILOS
+        g = getattr(self.ctx, "premium", None)
+        candado = "" if g is not None and g.premium else "🔒 "
+        menu = QMenu(self)
+        for clave, nombre in ESTILOS.items():
+            menu.addAction(f"{candado}Visualizador · {nombre}", lambda k=clave: self.pidio_visualizador.emit(k))
+        menu.addSeparator()
+        menu.addAction(f"{candado}Karaoke a pantalla completa", self.pidio_karaoke.emit)
+        if candado:
+            menu.addSeparator()
+            aviso = menu.addAction("Exclusivo para donadores")
+            aviso.setEnabled(False)
+        menu.exec(self.bt_visual.mapToGlobal(QPoint(0, -menu.sizeHint().height() - 6)))
+
+    # ------------------------------------------------------------ colores de la carátula
+
+    def _pintar_colores(self):
+        """Un paso de la transición: el relleno del progreso y el tinte de la barra siguen a la carátula."""
+        f = self._colores.fuerza
+        if f > 0.02:
+            c = self._colores.colores()[2]
+            self.barra.color_relleno = QColor(c).lighter(115)
+        else:
+            self.barra.color_relleno = None
+        self.barra.update()
+        self.update()
+
+    def paintEvent(self, e):
+        super().paintEvent(e)
+        f = self._colores.fuerza
+        if f <= 0.02:
+            return
+        a, b, c = [QColor(h) for h in self._colores.hex_actuales()]
+        g = QLinearGradient(0, 0, self.width(), 0)
+        for pos, col in ((0.0, a), (0.55, b), (1.0, c)):
+            col.setAlphaF(0.30 * f)
+            g.setColorAt(pos, col)
+        p = QPainter(self)
+        p.fillRect(self.rect(), g)
+        p.end()
 
     def marcar_panel(self, nombre):
         self.bt_letras.set_activo(nombre == "letras")

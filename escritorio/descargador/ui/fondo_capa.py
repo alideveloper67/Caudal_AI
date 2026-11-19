@@ -228,6 +228,8 @@ class PersonajeEsquina(QWidget):
             self._sonando = getattr(reproductor, "estado", "") == "sonando"
             self._tomar_posicion()
             self._leer_ritmo()
+        from ..cumpleanos import ESTADO as _cumple
+        _cumple.cambiado.connect(self.update)      # el gorrito de cumpleaños aparece / se va solo
         self.hide()
 
     # ---------------------------------------------------------------- ajustes
@@ -516,6 +518,11 @@ class PersonajeEsquina(QWidget):
         # agrandar pixel art: sin suavizado (nítido); se suaviza si hay que achicarlo o si gira
         p.setRenderHint(QPainter.SmoothPixmapTransform, self.pm.height() > h or self._amp > 0)
         p.drawPixmap(QRectF(x, y, w, h), self.pm, QRectF(self.pm.rect()))
+        from ..cumpleanos import ESTADO as _cumple
+        if _cumple.es_mio_hoy:
+            # cumpleaños: gorrito de fiesta sobre el personaje (baila con él)
+            from .cumpleanos_ui import pintar_gorro
+            pintar_gorro(p, x + w * 0.52, y + h * 0.1, w * 0.3)
         p.restore()
         p.end()
 

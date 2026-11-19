@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""La cuarta «Actualización grande de Caudal» (2.6): una presentación a pantalla completa.
+"""La quinta «Actualización grande de Caudal» (2.7): una presentación a pantalla completa.
 
 Siete diapositivas con fondo de aurora animado, una ilustración propia por
 diapositiva (todo dibujado con QPainter, sin imágenes) y una transición de
@@ -20,7 +20,8 @@ from PySide6.QtWidgets import QApplication, QDialog, QPushButton
 from .. import version as _version
 from . import ilustraciones_grandes as I
 from . import ilustraciones_v4  # noqa: F401  (ilustraciones de la edición anterior)
-from . import ilustraciones_v5  # noqa: F401  (registra las ilustraciones de esta edición)
+from . import ilustraciones_v5  # noqa: F401  (ilustraciones de la edición anterior)
+from . import ilustraciones_v6  # noqa: F401  (registra las ilustraciones de esta edición)
 from .componentes import fuente
 from .estilos import C
 
@@ -28,24 +29,25 @@ TITULO = "ACTUALIZACIÓN GRANDE DE CAUDAL"
 
 # clave de la ilustración, etiqueta, título, texto
 DIAPOSITIVAS = [
-    dict(clave="v5_portada", etiqueta="EDICIÓN 2.6", titulo=TITULO,
-         texto="Modo gamer, tu personaje cobra vida y regalos para tus amigos. Esto es lo nuevo.", centrada=True,
+    dict(clave="v6_portada", etiqueta="EDICIÓN 2.7", titulo=TITULO,
+         texto="Visualizador a pantalla completa, modo karaoke y celebraciones. Esto es lo nuevo.", centrada=True,
          tono=0),
-    dict(clave="gamer", etiqueta="MODO GAMER", titulo="Caudal se une a tu partida",
-         texto="Un mini reproductor flotante encima del juego, atajos globales de teclado, ahorro automático al "
-               "jugar a pantalla completa, sonido por tipo de juego y la música baja cuando hablas.", tono=40),
-    dict(clave="nivel", etiqueta="PROGRESO", titulo="Nivel, misiones y racha",
-         texto="Sube de nivel, cumple misiones y mantén tu racha. Listas por situación (Lobby, Concentración, "
-               "Clutch, Victoria y Derrota) y un tema RGB neón.", tono=-30),
-    dict(clave="ahora_suena", etiqueta="PARA STREAMERS", titulo="«Ahora suena» para OBS",
-         texto="Muestra en tu directo la canción que suena. Ojo: la música de YouTube no se puede usar en "
-               "directos por derechos de autor.", tono=70),
-    dict(clave="personaje", etiqueta="TU PERSONAJE", titulo="Tu personaje cobra vida",
-         texto="Arrástralo con el ratón a donde quieras y baila suave al ritmo de la música. Con doble clic "
-               "vuelve a su esquina.", tono=-14),
-    dict(clave="regalo", etiqueta="DONADORES", titulo="Regala una prueba",
-         texto="Genera códigos para que tus amigos prueben 7 días los beneficios de donador.", tono=34),
-    dict(clave="v5_final", etiqueta="GRACIAS", titulo="Gracias por escuchar con Caudal",
+    dict(clave="v6_visualizador", etiqueta="DONADORES", titulo="Tu música a pantalla completa",
+         texto="Un visualizador con tres estilos, Ondas, Partículas y Barras, que siguen tu música al ritmo "
+               "de cada canción.", tono=40),
+    dict(clave="v6_karaoke", etiqueta="DONADORES", titulo="Modo karaoke",
+         texto="La letra gigante se va llenando fila por fila mientras suena la canción, y tu mascota canta "
+               "contigo.", tono=-30),
+    dict(clave="v6_colores", etiqueta="A TU MEDIDA", titulo="Colores, sonidos y calidad real",
+         texto="Los colores siguen la carátula y la interfaz suena al tocarla (donadores). Además, una insignia "
+               "te dice la calidad real del audio (todos).", tono=70),
+    dict(clave="v6_cumple", etiqueta="CELEBRACIONES", titulo="¡Feliz cumpleaños!",
+         texto="El día de tu cumple, confeti y gorrito para tu mascota. Y tus amigos lo saben para saludarte.",
+         tono=-14),
+    dict(clave="v6_semana", etiqueta="DONADORES", titulo="Tu semana y «¿Qué canción era?»",
+         texto="Tu semana en una tarjeta para compartir y un buscador para volver a esa canción que no "
+               "recuerdas.", tono=34),
+    dict(clave="v6_final", etiqueta="GRACIAS", titulo="Gracias por escuchar con Caudal",
          texto="Todo esto es para ti. Disfruta lo nuevo.", centrada=True, tono=8),
 ]
 

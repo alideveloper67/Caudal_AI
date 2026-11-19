@@ -291,6 +291,10 @@ class Catalogo {
 
   static http.Client get _http => _clienteHttp ??= http.Client();
 
+  /// Para las pruebas: otro cliente HTTP (null vuelve al de siempre).
+  @visibleForTesting
+  static set clientePruebas(http.Client? c) => _clienteHttp = c;
+
   static String _fechaVersion() {
     final h = DateTime.now().toUtc();
     String dos(int n) => n.toString().padLeft(2, '0');
@@ -1996,7 +2000,7 @@ class Catalogo {
   /// falla es una emisora (la «radio del artista»), se arma con su primera
   /// canción o, como último recurso, con las canciones de la propia lista.
   static Future<Map<String, dynamic>> radio(
-      {String? videoId, String? playlistId, int limite = 50}) async {
+      {String? videoId, String? playlistId, int limite = 50, String respaldo = ''}) async {
     final conVideo = videoId != null && videoId.isNotEmpty;
     final conLista = playlistId != null && playlistId.isNotEmpty;
     final soloVideo = conVideo && !conLista;
@@ -2055,7 +2059,23 @@ class Catalogo {
         ultimo ??= CatalogoError('$e');
       }
     }
-    throw CatalogoError('No se pudo crear la radio: ${ultimo?.mensaje ?? 'YouTube Music no devolvió canciones'}');
+    // 4) último recurso: YouTube no quiso armar la cola a esta conexión (pasa con ciertas redes),
+    // pero sí deja buscar: canciones de ese artista o de ese nombre, para que la radio suene igual
+    final q = respaldo.trim();
+    if (q.isNotEmpty) {
+      try {
+        final r = await buscar(q, filtro: 'canciones', limite: limite < 30 ? limite : 30);
+        final pistas = [
+          for (final p in r)
+            if ('${p['video_id'] ?? ''}'.isNotEmpty && p['video_id'] != videoId) p
+        ];
+        if (pistas.isNotEmpty) {
+          return {'pistas': pistas.take(limite).toList(), 'letras_id': '', 'relacionados_id': ''};
+        }
+      } catch (_) {/* se avisa con el fallo de antes */}
+    }
+    if (ultimo != null && _fallaPorRed(ultimo!.mensaje)) throw ultimo!;
+    throw CatalogoError('YouTube Music no quiso armar esta radio ahora. Inténtalo de nuevo en un momento.');
   }
 
   /// Secciones "Relacionado" de una cancion (para el panel lateral).

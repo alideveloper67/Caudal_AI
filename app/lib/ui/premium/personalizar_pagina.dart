@@ -8,6 +8,7 @@ import '../paginas/donar.dart';
 import '../paginas/perfil_comun.dart';
 import '../servicios.dart';
 import '../tema.dart';
+import 'atajos_donador.dart';
 import 'canje_pase.dart';
 import 'marcos.dart';
 import 'regalo_pases.dart';
@@ -140,6 +141,8 @@ class _PersonalizarPaginaState extends State<PersonalizarPagina> {
             const SizedBox(height: Esp.xl),
             _titulo('Tema de color'),
             _opciones([for (final c in Cosmeticos.temas) _tileTema(c, activo)]),
+            const SizedBox(height: Esp.xl),
+            const AtajosDonador(),
             if (PasesRegalo.puedeRegalar(e)) ...[
               const SizedBox(height: Esp.xl),
               const TarjetaRegalo(),

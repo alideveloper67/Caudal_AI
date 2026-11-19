@@ -24,7 +24,8 @@ from .panel_lateral import PanelLateral
 EXT_AUDIO = {".mp3", ".m4a", ".opus", ".ogg", ".flac", ".wav", ".aac", ".wma", ".webm"}
 EXT_VIDEO = {".mp4", ".mkv", ".mov", ".avi", ".webm", ".m4v", ".wmv", ".flv", ".ts"}
 
-SINGLETONS = ("descargas", "video", "letra", "vinilo")
+SINGLETONS = ("descargas", "video", "letra", "vinilo", "visualizador", "karaoke")
+VISTAS_GRANDES = ("visualizador", "karaoke")      # a pantalla completa, para donadores
 
 
 class _Teclas(QObject):
@@ -190,6 +191,9 @@ class Ventana(QWidget):
         self._t_regalo.timeout.connect(self._avisar_regalo)
         self.premium.cambiado.connect(lambda: self._t_regalo.start(3000))
         self._t_regalo.start(5000)
+        # «Feliz cumpleaños»: mi fecha y los amigos que cumplen hoy; mi día, la celebración (una vez al día)
+        self._celebracion = None
+        QTimer.singleShot(2000, self._iniciar_cumple)
         QTimer.singleShot(1500, self.fondo.sincronizar)
         QTimer.singleShot(6000, lambda: self.buscar_version(True))
         QTimer.singleShot(9000, self._buscar_avisos)
@@ -463,6 +467,14 @@ class Ventana(QWidget):
             from .vinilo import PaginaVinilo
             w = PaginaVinilo(self.ctx)
             w.volver.connect(self.cerrar_vinilo)
+        elif pag == "visualizador":
+            from .visualizador import PaginaVisualizador
+            w = PaginaVisualizador(self.ctx)
+            w.volver.connect(self.cerrar_vista_grande)
+        elif pag == "karaoke":
+            from .karaoke import PaginaKaraoke
+            w = PaginaKaraoke(self.ctx)
+            w.volver.connect(self.cerrar_vista_grande)
         elif pag == "estudio":
             from .paginas.estudio import PaginaEstudio
             w = PaginaEstudio(self.ctx)
@@ -576,6 +588,7 @@ class Ventana(QWidget):
         self.bt_ajustes.set_activo(pag == "ajustes", punto=False)
         if hasattr(self, "barra") and hasattr(self, "panel_der"):
             self.barra.bt_vinilo.set_activo(pag == "vinilo", punto=False)
+            self.barra.bt_visual.set_activo(pag in VISTAS_GRANDES, punto=False)
             self.barra.bt_letras.set_activo(pag == "letra" or (
                 self.panel_der.isVisible() and self.panel_der.actual == "letras"))
         titulo = getattr(w, "titulo", "") or ""
@@ -672,6 +685,8 @@ class Ventana(QWidget):
         self.barra.pidio_letra.connect(self.alternar_letra)
         self.barra.pidio_video.connect(self._ver_video)
         self.barra.pidio_vinilo.connect(self.alternar_vinilo)
+        self.barra.pidio_visualizador.connect(self.abrir_visualizador)
+        self.barra.pidio_karaoke.connect(self.abrir_karaoke)
         self.r.estado_cambio.connect(self._vinilo_auto)
         self.barra.pidio_mini.connect(self.alternar_mini)
         self.barra.pidio_ecualizador.connect(self.abrir_ecualizador)
@@ -718,11 +733,14 @@ class Ventana(QWidget):
         atajo("Ctrl+D", lambda: self.navegar({"pagina": "descargas"}))
         atajo("Ctrl+,", lambda: self.navegar({"pagina": "ajustes"}))
         atajo("Ctrl+Shift+L", self.alternar_letra)
+        atajo("Ctrl+Shift+V", lambda: self.abrir_visualizador())
+        atajo("Ctrl+Shift+K", self.abrir_karaoke)
         atajo("Ctrl+Shift+Q", lambda: self.alternar_panel("cola"))
         atajo("Ctrl+M", self.alternar_mini)
         atajo("F11", self.alternar_completa)
         atajo("Escape", lambda: self.en_completa and self.alternar_completa()
               or self._escape_estudio()
+              or self._en_vista_grande() and self.cerrar_vista_grande()
               or self._en_vinilo() and self.cerrar_vinilo())
         atajo("Ctrl+Shift+A", self._anadir_sonando_a_lista)
         atajo("Ctrl+Shift+E", self.abrir_estudio)
@@ -834,6 +852,56 @@ class Ventana(QWidget):
         else:
             self.navegar({"pagina": "inicio"})
 
+    # ------------------------------------------------------------ visualizador y karaoke (donadores)
+
+    def _en_vista_grande(self):
+        actual = self.historia[self.indice][0] if 0 <= self.indice < len(self.historia) else {}
+        return actual.get("pagina") in VISTAS_GRANDES
+
+    def _pedir_donador(self):
+        """True si la cuenta es de donador; si no, abre «Donar aquí» y devuelve False."""
+        g = getattr(self.ctx, "premium", None)
+        if g is not None and g.premium:
+            return True
+        from .donar import abrir_donar
+        abrir_donar(self)
+        return False
+
+    def abrir_visualizador(self, estilo=None):
+        """El visualizador a pantalla completa (Ondas, Partículas o Barras); si ya está abierto, cambia de estilo."""
+        if not self._pedir_donador():
+            return
+        if self.r.actual is None:
+            self.aviso.mostrar("Pon algo a sonar para ver el visualizador")
+            return
+        if estilo:
+            from .visualizador import estilo_valido
+            self.ajustes["visualizador_estilo"] = estilo_valido(estilo)
+            self.ajustes.guardar()
+            vista = self.singletons.get("visualizador")
+            if vista is not None:
+                vista.elegir_estilo(estilo)
+        if not self._en_vista_grande() or self.historia[self.indice][0].get("pagina") != "visualizador":
+            self.navegar({"pagina": "visualizador"})
+
+    def abrir_karaoke(self):
+        """El karaoke y las letras a pantalla completa."""
+        if not self._pedir_donador():
+            return
+        if self.r.actual is None:
+            self.aviso.mostrar("Pon algo a sonar para cantar")
+            return
+        if not self._en_vista_grande() or self.historia[self.indice][0].get("pagina") != "karaoke":
+            self.navegar({"pagina": "karaoke"})
+
+    def cerrar_vista_grande(self):
+        if self.en_completa:
+            self.alternar_completa()
+        if self.indice > 0:
+            self.atras()
+        else:
+            self.navegar({"pagina": "inicio"})
+
     def _vinilo_auto(self, estado):
         """Con «Mostrar el vinilo al reproducir», se abre al empezar cada cancion."""
         p = self.r.actual
@@ -880,9 +948,10 @@ class Ventana(QWidget):
     def alternar_completa(self):
         actual = self.historia[self.indice][0] if 0 <= self.indice < len(self.historia) else {}
         if not self.en_completa:
-            if self.r.modo != "video":
+            grande = actual.get("pagina") in VISTAS_GRANDES      # el visualizador y el karaoke también ocupan toda la pantalla
+            if self.r.modo != "video" and not grande:
                 return
-            if actual.get("pagina") != "video":
+            if actual.get("pagina") != "video" and not grande:
                 self.mostrar_video()
             self._antes_completa = (self.isMaximized(), self.panel_der.isVisible())
             self.en_completa = True
@@ -893,7 +962,7 @@ class Ventana(QWidget):
             self.centro.setStyleSheet("QFrame#panel_centro{border-radius:0;background:#000;}")
             self.showFullScreen()
             vista = self.singletons.get("video")
-            if vista:
+            if vista and not grande:
                 vista.modo_completa(True)
         else:
             self.en_completa = False
@@ -1144,6 +1213,39 @@ class Ventana(QWidget):
             return
         if self._aviso_regalo is not None:
             self._aviso_regalo.finished.connect(lambda _r=0: setattr(self, "_aviso_regalo", None))
+
+    def _iniciar_cumple(self):
+        """Lee mi fecha de nacimiento y los amigos que cumplen hoy (sin frenar el arranque)."""
+        from .. import cumpleanos
+        from ..hilos import en_segundo_plano
+        estado = cumpleanos.ESTADO
+        sesion = (getattr(self.ctx, "cuenta", None) or {}).get("sesion")
+        if sesion is None or not getattr(sesion, "access", ""):
+            return
+        if estado.mi_id and estado.mi_id != getattr(sesion, "user_id", ""):
+            estado.reiniciar()          # entró otra cuenta: nada de lo de la anterior
+
+        def listo(resultado):
+            estado.aplicar(sesion, resultado)
+            self._celebrar_cumple()
+
+        en_segundo_plano(estado.leer_de_la_nube, sesion, ok=listo, error=lambda _e: None, dueno=self)
+
+    def _celebrar_cumple(self):
+        """El día de mi cumpleaños, una sola vez: la pantalla de celebración (espera si hay otro aviso)."""
+        from .. import cumpleanos
+        estado = cumpleanos.ESTADO
+        if self._saliendo or self._celebracion is not None or not estado.toca_celebrar(self.ajustes):
+            return
+        if (self.en_completa or self._aviso_grande is not None or self._aviso_mascotas is not None
+                or self._aviso_regalo is not None):
+            QTimer.singleShot(20000, self._celebrar_cumple)
+            return
+        from .cumpleanos_ui import mostrar_celebracion
+        estado.marcar_celebrado(self.ajustes)       # antes de enseñarla: si la cierran, no vuelve a salir hoy
+        self._celebracion = mostrar_celebracion(self, self.ctx)
+        if self._celebracion is not None:
+            self._celebracion.cerrada.connect(lambda: setattr(self, "_celebracion", None))
 
     def ir_a_regalo(self):
         """Lleva a Ajustes, a la tarjeta «Regala una prueba a tus amigos»."""

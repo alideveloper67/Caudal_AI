@@ -1,4 +1,4 @@
-// La cuarta actualizacion grande (2.5.0): cuando toca ensenarla, que cada diapositiva
+// La quinta actualizacion grande (2.6.0): cuando toca ensenarla, que cada diapositiva
 // se vea bien en pantallas distintas, que se pueda recorrer (tactil, botones,
 // teclado), que se cierre con «Saltar» y «Empezar», y que la release marcada
 // [grande] use el aviso previo.
@@ -33,35 +33,35 @@ Future<void> _avanza(WidgetTester t, [int segundos = 1]) async {
 
 void main() {
   group('cuando toca ensenarlo', () {
-    test('la edicion es la 2.5.0', () => expect(edicionNovedades, '2.5.0'));
+    test('la edicion es la 2.6.0', () => expect(edicionNovedades, '2.6.0'));
 
-    test('quien ya vio la anterior (2.4.0) ve esta al pasar a la 2.5.0 o a un parche', () {
-      expect(tocaNovedades('2.4.0', '2.5.0'), isTrue);
-      expect(tocaNovedades('2.4.0', '2.5.1'), isTrue);
-      expect(tocaNovedades('2.4.4', '2.5.0'), isTrue);
+    test('quien ya vio la anterior (2.5.0) ve esta al pasar a la 2.6.0 o a un parche', () {
+      expect(tocaNovedades('2.5.0', '2.6.0'), isTrue);
+      expect(tocaNovedades('2.5.0', '2.6.1'), isTrue);
+      expect(tocaNovedades('2.5.4', '2.6.0'), isTrue);
     });
 
     test('la primera vez que se abre la edicion (o un parche suyo)', () {
-      expect(tocaNovedades(null, '2.5.0'), isTrue);
-      expect(tocaNovedades('', '2.5.0'), isTrue);
-      expect(tocaNovedades('2.1.3', '2.5.1'), isTrue);
-      expect(tocaNovedades('1.9.0', '2.6.0'), isTrue);
+      expect(tocaNovedades(null, '2.6.0'), isTrue);
+      expect(tocaNovedades('', '2.6.0'), isTrue);
+      expect(tocaNovedades('2.1.3', '2.6.1'), isTrue);
+      expect(tocaNovedades('1.9.0', '2.7.0'), isTrue);
     });
 
     test('una sola vez: si ya se vio no vuelve, ni con un parche', () {
-      expect(tocaNovedades('2.5.0', '2.5.0'), isFalse);
-      expect(tocaNovedades('2.5.0', '2.5.1'), isFalse);
-      expect(tocaNovedades('2.5.1', '2.5.4'), isFalse);
+      expect(tocaNovedades('2.6.0', '2.6.0'), isFalse);
+      expect(tocaNovedades('2.6.0', '2.6.1'), isFalse);
+      expect(tocaNovedades('2.6.1', '2.6.4'), isFalse);
     });
 
-    test('antes de la edicion no sale (la 2.4.x ya no ensena la anterior)', () {
-      expect(tocaNovedades(null, '2.4.4'), isFalse);
-      expect(tocaNovedades('2.4.0', '2.4.4'), isFalse);
-      expect(tocaNovedades('2.0.0', '2.3.9'), isFalse);
+    test('antes de la edicion no sale (la 2.5.x ya no ensena la anterior)', () {
+      expect(tocaNovedades(null, '2.5.4'), isFalse);
+      expect(tocaNovedades('2.5.0', '2.5.4'), isFalse);
+      expect(tocaNovedades('2.0.0', '2.4.9'), isFalse);
     });
 
     test('la version de la app es la de la edicion', () {
-      expect(versionApp, '2.5.0');
+      expect(versionApp, '2.6.0');
     });
   });
 
@@ -102,8 +102,8 @@ void main() {
   group('la presentacion', () {
     const tamanos = [Size(320, 568), Size(412, 915), Size(915, 412), Size(800, 1280), Size(1440, 900)];
 
-    test('tiene siete diapositivas y la portada lleva el titulo de la edicion', () {
-      expect(diapositivas.length, 7);
+    test('tiene nueve diapositivas y la portada lleva el titulo de la edicion', () {
+      expect(diapositivas.length, 9);
       expect(diapositivas.first.titulo, 'ACTUALIZACIÓN GRANDE DE CAUDAL');
       expect(diapositivas.last.titulo, 'Gracias por escuchar con Caudal');
     });
@@ -119,7 +119,7 @@ void main() {
     });
 
     for (final tam in tamanos) {
-      for (var i = 0; i < 7; i++) {
+      for (var i = 0; i < 9; i++) {
         testWidgets('diapositiva ${i + 1} sin desbordes en ${tam.width.toInt()}x${tam.height.toInt()}', (t) async {
           await _montar(t, tam, NovedadesGrandes(paginaInicial: i));
           // las ilustraciones no paran: el reloj se avanza a mano, varios segundos
@@ -136,7 +136,7 @@ void main() {
     }
 
     testWidgets('con la letra al 130 % no se desborda ninguna diapositiva en 320x568', (t) async {
-      for (var i = 0; i < 7; i++) {
+      for (var i = 0; i < 9; i++) {
         await _montar(t, const Size(320, 568), NovedadesGrandes(paginaInicial: i), texto: 1.3);
         await _avanza(t, 3);
         expect(find.text('Saltar'), findsOneWidget);
@@ -260,7 +260,7 @@ void main() {
       await _montar(t, const Size(360, 640), const NovedadesGrandes());
       await _avanza(t);
       expect(t.getSemantics(find.text('ACTUALIZACIÓN GRANDE DE CAUDAL')).flagsCollection.isHeader, isTrue);
-      expect(find.bySemanticsLabel(RegExp('Diapositiva 1 de 7')), findsWidgets);
+      expect(find.bySemanticsLabel(RegExp('Diapositiva 1 de 9')), findsWidgets);
       expect(t.getSemantics(find.byTooltip('Siguiente')).flagsCollection.isButton, isTrue);
       expect(find.bySemanticsLabel('Saltar'), findsWidgets);
       semantica.dispose();
@@ -269,7 +269,7 @@ void main() {
 
   group('el aviso previo a actualizar ([grande])', () {
     const grande = Novedad(
-      version: '2.5.0', notas: '[grande]\nTambién arreglamos los colores del reproductor.',
+      version: '2.6.0', notas: '[grande]\nTambién arreglamos los colores del reproductor.',
       apk: 'https://ejemplo/Caudal.apk', pagina: 'https://ejemplo/release', peso: 1000);
 
     setUp(() => Plataforma.forzada = TargetPlatform.android);
@@ -290,11 +290,11 @@ void main() {
       expect(find.text('Actualizar ahora'), findsOneWidget);
       expect(find.text('Empezar'), findsNothing);
       expect(find.text('Más tarde'), findsOneWidget);
-      expect(find.text('Caudal 2.5.0 ya está lista'), findsOneWidget);
+      expect(find.text('Caudal 2.6.0 ya está lista'), findsOneWidget);
       for (final it in novedadesDeEstaEdicion) {
         expect(find.text(it.titular, skipOffstage: false), findsOneWidget, reason: it.titular);
       }
-      expect(novedadesDeEstaEdicion.length, 5);
+      expect(novedadesDeEstaEdicion.length, 7);
       expect(find.text('Y además', skipOffstage: false), findsOneWidget);
       expect(find.text('También arreglamos los colores del reproductor.', skipOffstage: false), findsOneWidget);
       expect(find.textContaining('[grande]', skipOffstage: false), findsNothing);

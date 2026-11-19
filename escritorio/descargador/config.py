@@ -144,6 +144,10 @@ DEFECTOS = {
     "letras_auto": False,            # abrir las letras al reproducir
     "vinilo_auto": False,            # abrir el modo vinilo al reproducir
     "vinilo_pantalla": True,         # el modo vinilo mantiene la pantalla encendida
+    "visualizador_estilo": "ondas",  # ondas | particulas | barras (donadores)
+    "colores_caratula": True,        # la barra y las vistas grandes toman los colores de la carátula (donadores)
+    "sonidos_ui": False,             # sonidito al dar me gusta y al abrir (donadores)
+    "sonido_ui_tipo": "burbuja",     # burbuja | moneda | campana
     "panel_derecho": "sonando",      # sonando | cola | letras | oculto
     "subtitulos_video": False,
     "teclas_multimedia": True,
@@ -160,6 +164,7 @@ DEFECTOS = {
     "mezcla_dj_graves": True,        # cambio de graves: los graves de una cancion ceden a los de la otra
     "version_novedades_vista": "",   # ultima version cuyo aviso de novedades grande ya se vio
     "presentacion_mascotas_vista": "",   # la presentacion de la 2.4.2 (mascotitas y fondos) ya se vio
+    "cumple_celebrado": "",          # el dia (aaaa-mm-dd) en que ya salio la pantalla de «Feliz cumpleaños»
 }
 
 
