@@ -10,6 +10,9 @@ import '../../nucleo/gif_perfil.dart';
 import '../../nucleo/nube.dart';
 import '../../nucleo/social.dart';
 import '../comunes.dart';
+import '../../nucleo/premium.dart';
+import '../premium/marcos.dart';
+import '../premium/personalizar_pagina.dart';
 import '../servicios.dart';
 import '../tema.dart';
 import 'donar.dart';
@@ -374,6 +377,23 @@ class _PerfilEditarPaginaState extends State<PerfilEditarPagina> {
           textInputAction: TextInputAction.done,
           onSubmitted: _agregarGenero,
         ),
+        _titulo('Marco y efecto del nombre'),
+        ListenableBuilder(
+          listenable: Premium.i,
+          builder: (context, _) => ListTile(
+            contentPadding: EdgeInsets.zero,
+            leading: Icon(Premium.i.activo ? Icons.auto_awesome_rounded : Icons.lock_outline_rounded,
+                color: Premium.i.activo ? const Color(0xFFFFC857) : C.texto3),
+            title: const Text('Personalizar'),
+            subtitle: Text(
+                Premium.i.activo
+                    ? 'Aro animado en tu foto y efecto en tu nombre · exclusivo'
+                    : 'Exclusivo para donadores · pruébalo ahí con la vista previa',
+                style: estiloSecundario),
+            trailing: const Icon(Icons.chevron_right_rounded, color: C.texto3),
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PersonalizarPagina())),
+          ),
+        ),
         _titulo('Color de tu perfil'),
         Wrap(spacing: 12, runSpacing: 12, children: [
           for (final c in coloresPerfil)
@@ -490,10 +510,13 @@ class _PerfilEditarPaginaState extends State<PerfilEditarPagina> {
           child: Stack(alignment: Alignment.bottomRight, children: [
             Container(
               padding: const EdgeInsets.all(4),
-              decoration: BoxDecoration(shape: BoxShape.circle, border: Border.all(color: color, width: 2.5)),
+              decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  border: AvatarMarco.tiene(Premium.i.marcoEfectivo) ? null : Border.all(color: color, width: 2.5)),
               child: _fotoNueva != null
                   ? ClipOval(child: Image.memory(_fotoNueva!, width: 104, height: 104, fit: BoxFit.cover))
-                  : AvatarPerfil(nombre: _nombre.text.isEmpty ? p.nombre : _nombre.text, fotoUrl: p.fotoUrl, color: color, radio: 52),
+                  : AvatarPerfil(nombre: _nombre.text.isEmpty ? p.nombre : _nombre.text, fotoUrl: p.fotoUrl, color: color, radio: 52,
+                      marco: Premium.i.marcoEfectivo),
             ),
             Container(
               padding: const EdgeInsets.all(8),

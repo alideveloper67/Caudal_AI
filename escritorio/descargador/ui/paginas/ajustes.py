@@ -111,6 +111,11 @@ class PaginaAjustes(Pagina):
         if gestor_mascota is not None:
             from ..mascotas_ajuste import SeccionMascotas
             self.cuerpo.addWidget(SeccionMascotas(gestor_mascota, self.lienzo))
+        # marco animado, efecto del nombre y tema de colores (donadores; el resto lo prueba con candado)
+        if getattr(ctx, "premium", None) is not None:
+            from ..personalizar_ajuste import SeccionPersonalizar
+            self.seccion_personalizar = SeccionPersonalizar(ctx)
+            self.cuerpo.addWidget(self.seccion_personalizar)
 
         # ---------------- reproduccion
         s = Seccion("Reproducción")
@@ -197,6 +202,12 @@ class PaginaAjustes(Pagina):
         s.fila("Igualar el volumen entre canciones", "Las canciones suaves y las fuertes suenan "
                                         "parecido, sin tocar los cambios de volumen de cada una.",
                self.normalizar)
+        self.modo_noche = _interruptor(a["modo_noche"])
+        self._conectar(self.modo_noche, "modo_noche", ctx.reproductor.aplicar_sonido)
+        s.fila("Modo noche", "Baja lo que suena fuerte y sube un poco lo suave, para escuchar de noche o para dormir sin sustos.", self.modo_noche)
+        self.envolvente = _interruptor(a["sonido_envolvente"])
+        self._conectar(self.envolvente, "sonido_envolvente", ctx.reproductor.aplicar_sonido)
+        s.fila("Sonido envolvente", "Abre el sonido para que suene más amplio, sobre todo con audífonos.", self.envolvente)
         from ...reproduccion import NOMBRES_SUPER_VOLUMEN
         self.super = _combo([(n, k) for k, n in NOMBRES_SUPER_VOLUMEN.items()],
                             int(a["super_volumen"] or 0), 200)
@@ -444,8 +455,19 @@ class PaginaAjustes(Pagina):
         s = Seccion("Apoya a Caudal")
         bt_donar = QPushButton("Donar con Yape")
         bt_donar.clicked.connect(lambda: abrir_donar(self))
-        s.fila("Donar a Caudal", "Caudal es gratis. Los donadores tienen fondo, GIF y mascotita "
-                                 "exclusivos.", bt_donar)
+        s.fila("Donar a Caudal", "Caudal es gratis. Los donadores tienen fondo, GIF, mascotita, marcos, "
+                                 "temas y tarjetas exclusivos.", bt_donar)
+        if getattr(ctx, "premium", None) is not None:
+            from ..anio_caudal import abrir_anio
+            from ..canje_pase import abrir_canje
+            bt_codigo = QPushButton("Canjear")
+            bt_codigo.clicked.connect(lambda: abrir_canje(ctx, self))
+            s.fila("Tengo un código de prueba", "Un amigo te pasó un código: 7 días de beneficios de donador.",
+                   bt_codigo)
+            bt_anio = QPushButton("Ver mi año")
+            bt_anio.clicked.connect(lambda: abrir_anio(ctx, self))
+            s.fila("Tu año en Caudal", "Un resumen en imagen de lo que escuchaste este año, para tus estados "
+                                       "(donadores).", bt_anio)
         self.cuerpo.addWidget(s)
 
         # ---------------- motor
@@ -518,6 +540,9 @@ class PaginaAjustes(Pagina):
             gestor.elegir(fondo)
 
     def _aplicar_aspecto(self):
+        premium = getattr(self.ctx, "premium", None)
+        if premium is not None:
+            premium.aspecto_elegido_a_mano()
         ventana = getattr(self.ctx, "ventana", None)
         if ventana is not None and hasattr(ventana, "reabrir_con_aspecto"):
             ventana.reabrir_con_aspecto()
@@ -633,25 +658,36 @@ class PaginaAjustes(Pagina):
             self.ctx.aviso.emit("Historial de escuchas borrado")
 
     def _pintar_motor(self):
-        try:
-            import yt_dlp
-            v_yt = yt_dlp.version.__version__
-        except Exception:
-            v_yt = "no disponible"
-        mod = mpv_carga.modulo()
-        if mod is not None:
+        # importar yt_dlp y buscar ffmpeg pesan (más en un equipo lento o con el disco frío):
+        # se hace en segundo plano para que Ajustes abra al instante
+        self.et_motor.setText("Leyendo el motor…")
+
+        def leer():
             try:
-                import locale
-                locale.setlocale(locale.LC_NUMERIC, "C")
-                m = self.ctx.reproductor.audio[0].mpv if self.ctx.reproductor.audio else None
-                v_mpv = m.mpv_version if m is not None else "cargado"
+                import yt_dlp
+                v_yt = yt_dlp.version.__version__
             except Exception:
-                v_mpv = "cargado"
-        else:
-            v_mpv = "NO ENCONTRADO: " + (mpv_carga.error() or "")
-        ff = ruta_ffmpeg()
-        self.et_motor.setText(f"yt-dlp {v_yt}\nReproductor: {v_mpv}\n"
-                              f"ffmpeg: {ff or 'NO ENCONTRADO'}")
+                v_yt = "no disponible"
+            return v_yt, ruta_ffmpeg()
+
+        def pintar(res):
+            v_yt, ff = res
+            mod = mpv_carga.modulo()
+            if mod is not None:
+                try:
+                    import locale
+                    locale.setlocale(locale.LC_NUMERIC, "C")
+                    m = self.ctx.reproductor.audio[0].mpv if self.ctx.reproductor.audio else None
+                    v_mpv = m.mpv_version if m is not None else "cargado"
+                except Exception:
+                    v_mpv = "cargado"
+            else:
+                v_mpv = "NO ENCONTRADO: " + (mpv_carga.error() or "")
+            self.et_motor.setText(f"yt-dlp {v_yt}\nReproductor: {v_mpv}\n"
+                                  f"ffmpeg: {ff or 'NO ENCONTRADO'}")
+
+        en_segundo_plano(leer, ok=pintar, error=lambda _e: self.et_motor.setText("Motor: no se pudo leer"),
+                         dueno=self)
 
     def _actualizar_motor(self):
         if getattr(sys, "frozen", False):

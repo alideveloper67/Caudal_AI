@@ -10,6 +10,7 @@ import '../../nucleo/tarjeta_lista.dart';
 import '../../nucleo/social.dart';
 import '../comunes.dart';
 import '../emojis.dart';
+import '../premium/marcos.dart';
 import '../servicios.dart';
 import '../tema.dart';
 import 'amigos_pagina.dart';
@@ -161,8 +162,9 @@ class _MensajesPaginaState extends State<MensajesPagina> {
                         final c = chats[i];
                         return ListTile(
                           contentPadding: const EdgeInsets.symmetric(horizontal: Esp.lado, vertical: 4),
-                          leading: AvatarPerfil(nombre: c.visible, fotoUrl: c.fotoUrl, radio: 24),
-                          title: Text(c.visible, style: TextStyle(fontWeight: c.sinLeer > 0 ? FontWeight.w900 : FontWeight.w700)),
+                          leading: AvatarPerfil(nombre: c.visible, fotoUrl: c.fotoUrl, marco: c.marco, radio: 24),
+                          title: NombreEfecto(c.visible, efecto: c.efectoNombre,
+                              estilo: TextStyle(fontWeight: c.sinLeer > 0 ? FontWeight.w900 : FontWeight.w700)),
                           subtitle: Text(c.vistaPrevia, maxLines: 1, overflow: TextOverflow.ellipsis,
                               style: TextStyle(color: c.sinLeer > 0 ? C.texto : C.texto2)),
                           trailing: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.end, children: [
@@ -316,7 +318,7 @@ class _DialogoNuevoChatState extends State<_DialogoNuevoChat> {
                                   final c = lista[i];
                                   return ListTile(
                                     contentPadding: EdgeInsets.zero,
-                                    leading: AvatarPerfil(nombre: c.visible, fotoUrl: c.fotoUrl, radio: 22),
+                                    leading: AvatarPerfil(nombre: c.visible, fotoUrl: c.fotoUrl, marco: c.marco, radio: 22),
                                     title: Text(c.visible, maxLines: 1, overflow: TextOverflow.ellipsis,
                                         style: const TextStyle(fontWeight: FontWeight.w700)),
                                     subtitle: Text('@${c.usuario}', style: estiloSecundario),
@@ -381,7 +383,7 @@ Future<ResumenChat?> elegirDestinoChat(BuildContext context) async {
         ),
         for (final c in chats)
           ListTile(
-            leading: AvatarPerfil(nombre: c.visible, fotoUrl: c.fotoUrl, radio: 20),
+            leading: AvatarPerfil(nombre: c.visible, fotoUrl: c.fotoUrl, marco: c.marco, radio: 20),
             title: Text(c.visible),
             subtitle: Text('@${c.usuario}', style: estiloSecundario),
             onTap: () => Navigator.pop(ctx, c),
@@ -649,13 +651,13 @@ class _ConversacionPaginaState extends State<ConversacionPagina> {
           InkWell(
             borderRadius: BorderRadius.circular(999),
             onTap: () => abrirPerfil(context, widget.chat.usuario),
-            child: AvatarPerfil(nombre: widget.chat.visible, fotoUrl: widget.chat.fotoUrl, radio: 17),
+            child: AvatarPerfil(nombre: widget.chat.visible, fotoUrl: widget.chat.fotoUrl, marco: widget.chat.marco, radio: 17),
           ),
           const SizedBox(width: 10),
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(widget.chat.visible, maxLines: 1, overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+              NombreEfecto(widget.chat.visible, efecto: widget.chat.efectoNombre,
+                  estilo: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
               Text('@${widget.chat.usuario}', style: estiloDetalle),
             ]),
           ),

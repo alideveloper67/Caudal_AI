@@ -217,3 +217,33 @@ def test_los_errores_quedan_en_fallos_log(tmp_path):
         assert "ZeroDivisionError" in texto and "prueba" in texto
     finally:
         sys.excepthook, threading.excepthook = antes_hook, antes_hilo
+
+
+def test_estilo_exclusivo_de_la_tarjeta_pide_donar_y_luego_se_usa_al_guardar(app, pagina, monkeypatch):
+    from descargador.ui import letra_viva as L
+    pag, ctx, carpeta = pagina
+    ctx.reproductor.posicion_cambio.emit(16.5)
+    bombear(app, 0.2)
+    abiertos = []
+    monkeypatch.setattr("descargador.ui.donar.abrir_donar", lambda padre=None: abiertos.append(1))
+    eleccion = {"i": 1}                                   # «Neón»
+    monkeypatch.setattr(L.PaginaLetra, "_mostrar_menu", lambda self, menu: menu.actions()[eleccion["i"]])
+    # sin ser donador: se abre «Donar aquí» y el estilo no cambia; guardar sigue siendo el clásico, de un clic
+    pag.bt_estilo.click()
+    assert abiertos == [1] and pag.estilo_tarjeta == "clasico"
+    # con beneficios: el estilo queda elegido, el botón lo dice y la imagen sale en ese estilo
+    class _Premium:
+        premium = True
+    ctx.premium = _Premium()
+    pag.bt_estilo.click()
+    assert pag.estilo_tarjeta == "neon" and "Neón" in pag.bt_estilo.text()
+    vistos = []
+    real = L.crear_tarjeta
+    monkeypatch.setattr(L, "crear_tarjeta", lambda *a, **k: (vistos.append(a[-1]), real(*a, **k))[1])
+    pag.bt_imagen.click()
+    assert vistos == ["neon"]
+    assert len([f for f in os.listdir(carpeta) if f.endswith(".png")]) == 1
+    # si se acaba la prueba, vuelve el clásico solo
+    ctx.premium.premium = False
+    pag.bt_imagen.click()
+    assert vistos == ["neon", "clasico"]

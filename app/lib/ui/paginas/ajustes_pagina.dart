@@ -16,6 +16,9 @@ import '../novedades_grandes.dart';
 import '../tema.dart';
 import '../../nucleo/fondo_app.dart';
 import '../../nucleo/mascota_app.dart';
+import '../../nucleo/premium.dart';
+import '../premium/canje_pase.dart';
+import '../premium/personalizar_pagina.dart';
 import 'mascota_pagina.dart';
 import 'aspecto_pagina.dart';
 import 'fondo_pagina.dart';
@@ -232,6 +235,16 @@ class _AjustesPaginaState extends State<AjustesPagina> {
         ),
 
         _seccion('Aspecto'),
+        SwitchListTile.adaptive(
+          secondary: Icon(Icons.speed_rounded, color: C.acento),
+          title: const Text('Modo ligero'),
+          subtitle: const Text(
+              'Quita animaciones y adornos y usa menos memoria, para que Caudal vaya fluido en equipos lentos. '
+              'El sonido y la calidad no cambian.',
+              style: estiloSecundario),
+          value: a.sino('modo_ligero'),
+          onChanged: (v) => _sino('modo_ligero', v),
+        ),
         ListTile(
           leading: Icon(Icons.palette_outlined, color: C.acento),
           title: const Text('Color y fondo de la app'),
@@ -293,6 +306,39 @@ class _AjustesPaginaState extends State<AjustesPagina> {
               trailing: const Icon(Icons.chevron_right_rounded, color: C.texto3),
               onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MascotaPagina())),
             );
+          },
+        ),
+
+        ListenableBuilder(
+          listenable: Premium.i,
+          builder: (context, _) {
+            final p = Premium.i;
+            final e = p.estado;
+            return Column(children: [
+              ListTile(
+                leading: Icon(p.activo ? Icons.auto_awesome_rounded : Icons.lock_outline_rounded,
+                    color: p.activo ? const Color(0xFFFFC857) : C.texto3),
+                title: const Text('Personalizar'),
+                subtitle: Text(
+                    p.activo
+                        ? (e.esPrueba && e.diasRestantes() != null
+                            ? textoPrueba(e.diasRestantes()!, e.vence)
+                            : 'Marco del avatar, efecto del nombre y temas de color · exclusivo')
+                        : 'Marcos, efectos y temas de color · exclusivo para donadores',
+                    style: estiloSecundario),
+                trailing: const Icon(Icons.chevron_right_rounded, color: C.texto3),
+                onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PersonalizarPagina())),
+              ),
+              if (!p.activo || e.esPrueba)
+                ListTile(
+                  dense: true,
+                  leading: const SizedBox(width: 24),
+                  title: const Text('Tengo un código de prueba'),
+                  trailing: const Icon(Icons.confirmation_number_outlined, size: 18, color: C.texto3),
+                  onTap: () => mostrarCanjePase(context),
+                ),
+              AvisoPrueba(alDonar: () => mostrarDonar(context)),
+            ]);
           },
         ),
 

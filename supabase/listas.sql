@@ -341,8 +341,9 @@ begin
     select count(*) into nuevas from public.candidatas_lista(p_lista, p_items);
     if nuevas = 0 then return 0; end if;
     select count(*) into existentes from public.lista_items where lista_id = p_lista;
-    if existentes + nuevas > 2000 then
-        raise exception 'Una lista compartida admite hasta 2000 canciones y esta ya tiene %.', existentes;
+    -- sin tope práctico para quien importa listas enormes: solo una guarda de cordura
+    if existentes + nuevas > 200000 then
+        raise exception 'Una lista compartida admite hasta 200000 canciones y esta ya tiene %.', existentes;
     end if;
 
     select coalesce(max(orden), 0) into base from public.lista_items where lista_id = p_lista;

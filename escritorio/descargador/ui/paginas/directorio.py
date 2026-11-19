@@ -13,6 +13,7 @@ from ...hilos import en_segundo_plano
 from .. import iconos
 from ..componentes import Esqueleto, Portada, SinResultados, suavizar
 from ..estilos import C
+from ..premium_estilos import nombre_efecto
 from . import perfil_comun as PC
 
 LOTE = 24
@@ -42,7 +43,8 @@ class TarjetaPerfil(QFrame):
         banda = PC.FondoPerfil(84, 15, True, 0.5, color, p.get("banner_url"))
         v.addWidget(banda)
         # la foto «sube» sobre la banda
-        self.avatar = PC.Avatar(72, S.nombre_visible(p), color, p["foto_url"], anillo=C["panel"], padre=self)
+        self.avatar = PC.Avatar(72, S.nombre_visible(p), color, p["foto_url"], anillo=C["panel"], padre=self,
+                                marco=p.get("marco"))
         self.avatar.move(16, 46)
         cuerpo = QVBoxLayout()
         cuerpo.setContentsMargins(16, 0, 16, 0)
@@ -51,7 +53,7 @@ class TarjetaPerfil(QFrame):
         notas = PC.notas_de(p, solo_principales=True)
         if notas:
             cuerpo.addWidget(notas[0], 0, Qt.AlignLeft)
-        n = PC.etiqueta(S.nombre_visible(p), "font-size:16px;font-weight:800;", False)
+        n = nombre_efecto(S.nombre_visible(p), "font-size:16px;font-weight:800;", p.get("efecto_nombre"), False)
         n.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
         cuerpo.addWidget(n)
         u = PC.etiqueta(f"@{p['usuario']}", f"color:{C['texto3']};font-size:12px;", False)

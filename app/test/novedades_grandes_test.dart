@@ -33,30 +33,30 @@ Future<void> _avanza(WidgetTester t, [int segundos = 1]) async {
 
 void main() {
   group('cuando toca ensenarlo', () {
-    test('la edicion es la 2.3.0', () => expect(edicionNovedades, '2.3.0'));
+    test('la edicion es la 2.4.0', () => expect(edicionNovedades, '2.4.0'));
 
-    test('quien ya vio la primera (2.2.0) ve esta al pasar a la 2.3.0 o a un parche', () {
-      expect(tocaNovedades('2.2.0', '2.3.0'), isTrue);
-      expect(tocaNovedades('2.2.0', '2.3.1'), isTrue);
-      expect(tocaNovedades('2.2.3', '2.3.0'), isTrue);
+    test('quien ya vio la anterior (2.3.0) ve esta al pasar a la 2.4.0 o a un parche', () {
+      expect(tocaNovedades('2.3.0', '2.4.0'), isTrue);
+      expect(tocaNovedades('2.3.0', '2.4.1'), isTrue);
+      expect(tocaNovedades('2.3.4', '2.4.0'), isTrue);
     });
 
     test('la primera vez que se abre la edicion (o un parche suyo)', () {
-      expect(tocaNovedades(null, '2.3.0'), isTrue);
-      expect(tocaNovedades('', '2.3.0'), isTrue);
-      expect(tocaNovedades('2.1.3', '2.3.1'), isTrue);
-      expect(tocaNovedades('1.9.0', '2.4.0'), isTrue);
+      expect(tocaNovedades(null, '2.4.0'), isTrue);
+      expect(tocaNovedades('', '2.4.0'), isTrue);
+      expect(tocaNovedades('2.1.3', '2.4.1'), isTrue);
+      expect(tocaNovedades('1.9.0', '2.5.0'), isTrue);
     });
 
     test('una sola vez: si ya se vio no vuelve, ni con un parche', () {
-      expect(tocaNovedades('2.3.0', '2.3.0'), isFalse);
-      expect(tocaNovedades('2.3.0', '2.3.1'), isFalse);
-      expect(tocaNovedades('2.3.1', '2.3.4'), isFalse);
+      expect(tocaNovedades('2.4.0', '2.4.0'), isFalse);
+      expect(tocaNovedades('2.4.0', '2.4.1'), isFalse);
+      expect(tocaNovedades('2.4.1', '2.4.4'), isFalse);
     });
 
-    test('antes de la edicion no sale (la 2.2.x ya no ensena la anterior)', () {
-      expect(tocaNovedades(null, '2.2.0'), isFalse);
-      expect(tocaNovedades('2.2.0', '2.2.1'), isFalse);
+    test('antes de la edicion no sale (la 2.3.x ya no ensena la anterior)', () {
+      expect(tocaNovedades(null, '2.3.4'), isFalse);
+      expect(tocaNovedades('2.3.0', '2.3.4'), isFalse);
       expect(tocaNovedades('2.0.0', '2.1.9'), isFalse);
     });
   });
@@ -98,14 +98,21 @@ void main() {
   group('la presentacion', () {
     const tamanos = [Size(320, 568), Size(412, 915), Size(915, 412), Size(800, 1280), Size(1440, 900)];
 
-    test('tiene once diapositivas y la portada lleva el titulo de la edicion', () {
-      expect(diapositivas.length, 11);
+    test('tiene trece diapositivas y la portada lleva el titulo de la edicion', () {
+      expect(diapositivas.length, 13);
       expect(diapositivas.first.titulo, 'ACTUALIZACIÓN GRANDE DE CAUDAL');
       expect(diapositivas.last.titulo, 'Gracias por ser parte de Caudal');
     });
 
+    test('no anuncia el algoritmo de recomendaciones por animo', () {
+      final todo = diapositivas.map((d) => '${d.titulo} ${d.texto}').join(' ').toLowerCase();
+      expect(todo.contains('triste'), isFalse);
+      expect(todo.contains('animo'), isFalse);
+      expect(todo.contains('ánimo'), isFalse);
+    });
+
     for (final tam in tamanos) {
-      for (var i = 0; i < 11; i++) {
+      for (var i = 0; i < 13; i++) {
         testWidgets('diapositiva ${i + 1} sin desbordes en ${tam.width.toInt()}x${tam.height.toInt()}', (t) async {
           await _montar(t, tam, NovedadesGrandes(paginaInicial: i));
           // las ilustraciones no paran: el reloj se avanza a mano, varios segundos
@@ -115,14 +122,14 @@ void main() {
           }
           expect(find.text(diapositivas[i].titulo), findsOneWidget);
           expect(find.text('Saltar'), findsOneWidget);
-          expect(find.text('Empezar'), i == 10 ? findsOneWidget : findsNothing);
+          expect(find.text('Empezar'), i == diapositivas.length - 1 ? findsOneWidget : findsNothing);
           expect(t.takeException(), isNull);
         });
       }
     }
 
     testWidgets('con la letra al 130 % no se desborda ninguna diapositiva en 320x568', (t) async {
-      for (var i = 0; i < 11; i++) {
+      for (var i = 0; i < 13; i++) {
         await _montar(t, const Size(320, 568), NovedadesGrandes(paginaInicial: i), texto: 1.3);
         await _avanza(t, 3);
         expect(find.text('Saltar'), findsOneWidget);
@@ -194,7 +201,7 @@ void main() {
     });
 
     testWidgets('«Saltar» sigue a la vista en la ultima diapositiva', (t) async {
-      await _montar(t, const Size(360, 640), const NovedadesGrandes(paginaInicial: 10));
+      await _montar(t, const Size(360, 640), NovedadesGrandes(paginaInicial: diapositivas.length - 1));
       await _avanza(t);
       expect(find.text('Saltar'), findsOneWidget);
     });
@@ -202,7 +209,7 @@ void main() {
     testWidgets('«Empezar» y Enter al final avisan a quien la monto', (t) async {
       var empezado = 0, cerrado = 0;
       await _montar(t, const Size(360, 640),
-          NovedadesGrandes(paginaInicial: 10, alEmpezar: () => empezado++, alCerrar: () => cerrado++));
+          NovedadesGrandes(paginaInicial: diapositivas.length - 1, alEmpezar: () => empezado++, alCerrar: () => cerrado++));
       await _avanza(t);
       await t.tap(find.text('Empezar'));
       await t.pump();
@@ -246,7 +253,7 @@ void main() {
       await _montar(t, const Size(360, 640), const NovedadesGrandes());
       await _avanza(t);
       expect(t.getSemantics(find.text('ACTUALIZACIÓN GRANDE DE CAUDAL')).flagsCollection.isHeader, isTrue);
-      expect(find.bySemanticsLabel(RegExp('Diapositiva 1 de 11')), findsWidgets);
+      expect(find.bySemanticsLabel(RegExp('Diapositiva 1 de 13')), findsWidgets);
       expect(t.getSemantics(find.byTooltip('Siguiente')).flagsCollection.isButton, isTrue);
       expect(find.bySemanticsLabel('Saltar'), findsWidgets);
       semantica.dispose();
@@ -280,7 +287,7 @@ void main() {
       for (final it in novedadesDeEstaEdicion) {
         expect(find.text(it.titular, skipOffstage: false), findsOneWidget, reason: it.titular);
       }
-      expect(novedadesDeEstaEdicion.length, 9);
+      expect(novedadesDeEstaEdicion.length, 11);
       expect(find.text('Y además', skipOffstage: false), findsOneWidget);
       expect(find.text('También arreglamos los colores del reproductor.', skipOffstage: false), findsOneWidget);
       expect(find.textContaining('[grande]', skipOffstage: false), findsNothing);

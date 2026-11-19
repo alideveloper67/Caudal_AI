@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-"""La segunda «Actualización grande de Caudal»: una presentación a pantalla completa.
+"""La tercera «Actualización grande de Caudal»: una presentación a pantalla completa.
 
-Once diapositivas con fondo de aurora animado, una ilustración propia por
+Nueve diapositivas con fondo de aurora animado, una ilustración propia por
 diapositiva (todo dibujado con QPainter, sin imágenes) y una transición de
 fundido con desplazamiento en capas (parallax). Se maneja con las flechas, Enter,
 la rueda, el clic o los puntos de progreso; «Saltar» está siempre a la vista.
@@ -19,6 +19,7 @@ from PySide6.QtWidgets import QApplication, QDialog, QPushButton
 
 from .. import version as _version
 from . import ilustraciones_grandes as I
+from . import ilustraciones_v4  # noqa: F401  (registra las ilustraciones de esta edición)
 from .componentes import fuente
 from .estilos import C
 
@@ -26,30 +27,29 @@ TITULO = "ACTUALIZACIÓN GRANDE DE CAUDAL"
 
 # clave de la ilustración, etiqueta, título, texto
 DIAPOSITIVAS = [
-    dict(clave="portada", etiqueta="EDICIÓN 2.4", titulo=TITULO,
-         texto="Fondos, vinilo, estudio, gustos y mucho más. Esto es lo nuevo.", centrada=True, tono=0),
-    dict(clave="fondo", etiqueta="TU ESPACIO", titulo="Tu imagen, detrás de todo",
-         texto="Pon una imagen tenue detrás de toda la app. Exclusivo para donadores.", tono=14),
-    dict(clave="donadores", etiqueta="DONADORES", titulo="Donador de Caudal",
-         texto="Una etiqueta que se nota, un fondo exclusivo y GIF animados en tu foto y en el fondo de tu "
-               "perfil, con búsqueda segura de GIF.", tono=30),
-    dict(clave="vinilo", etiqueta="MODO NUEVO", titulo="Modo vinilo",
-         texto="Un disco que gira, un brazo que baja la aguja y una pantalla que se enciende con tu música.",
-         tono=-24),
-    dict(clave="estudio", etiqueta="MODO NUEVO", titulo="Modo estudio",
-         texto="Temporizador, lluvia, mezclador de sonidos ambientales, Pomodoro y racha para no perder el ritmo.",
-         tono=-44),
-    dict(clave="musica", etiqueta="REPRODUCCIÓN", titulo="Música sin cortes",
-         texto="Las canciones se enlazan con transiciones suaves. Ni un silencio entre una y otra.", tono=18),
-    dict(clave="compartir", etiqueta="SOCIAL", titulo="Tu perfil, en tus historias",
-         texto="Compártelo como una imagen lista para estados e historias.", tono=46),
-    dict(clave="gustos", etiqueta="DESCUBRE", titulo="Tus artistas, tus parecidos",
-         texto="Elige tus artistas favoritos al crear la cuenta y encuentra canciones que de verdad se parecen.",
-         tono=-10),
-    dict(clave="portadas", etiqueta="TUS LISTAS", titulo="Portadas a tu gusto",
-         texto="Cualquier imagen puede ser la portada de tus listas.", tono=58),
-    dict(clave="arrastrar", etiqueta="AL DETALLE", titulo="Arrastra como en el teléfono",
-         texto="Mueve canciones con el ratón, más pulido y más rápido.", tono=-34),
+    dict(clave="portada", etiqueta="EDICIÓN 2.5", titulo=TITULO,
+         texto="Más estilo, más herramientas y una app que va más suave. Esto es lo nuevo.", centrada=True, tono=0),
+    dict(clave="marcos", etiqueta="TU PERFIL", titulo="Lúcete en tu perfil",
+         texto="Marcos animados para tu foto y nombres con brillo, degradado o arcoíris. Se ven en tu perfil, tus "
+               "chats y tus amigos.", tono=30),
+    dict(clave="temas", etiqueta="DONADORES", titulo="Temas exclusivos",
+         texto="Seis paletas completas (Atardecer, Bosque, Sakura, Océano, Medianoche y Ámbar) que cambian el color "
+               "de toda la app.", tono=-20),
+    dict(clave="pase", etiqueta="PASE DE PRUEBA", titulo="Pase de prueba",
+         texto="Canjea un código y usa todos los beneficios de donador durante 7 días. Pídelo a quien te invitó a "
+               "Caudal.", tono=46),
+    dict(clave="letras", etiqueta="COMPARTE", titulo="Letras para presumir",
+         texto="Tarjetas con la carátula difuminada y estilos nuevos para donadores, listas para tus estados e "
+               "historias.", tono=18),
+    dict(clave="anio", etiqueta="TU AÑO", titulo="Tu año en Caudal",
+         texto="Tus minutos, tu canción y tus artistas del año en una imagen lista para compartir. Exclusivo de "
+               "donadores.", tono=-40),
+    dict(clave="musica", etiqueta="REPRODUCCIÓN", titulo="La música no se corta",
+         texto="Si la conexión se cae, Caudal la retoma solo y sigue justo donde iba, sin saltar de canción.",
+         tono=10),
+    dict(clave="fluido", etiqueta="RENDIMIENTO", titulo="Más fluida",
+         texto="Ajustes abre al instante, sin congelar la ventana, y la app trabaja en segundo plano para ir suave.",
+         tono=-14),
     dict(clave="final", etiqueta="GRACIAS", titulo="Gracias por ser parte de Caudal",
          texto="Todo esto es para ti. Disfruta lo nuevo.", centrada=True, tono=8),
 ]

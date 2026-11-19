@@ -13,6 +13,7 @@ from ...hilos import en_segundo_plano
 from .. import iconos
 from ..componentes import Pagina, Portada, SinResultados
 from ..estilos import C
+from ..premium_estilos import nombre_efecto
 from . import perfil_comun as PC
 
 
@@ -119,9 +120,9 @@ class PaginaPerfil(Pagina):
                 fila.addWidget(n)
             fila.addStretch(1)
             cv.addLayout(fila)
-        nombre = QLabel(S.nombre_visible(p))
-        nombre.setStyleSheet(f"background:transparent;color:{C['texto']};font-size:32px;font-weight:900;")
-        nombre.setWordWrap(True)
+        marco, efecto = self._premium_de(p)
+        nombre = nombre_efecto(S.nombre_visible(p), f"color:{C['texto']};font-size:32px;font-weight:900;",
+                               efecto, True, siempre=True)
         cv.addWidget(nombre)
         datos = [f"@{p['usuario']}"]
         if p["creado"] and S.mes_anio(p["creado"]):
@@ -137,10 +138,17 @@ class PaginaPerfil(Pagina):
         v.addLayout(fila_acc)
         v.addStretch(1)
         av = PC.Avatar(148, S.nombre_visible(p), color, p["foto_url"], anillo=C["panel"], padre=cont,
-                       animar=True)
+                       animar=True, marco=marco, marco_siempre=True)
         av.move(26, alto_fondo - 78)
         av.raise_()
         return cont
+
+    def _premium_de(self, p):
+        """(marco, efecto) de esta persona. En mi perfil se ve al instante lo que acabo de elegir."""
+        gestor = getattr(self.ctx, "premium", None)
+        if p.get("es_mio") and gestor is not None:
+            return gestor.marco_efectivo(), gestor.efecto_efectivo()
+        return p.get("marco"), p.get("efecto_nombre")
 
     def _estadisticas(self, p, color):
         fila = QHBoxLayout()

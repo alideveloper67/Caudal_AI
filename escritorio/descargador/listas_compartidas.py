@@ -21,7 +21,7 @@ SERVIDOR_WEB = "https://caudal-musica.netlify.app"
 ROLES = ("colaborador", "oyente")
 POR_DEFECTO = "colaborador"
 MAX_MIEMBROS = 20
-MAX_CANCIONES = 2000
+MAX_CANCIONES = 200000
 CADA_REFRESCO = 20            # segundos: lista compartida abierta
 
 # ---------------------------------------------------------------- códigos
@@ -111,8 +111,10 @@ def _entero(v):
 
 def _persona(d):
     d = d if isinstance(d, dict) else {}
+    from .premium_datos import efecto_valido, marco_valido
     return {"id": _texto(d.get("id")), "usuario": _texto(d.get("usuario")),
-            "nombre": _texto(d.get("nombre")), "foto_url": d.get("foto_url") or ""}
+            "nombre": _texto(d.get("nombre")), "foto_url": d.get("foto_url") or "",
+            "marco": marco_valido(d.get("marco")), "efecto_nombre": efecto_valido(d.get("efecto_nombre"))}
 
 
 def nombre_persona(p):

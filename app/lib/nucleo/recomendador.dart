@@ -76,6 +76,12 @@ class Gusto {
         peso[a.clave] = (peso[a.clave] ?? 0) + (i == 0 ? w : w * 0.5);
       }
     }
+    // el ánimo de lo último que sonó pesa más: si vienes oyendo tristes, la radio sigue ahí
+    for (final e in historial.reversed.take(8)) {
+      for (final r in Rasgos.de(e.pista)) {
+        if (r.startsWith('animo:')) rasgos[r] = (rasgos[r] ?? 0) + 1.5;
+      }
+    }
     final topeRasgo = rasgos.values.fold<double>(0, max);
     if (topeRasgo > 0) {
       for (final k in rasgos.keys.toList()) {
@@ -854,7 +860,34 @@ class Rasgos {
     final crudo = p['anio'] ?? (p['album'] is Map ? (p['album'] as Map)['anio'] : null);
     final anio = int.tryParse('${crudo ?? ''}'.trim());
     if (anio != null && anio > 1900 && anio < 2100) salida.add('dec:${anio ~/ 10 * 10}');
+    final animo = animoDe(texto);
+    if (animo.isNotEmpty) salida.add('animo:$animo');
     return salida;
+  }
+
+  // Palabras que delatan el ánimo de una canción en su título (español e inglés).
+  static final RegExp _triste = RegExp(
+      r'(?<![a-záéíóúñü])(triste|tristeza|llor\w*|lágrimas|lagrimas|dolor|duele\w*|soledad|adiós|adios|olvid\w*|'
+      r'extraño|extrano|perdón|perdon|ausencia|herid\w*|roto|rota|desamor|despedida|muerte|nostalgia|'
+      r'sad|cry\w*|tears?|lonely|alone|heartbreak\w*|broken|goodbye|hurt\w*|miss(ing)? you|without you|'
+      r'sin ti|pain|sorry|farewell|depress\w*|grief|memories)(?![a-záéíóúñü])',
+      caseSensitive: false);
+  static final RegExp _fiesta = RegExp(
+      r'(?<![a-záéíóúñü])(fiesta|baila\w*|bailar|perreo|party|dance|dancing|goza\w*|rumba|prende|booty|twerk|'
+      r'sandungueo|energy|energía|summer|verano|bounce|turn up|pop off)(?![a-záéíóúñü])',
+      caseSensitive: false);
+  static final RegExp _romantica = RegExp(
+      r'(?<![a-záéíóúñü])(amor|love|te quiero|te amo|besos?|beso|corazón|corazon|heart|mi vida|cariño|'
+      r'enamorad\w*|romance|romántic\w*|forever|eres mi|contigo)(?![a-záéíóúñü])',
+      caseSensitive: false);
+
+  /// `triste`, `fiesta`, `romantica` o '' si el título no lo dice.
+  /// Manda la tristeza: «Sin ti» es triste aunque hable de amor.
+  static String animoDe(String texto) {
+    if (_triste.hasMatch(texto)) return 'triste';
+    if (_fiesta.hasMatch(texto)) return 'fiesta';
+    if (_romantica.hasMatch(texto)) return 'romantica';
+    return '';
   }
 
   /// -1..1: cuánto se parecen dos pistas por sus rasgos. Sin datos: 0.
@@ -869,6 +902,20 @@ class Rasgos {
     final da = int.tryParse((v(a, 'dec:') ?? '').replaceFirst('dec:', ''));
     final db = int.tryParse((v(b, 'dec:') ?? '').replaceFirst('dec:', ''));
     if (da != null && db != null) s += (da - db).abs() <= 10 ? 0.2 : -0.1;
+    // mismo ánimo (triste con triste...) sube; ánimos opuestos (triste con fiesta) bajan
+    final na = v(a, 'animo:'), nb = v(b, 'animo:');
+    if (na != null && nb != null) {
+      if (na == nb) {
+        s += 0.5;
+      } else {
+        final par = {na, nb};
+        s += par.containsAll({'animo:triste', 'animo:fiesta'})
+            ? -0.6
+            : par.containsAll({'animo:romantica', 'animo:triste'})
+                ? 0.15
+                : -0.25;
+      }
+    }
     return s.clamp(-1.0, 1.0);
   }
 }

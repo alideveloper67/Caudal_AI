@@ -15,6 +15,7 @@ from ...hilos import en_segundo_plano
 from .. import iconos
 from ..componentes import Portada, _borrar_layout
 from ..estilos import C
+from ..premium_estilos import nombre_efecto
 from .amigos import PanelAmigos, PanelSolicitudes
 from .juntos import _fuente_emoji, menu_emojis
 from .perfil_comun import Avatar
@@ -140,11 +141,10 @@ class DialogoNuevoChat(QDialog):
                         f"QPushButton:hover{{background:{C['superficie2']};}}")
         h = QHBoxLayout(b)
         h.setContentsMargins(10, 6, 10, 6)
-        h.addWidget(Avatar(42, S.nombre_visible(p), C["acento"], p.get("foto_url")))
+        h.addWidget(Avatar(42, S.nombre_visible(p), C["acento"], p.get("foto_url"), marco=p.get("marco")))
         col = QVBoxLayout()
         col.setSpacing(0)
-        n = QLabel(S.nombre_visible(p))
-        n.setStyleSheet("font-weight:700;background:transparent;")
+        n = nombre_efecto(S.nombre_visible(p), "font-weight:700;", p.get("efecto_nombre"), False)
         u = QLabel("@" + (p.get("usuario") or ""))
         u.setStyleSheet(f"color:{C['texto3']};font-size:11.5px;background:transparent;")
         col.addWidget(n)
@@ -612,7 +612,7 @@ class PaginaMensajes(QWidget):
                         f"QPushButton:hover{{background:{C['superficie3'] if activo else C['superficie']};}}")
         h = QHBoxLayout(b)
         h.setContentsMargins(10, 6, 10, 6)
-        h.addWidget(Avatar(40, c["visible"] or "?", C["acento"], c.get("foto_url")))
+        h.addWidget(Avatar(40, c["visible"] or "?", C["acento"], c.get("foto_url"), marco=c.get("marco")))
         col = QVBoxLayout()
         col.setSpacing(0)
         n = QLabel(c["visible"])

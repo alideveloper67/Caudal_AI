@@ -546,7 +546,8 @@ class DialogoCompartir(_Base):
         for m in miembros:
             fila = QHBoxLayout()
             fila.setSpacing(10)
-            fila.addWidget(Avatar(34, LC.nombre_persona(m), C["acento"], m.get("foto_url")))
+            fila.addWidget(Avatar(34, LC.nombre_persona(m), C["acento"], m.get("foto_url"),
+                                  marco=m.get("marco")))
             nombre = LC.nombre_persona(m) + ("  ·  tú, dueño" if m["es_dueno"] else "")
             n = QLabel(f"<b>{nombre}</b><br><span style='color:{C['texto3']};font-size:11px'>@{m['usuario']}</span>")
             n.setStyleSheet("background:transparent;")

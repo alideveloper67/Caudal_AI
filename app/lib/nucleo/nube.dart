@@ -105,7 +105,7 @@ class Nube {
       'no tienes acceso a esa lista': 'Ya no tienes acceso a esa lista. Puede que su dueño haya dejado de compartirla.',
       'solo puedes escuchar': 'En esta lista solo puedes escuchar: no puedes añadir ni quitar canciones.',
       'solo puedes quitar las canciones que añadiste': 'Solo puedes quitar las canciones que añadiste tú.',
-      'admite hasta 2000': 'Esta lista ya llegó al máximo de 2000 canciones.',
+      'admite hasta 200000': 'Esta lista ya llegó al máximo de 200000 canciones.',
       'no estás en esa lista': 'Ya no estás en esa lista.',
       'esa persona no está en la lista': 'Esa persona ya no está en la lista.',
       'solo el dueño de la lista': 'Solo el dueño de la lista puede quitar a alguien.',

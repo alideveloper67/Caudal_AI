@@ -76,6 +76,55 @@ class Importar {
     throw const ErrorImportar('Pega el enlace de una lista de Spotify, Apple Music o YouTube Music.');
   }
 
+  // ------------------------------------------------------------ Snaptube y otras apps
+
+  /// Las carpetas donde Snaptube guarda lo que baja (audio y video), por si se
+  /// quieren abrir directamente.
+  static const carpetasSnaptube = [
+    '/storage/emulated/0/snaptube/download/SnapTube Audio',
+    '/storage/emulated/0/Snaptube/Download/SnapTube Audio',
+    '/storage/emulated/0/SnapTube Audio',
+    '/storage/emulated/0/Download/SnapTube Audio',
+  ];
+
+  static const _extAudio = {'mp3', 'm4a', 'aac', 'flac', 'wav', 'ogg', 'opus', 'webm', 'wma', 'alac', 'aiff', 'mp4'};
+
+  /// De un nombre de archivo o una línea de texto a «artista - título»: se quita
+  /// el número de lista, la extensión y los adornos típicos ("(Official Video)").
+  static CancionExterna? cancionDeLinea(String linea) {
+    var t = linea.trim();
+    if (t.isEmpty) return null;
+    t = t.replaceFirst(RegExp(r'^\s*\d{1,5}\s*[.)\-–:]\s+'), '');
+    final m = RegExp(r'\.([A-Za-z0-9]{2,5})$').firstMatch(t);
+    if (m != null && _extAudio.contains(m.group(1)!.toLowerCase())) t = t.substring(0, m.start);
+    t = t
+        .replaceAll(RegExp(r'[\(\[]\s*(official|oficial|video|vídeo|lyrics?|letra|audio|hd|hq|4k|mv|music video|visualizer)[^\)\]]*[\)\]]',
+            caseSensitive: false), '')
+        .replaceAll('_', ' ')
+        .replaceAll(RegExp(r'\s{2,}'), ' ')
+        .trim();
+    if (t.length < 2) return null;
+    final corte = RegExp(r'\s[-–—]\s').firstMatch(t);
+    if (corte != null && corte.start > 0 && corte.end < t.length) {
+      return CancionExterna(titulo: t.substring(corte.end).trim(), artista: t.substring(0, corte.start).trim());
+    }
+    return CancionExterna(titulo: t);
+  }
+
+  /// Una lista armada con nombres de archivo o con líneas de texto (una canción
+  /// por línea). Sin tope de canciones; las repetidas se quitan.
+  static ListaExterna deLineas(Iterable<String> lineas, {required String titulo, String plataforma = 'Snaptube'}) {
+    final vistas = <String>{};
+    final canciones = <CancionExterna>[];
+    for (final l in lineas) {
+      final c = cancionDeLinea(l);
+      if (c == null) continue;
+      if (vistas.add(c.busqueda.toLowerCase())) canciones.add(c);
+    }
+    if (canciones.isEmpty) throw const ErrorImportar('No se encontró ninguna canción que leer.');
+    return ListaExterna(plataforma: plataforma, titulo: titulo, canciones: canciones);
+  }
+
   static Future<String> _pagina(String url, String sitio) async {
     http.Response r;
     // en el navegador esas webs no contestan a otras: se lee por la funcion de Caudal
@@ -228,7 +277,7 @@ class Importar {
     }
     Map<String, dynamic> d;
     try {
-      d = await Catalogo.lista(lista, limite: 5000);
+      d = await Catalogo.lista(lista, limite: 1 << 30);
     } catch (_) {
       throw const ErrorImportar('YouTube no mostró esa lista. Comprueba que sea pública.');
     }

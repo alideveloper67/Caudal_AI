@@ -121,6 +121,13 @@ class Ventana(QWidget):
         ctx.fondo = self.fondo
         from ..mascotas import GestorMascota
         ctx.mascota = GestorMascota(ctx)      # la mascotita del reproductor (donadores y fundadores)
+        # lo premium (marcos, efectos de nombre, temas, pase de prueba): copia local al instante y la nube
+        # se pregunta en segundo plano, sin frenar el arranque
+        from ..premium import GestorPremium
+        self.premium = GestorPremium(ctx)
+        ctx.premium = self.premium
+        self.premium.aspecto_cambiado.connect(self.reabrir_con_aspecto)
+        self.premium.refrescar()
         estilos.FONDO["activo"] = self.fondo.activo or estilos.patron_actual() is not None
         self.setStyleSheet(hoja(iconos.flechas_qss()))
         self.historia = []          # [(destino, widget o None)]

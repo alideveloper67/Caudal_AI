@@ -8,6 +8,7 @@ import 'package:flutter/services.dart';
 
 import '../nucleo/importar.dart';
 import '../nucleo/legal.dart';
+import '../nucleo/resumen_anual.dart' show esTemporadaDelResumen;
 import '../nucleo/tarjeta_lista.dart';
 import '../nucleo/version.dart';
 import '../reproduccion/reproductor.dart';
@@ -18,6 +19,7 @@ import 'novedades_grandes.dart';
 import 'paginas/acceso.dart';
 import 'paginas/mensajes_pagina.dart';
 import 'paginas/resumen.dart';
+import 'paginas/resumen_anual_pagina.dart';
 import 'paginas/ajustes_pagina.dart';
 import 'paginas/biblioteca.dart';
 import 'paginas/buscar.dart';
@@ -405,6 +407,10 @@ class _BarraLateral extends StatelessWidget {
           item(Icons.groups_2_outlined, Icons.groups_2_rounded, 'Escuchar juntos', false,
               () => alAbrir(const JuntosPagina())),
           item(Icons.insights_rounded, Icons.insights_rounded, 'Tu resumen', false, () => ResumenPagina.abrir(context)),
+          // «Tu año en Caudal»: siempre ahí; en diciembre (y la primera quincena de enero) con «nuevo»
+          item(Icons.auto_awesome_outlined, Icons.auto_awesome_rounded,
+              esTemporadaDelResumen(DateTime.now()) ? 'Tu año en Caudal · nuevo' : 'Tu año en Caudal', false,
+              () => alAbrir(const ResumenAnualPagina())),
           item(Icons.self_improvement_outlined, Icons.self_improvement_rounded, 'Modo estudio', false,
               () => alAbrir(const EstudioPagina())),
           const Spacer(),

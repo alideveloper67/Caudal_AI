@@ -6,6 +6,7 @@ import '../../nucleo/chat.dart';
 import '../../nucleo/nube.dart';
 import '../../nucleo/social.dart';
 import '../comunes.dart';
+import '../premium/marcos.dart';
 import '../servicios.dart';
 import '../tema.dart';
 import 'mensajes_pagina.dart';
@@ -212,8 +213,8 @@ class _SolicitudesVistaState extends State<SolicitudesVista> {
                 indice: i,
                 child: ListTile(
                   contentPadding: const EdgeInsets.symmetric(horizontal: Esp.lado, vertical: 4),
-                  leading: AvatarPerfil(nombre: c.visible, fotoUrl: c.fotoUrl, radio: 25),
-                  title: Text(c.visible, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800)),
+                  leading: AvatarPerfil(nombre: c.visible, fotoUrl: c.fotoUrl, marco: c.marco, radio: 25),
+                  title: NombreEfecto(c.visible, efecto: c.efectoNombre, estilo: const TextStyle(fontWeight: FontWeight.w800)),
                   subtitle: Text('@${c.usuario} · ${_desde(c.fecha)}', maxLines: 1, overflow: TextOverflow.ellipsis, style: estiloSecundario),
                   onTap: () => abrirPerfil(context, c.usuario),
                   trailing: ocupado
@@ -414,8 +415,8 @@ class _AmigosVistaState extends State<AmigosVista> {
                 for (final c in ctl.enviadas)
                   ListTile(
                     contentPadding: const EdgeInsets.symmetric(horizontal: Esp.lado),
-                    leading: AvatarPerfil(nombre: c.visible, fotoUrl: c.fotoUrl, radio: 22),
-                    title: Text(c.visible, maxLines: 1, overflow: TextOverflow.ellipsis),
+                    leading: AvatarPerfil(nombre: c.visible, fotoUrl: c.fotoUrl, marco: c.marco, radio: 22),
+                    title: NombreEfecto(c.visible, efecto: c.efectoNombre),
                     subtitle: Text('@${c.usuario} · esperando respuesta', style: estiloSecundario),
                     onTap: () => abrirPerfil(context, c.usuario),
                     trailing: TextButton(
@@ -446,8 +447,8 @@ class _AmigosVistaState extends State<AmigosVista> {
                   indice: i,
                   child: ListTile(
                     contentPadding: const EdgeInsets.symmetric(horizontal: Esp.lado, vertical: 2),
-                    leading: AvatarPerfil(nombre: c.visible, fotoUrl: c.fotoUrl, radio: 24),
-                    title: Text(c.visible, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w700)),
+                    leading: AvatarPerfil(nombre: c.visible, fotoUrl: c.fotoUrl, marco: c.marco, radio: 24),
+                    title: NombreEfecto(c.visible, efecto: c.efectoNombre, estilo: const TextStyle(fontWeight: FontWeight.w700)),
                     subtitle: Text('@${c.usuario}', style: estiloSecundario),
                     onTap: () => abrirPerfil(context, c.usuario),
                     trailing: Row(mainAxisSize: MainAxisSize.min, children: [
@@ -480,7 +481,7 @@ class _AmigosVistaState extends State<AmigosVista> {
                       for (final c in ctl.bloqueados)
                         ListTile(
                           contentPadding: const EdgeInsets.symmetric(horizontal: Esp.lado),
-                          leading: AvatarPerfil(nombre: c.visible, fotoUrl: c.fotoUrl, radio: 20),
+                          leading: AvatarPerfil(nombre: c.visible, fotoUrl: c.fotoUrl, marco: c.marco, radio: 20),
                           title: Text(c.visible),
                           subtitle: Text('@${c.usuario}', style: estiloSecundario),
                           trailing: OutlinedButton(onPressed: () => _desbloquear(c), child: const Text('Desbloquear')),
@@ -537,12 +538,12 @@ class _AmigosVistaState extends State<AmigosVista> {
                   child: Row(children: [
                     InkWell(
                       onTap: () => abrirPerfil(context, h.usuario),
-                      child: AvatarPerfil(nombre: h.visible, fotoUrl: h.fotoUrl, radio: 24),
+                      child: AvatarPerfil(nombre: h.visible, fotoUrl: h.fotoUrl, marco: h.marco, radio: 24),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        Text(h.visible, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontWeight: FontWeight.w800)),
+                        NombreEfecto(h.visible, efecto: h.efectoNombre, estilo: const TextStyle(fontWeight: FontWeight.w800)),
                         Text('@${h.usuario}', style: estiloSecundario),
                       ]),
                     ),

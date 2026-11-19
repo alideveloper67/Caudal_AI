@@ -303,7 +303,7 @@ class _HojaCompartirListaState extends State<HojaCompartirLista> {
                   ListTile(
                     dense: true,
                     contentPadding: EdgeInsets.zero,
-                    leading: AvatarPerfil(nombre: m.persona.visible, fotoUrl: m.persona.fotoUrl, radio: 18),
+                    leading: AvatarPerfil(nombre: m.persona.visible, fotoUrl: m.persona.fotoUrl, marco: m.persona.marco, radio: 18),
                     title: Text(m.esDueno ? '${m.persona.visible} (tú)' : m.persona.visible),
                     subtitle: Text(m.esDueno ? 'Dueño' : textoRolLista(m.rol), style: estiloDetalle),
                     trailing: m.esDueno

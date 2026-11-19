@@ -6,6 +6,7 @@ import 'package:sqflite/sqflite.dart';
 
 import 'chat.dart';
 import 'coleccion.dart';
+import 'cosmeticos.dart';
 import 'nube.dart';
 import 'sincronizacion.dart';
 import 'tarjeta_lista.dart';
@@ -23,7 +24,12 @@ typedef LlamadaBase = Future<dynamic> Function(String nombre, Map<String, dynami
 
 /// Una persona tal como la devuelven las funciones de listas.
 class PersonaLista {
-  const PersonaLista({this.id = '', this.usuario = '', this.nombre = '', this.fotoUrl = ''});
+  const PersonaLista({this.id = '', this.usuario = '', this.nombre = '', this.fotoUrl = '',
+      this.marco = Cosmeticos.ninguno, this.efectoNombre = Cosmeticos.ninguno});
+
+  /// Marco del avatar y efecto del nombre de un donador («ninguno» si no tiene).
+  final String marco;
+  final String efectoNombre;
   final String id;
   final String usuario;
   final String nombre;
@@ -34,7 +40,8 @@ class PersonaLista {
   static PersonaLista desde(Object? d) {
     if (d is! Map) return const PersonaLista();
     String t(String k) => d[k] == null ? '' : '${d[k]}';
-    return PersonaLista(id: t('id'), usuario: t('usuario'), nombre: t('nombre'), fotoUrl: t('foto_url'));
+    return PersonaLista(id: t('id'), usuario: t('usuario'), nombre: t('nombre'), fotoUrl: t('foto_url'),
+        marco: Cosmeticos.marco(d['marco']), efectoNombre: Cosmeticos.efectoNombre(d['efecto_nombre']));
   }
 }
 

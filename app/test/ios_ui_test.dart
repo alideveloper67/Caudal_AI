@@ -108,6 +108,7 @@ void main() {
 
     testWidgets('en Android sigue estando', (t) async {
       await _montar(t, const AjustesPagina());
+      await t.scrollUntilVisible(find.text('Guardar en la música del teléfono'), 300, scrollable: find.byType(Scrollable).first);
       expect(find.text('Guardar en la música del teléfono'), findsOneWidget);
     }, variant: _android);
   });

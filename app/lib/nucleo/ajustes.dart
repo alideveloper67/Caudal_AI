@@ -63,6 +63,8 @@ class Ajustes extends ChangeNotifier {
     'mezcla_dj_graves': true,
     // el temporizador para dormir baja el volumen los ultimos 30 s
     'apagado_suave': true,
+    // quita animaciones y adornos para equipos lentos; el sonido no cambia
+    'modo_ligero': false,
   };
 
   T _valor<T>(String clave) {

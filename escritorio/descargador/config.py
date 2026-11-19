@@ -121,6 +121,8 @@ DEFECTOS = {
     "fondo": "oscuro",               # fondo de la app (estilos.FONDOS)
     "tamano_personaje": 124,         # alto del personaje del fondo con personaje (se cambia con el ratón)
     "normalizar": True,              # mismo volumen percibido entre canciones
+    "modo_noche": False,             # comprime el volumen: nada suena fuerte de golpe (ideal para dormir)
+    "sonido_envolvente": False,      # ensancha el sonido en audifonos
     "autoplay": True,                # al acabarse la cola, seguir con canciones parecidas
     "sponsorblock": True,            # saltar lo que no es musica en videos musicales
     "sponsorblock_videos": False,    # y patrocinios / autopromocion en videos normales

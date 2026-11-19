@@ -149,6 +149,8 @@ def main():
         ajustes = Ajustes()
         # el color y el fondo elegidos, antes de construir la ventana
         from descargador.ui.estilos import aplicar_aspecto
+        from descargador.premium import revertir_aspecto_si_hace_falta
+        revertir_aspecto_si_hace_falta(ajustes)      # un tema de donadores ya vencido vuelve a lo normal
         aplicar_aspecto(ajustes["acento"], ajustes["fondo"])
         catalogo.fijar_region(ajustes["region"])
         historial = Historial()

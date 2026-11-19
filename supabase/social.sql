@@ -858,6 +858,8 @@ revoke execute on function public.puede_tener_fondo(uuid) from public, anon;
 grant execute on function public.puede_tener_fondo(uuid) to authenticated;
 revoke execute on function public.puede_poner_fondo() from public, anon;
 grant execute on function public.puede_poner_fondo() to authenticated;
+-- (Los pases de prueba, el marco y el efecto del nombre, y el vencimiento de títulos viven en premium.sql,
+--  que se ejecuta DESPUÉS de este archivo y redefine puede_tener_fondo, perfil_validar y varias RPC.)
 
 -- ---------------------------------------------------------------- Artistas favoritos (gustos)
 -- Al crear la cuenta la persona puede elegir sus artistas (o saltarlo). Sirven para recomendar.

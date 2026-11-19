@@ -142,8 +142,43 @@ def es_color(valor):
     return str(valor or "").startswith("#") and _rgb(valor) is not None
 
 
+# Temas exclusivos de donadores (Ajustes › Personalizar): paleta completa con contraste AA. No están en
+# ACENTOS ni en FONDOS, así que no salen en el selector normal de colores; se piden por su clave
+# «premium_<tema>» y se aplican con el mismo aplicar_aspecto de siempre.
+# clave -> (nombre, acento, fondo base, tinte con el que se levantan las superficies)
+PREMIUM_PREFIJO = "premium_"
+PREMIUM_TEMAS = {
+    "atardecer": ("Atardecer", "#FF7A59", "#12080F", "#FF6B4A"),
+    "bosque": ("Bosque profundo", "#34D399", "#06100A", "#34D399"),
+    "sakura": ("Sakura", "#F472B6", "#160B12", "#F9A8D4"),
+    "oceano": ("Océano", "#38BDF8", "#04101A", "#38BDF8"),
+    "medianoche": ("Medianoche", "#A78BFA", "#0A0A1F", "#818CF8"),
+    "ambar": ("Ámbar", "#FBBF24", "#130E04", "#FBBF24"),
+}
+_FRACCIONES_PREMIUM = (0.0, 0.045, 0.075, 0.105, 0.15, 0.125, 0.12)   # fondo, panel, sup, sup2, sup3, hover, borde
+
+
+def es_premium(valor):
+    """¿Es la clave de un tema exclusivo (premium_atardecer...)?"""
+    v = str(valor or "")
+    return v.startswith(PREMIUM_PREFIJO) and v[len(PREMIUM_PREFIJO):] in PREMIUM_TEMAS
+
+
+def _tema_premium(valor):
+    return PREMIUM_TEMAS[str(valor)[len(PREMIUM_PREFIJO):]]
+
+
+def fondo_premium(valor):
+    nombre, _acento, base, tinte = _tema_premium(valor)
+    b, t = _rgb(base), _rgb(tinte)
+    return (nombre,) + tuple(_hex(_mezcla(b, t, f)) for f in _FRACCIONES_PREMIUM)
+
+
 def acento_de(valor):
     """(etiqueta, acento, alto, bajo, texto) de un acento de la lista o de un color propio."""
+    if es_premium(valor):
+        nombre, hexa, _base, _tinte = _tema_premium(valor)
+        return (nombre,) + acento_de(hexa)[1:]
     if valor in ACENTOS:
         return ACENTOS[valor]
     rgb = _rgb(valor) if es_color(valor) else None
@@ -161,6 +196,8 @@ def acento_de(valor):
 
 def fondo_de(valor):
     """(etiqueta, fondo, panel, superficie, superficie2, superficie3, hover, borde)."""
+    if es_premium(valor):
+        return fondo_premium(valor)
     if valor in FONDOS:
         return FONDOS[valor]
     rgb = _rgb(valor) if es_color(valor) else None

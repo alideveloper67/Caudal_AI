@@ -13,6 +13,8 @@ import 'mensajes_pagina.dart';
 import 'perfil_comun.dart';
 import 'perfil_editar_pagina.dart';
 import 'perfil_listas.dart';
+import '../../nucleo/premium.dart';
+import '../premium/marcos.dart';
 
 /// El perfil de una persona. Sin [usuario] abre el perfil propio (con el
 /// botón para editarlo); con un usuario, el de esa persona (con amistad,
@@ -387,15 +389,25 @@ class _Cabecera extends StatelessWidget {
           bottom: -52,
           child: Hero(
             tag: 'avatar_${p.id}',
-            child: Container(
-              padding: const EdgeInsets.all(4),
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: C.fondo,
-                border: Border.all(color: color.withValues(alpha: 0.95), width: 2.5),
-                boxShadow: [BoxShadow(color: color.withValues(alpha: 0.4), blurRadius: 26, spreadRadius: 1)],
-              ),
-              child: AvatarPerfil(nombre: p.visible, fotoUrl: p.fotoUrl, color: color, radio: 54, marca: marca),
+            child: ListenableBuilder(
+              listenable: Premium.i,
+              builder: (context, _) {
+                // lo mío sale del teléfono (se ve al instante al personalizar); lo de otros, del servidor
+                final marco = p.esMio ? Premium.i.marcoEfectivo : p.marco;
+                return Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    color: C.fondo,
+                    // con marco de donador el aro lo pone el marco
+                    border: AvatarMarco.tiene(marco) ? null : Border.all(color: color.withValues(alpha: 0.95), width: 2.5),
+                    boxShadow: [BoxShadow(color: color.withValues(alpha: 0.4), blurRadius: 26, spreadRadius: 1)],
+                  ),
+                  child: AvatarPerfil(
+                      nombre: p.visible, fotoUrl: p.fotoUrl, color: color, radio: 54, marca: marca,
+                      marco: marco, animar: true),
+                );
+              },
             ),
           ),
         ),
@@ -420,7 +432,17 @@ class _Cabecera extends StatelessWidget {
                 border: Border.all(color: color.withValues(alpha: 0.28)),
               ),
               child: Column(children: [
-                Text(p.visible, textAlign: TextAlign.center, style: estiloTituloPagina.copyWith(fontSize: 26)),
+                ListenableBuilder(
+                  listenable: Premium.i,
+                  builder: (context, _) => NombreEfecto(
+                    p.visible,
+                    efecto: p.esMio ? Premium.i.efectoNombreEfectivo : p.efectoNombre,
+                    estilo: estiloTituloPagina.copyWith(fontSize: 26),
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    animar: true,
+                  ),
+                ),
                 const SizedBox(height: 2),
                 Text('@${p.usuario}', style: estiloSecundario),
                 if (p.titulos.isNotEmpty || p.fundador || p.esArtista) ...[

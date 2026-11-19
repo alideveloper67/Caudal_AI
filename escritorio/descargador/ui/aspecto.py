@@ -9,15 +9,20 @@ from PySide6.QtGui import QBrush, QColor, QConicalGradient, QFont, QPainter, QPa
 from PySide6.QtWidgets import (QAbstractButton, QColorDialog, QGridLayout, QHBoxLayout, QLabel,
                                QPushButton, QVBoxLayout, QWidget)
 
-from .estilos import ACENTOS, FONDOS, TEMAS, C, acento_de, acento_de_tema, es_color, fondo_de, ruta_patron
+from .estilos import (ACENTOS, FONDOS, TEMAS, C, acento_de, acento_de_tema, es_color, es_premium, fondo_de,
+                      ruta_patron)
 from .fondo_capa import pixmap_patron
 
 
 def nombre_acento(valor):
+    if es_premium(valor):
+        return "Tema " + acento_de(valor)[0]
     return "Tu color" if es_color(valor) else (ACENTOS.get(valor) or ACENTOS["cian"])[0]
 
 
 def nombre_fondo(valor):
+    if es_premium(valor):
+        return "Tema " + fondo_de(valor)[0]
     return "Tu fondo" if es_color(valor) else (FONDOS.get(valor) or FONDOS["oscuro"])[0]
 
 

@@ -6,6 +6,7 @@ import '../../nucleo/nube.dart';
 import '../../nucleo/social.dart';
 import '../comunes.dart';
 import '../plataforma.dart';
+import '../premium/marcos.dart';
 import '../servicios.dart';
 import '../tema.dart';
 import 'perfil_pagina.dart';
@@ -33,19 +34,35 @@ String textoSinConexion(BuildContext context) =>
 // ============================================================ foto
 
 /// Foto redonda; sin foto, un círculo con la inicial y el color del perfil.
+/// Con [marco] (un donador) lleva un aro de color; el tamaño total no cambia.
 class AvatarPerfil extends StatelessWidget {
-  const AvatarPerfil({super.key, required this.nombre, this.fotoUrl = '', this.color, this.radio = 24, this.marca});
+  const AvatarPerfil({super.key, required this.nombre, this.fotoUrl = '', this.color, this.radio = 24, this.marca,
+      this.marco = 'ninguno', this.animar = false});
 
   final String nombre;
   final String fotoUrl;
   final Color? color;
   final double radio;
 
+  /// Marco de donador (`aurora`, `fuego`...). En listas se deja quieto; [animar] solo en un avatar suelto.
+  final String marco;
+  final bool animar;
+
   /// Para saltarse la caché cuando la foto acaba de cambiar.
   final Object? marca;
 
   @override
   Widget build(BuildContext context) {
+    if (!AvatarMarco.tiene(marco)) return _foto(context, radio);
+    return AvatarMarco(
+      marco: marco,
+      radio: radio,
+      animar: animar,
+      child: _foto(context, AvatarMarco.radioInterno(marco, radio)),
+    );
+  }
+
+  Widget _foto(BuildContext context, double radio) {
     final tono = color ?? C.acento;
     final inicial = nombre.trim().isEmpty ? '?' : nombre.trim().substring(0, 1).toUpperCase();
     final relleno = Container(

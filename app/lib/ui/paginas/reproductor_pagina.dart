@@ -644,6 +644,16 @@ class _HojaCola extends StatelessWidget {
 
 final Map<String, Map<String, dynamic>> _cacheLetras = {};
 
+/// Cuánto se adelanta (+) o se atrasa (-) la letra de cada canción, en ms. Lo mueve
+/// el botón «Sincronía» cuando una letra llega corrida; vale mientras la app está abierta.
+final Map<String, int> _desfasesLetra = {};
+class _AvisoDesfase extends ChangeNotifier {
+  void avisar() => notifyListeners();
+}
+
+final _AvisoDesfase _desfaseCambio = _AvisoDesfase();
+int _desfaseDe(String clave) => _desfasesLetra[clave] ?? 0;
+
 Future<Map<String, dynamic>> _letraDe(Json p) async {
   final clave = '${p['clave']}';
   final hecho = _cacheLetras[clave];
@@ -715,7 +725,11 @@ class _TarjetaLetraState extends State<_TarjetaLetra> {
           Row(children: [
             const Text('Letra', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
             const Spacer(),
-            if (hay) const BotonTraducir(compacto: true),
+            if (hay) ...[
+              BotonSincronia(clave: '${widget.pista['clave']}', compacto: true),
+              const SizedBox(width: 6),
+              const BotonTraducir(compacto: true),
+            ],
             if (hay) const SizedBox(width: 10),
             if (hay) const Icon(Icons.open_in_full_rounded, size: 18),
           ]),
@@ -836,6 +850,8 @@ class _LetraCompletaState extends State<LetraCompleta> {
               onPressed: _compartir,
               icon: const Icon(Icons.ios_share_rounded),
             ),
+          BotonSincronia(clave: '${_pista['clave']}'),
+          const SizedBox(width: 8),
           const BotonTraducir(),
           const SizedBox(width: 12),
         ],
@@ -904,6 +920,7 @@ class _VistaLetraState extends State<_VistaLetra> {
       final s = Caudal.leer(context);
       _r = s.reproductor;
       _r!.posicion.addListener(_alAvanzar);
+      _desfaseCambio.addListener(_alAvanzar);
       _ajustes = s.ajustes..addListener(_traducirSiToca);
       _traducirSiToca();
     }
@@ -959,6 +976,7 @@ class _VistaLetraState extends State<_VistaLetra> {
   @override
   void dispose() {
     _r?.posicion.removeListener(_alAvanzar);
+    _desfaseCambio.removeListener(_alAvanzar);
     _ajustes?.removeListener(_traducirSiToca);
     _scroll.dispose();
     super.dispose();
@@ -968,7 +986,7 @@ class _VistaLetraState extends State<_VistaLetra> {
     if (_ls.isEmpty) return;
     // la posicion llega cada ~200 ms: medio paso mas de adelanto para que la
     // linea cambie, de media, en el mismo instante que antes
-    final ms = _r!.posicion.value.inMilliseconds + 250 + pasoPosicion.inMilliseconds ~/ 2;
+    final ms = _r!.posicion.value.inMilliseconds + 250 + pasoPosicion.inMilliseconds ~/ 2 + _desfaseDe(widget.clave);
     var i = -1;
     for (var k = 0; k < _ls.length; k++) {
       if (_ls[k].$1 <= ms) {
@@ -1071,6 +1089,103 @@ class _VistaLetraState extends State<_VistaLetra> {
       ),
     );
   }
+}
+
+/// «Sincronía»: si la letra llega adelantada o atrasada, se corrige a mano de medio en medio segundo.
+class BotonSincronia extends StatelessWidget {
+  const BotonSincronia({super.key, required this.clave, this.compacto = false});
+  final String clave;
+  final bool compacto;
+
+  void _abrir(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      useRootNavigator: true,
+      builder: (ctx) => ListenableBuilder(
+        listenable: _desfaseCambio,
+        builder: (ctx, _) {
+          final ms = _desfaseDe(clave);
+          void mover(int d) {
+            final n = (ms + d).clamp(-10000, 10000);
+            if (n == 0) {
+              _desfasesLetra.remove(clave);
+            } else {
+              _desfasesLetra[clave] = n;
+            }
+            _desfaseCambio.avisar();
+          }
+
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 4, 20, 18),
+              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('Sincronía de la letra', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
+                const SizedBox(height: 4),
+                const Text('Si la letra va por delante de la voz, atrásala. Si va por detrás, adelántala.',
+                    style: estiloSecundario),
+                const SizedBox(height: 14),
+                Row(children: [
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => mover(500),
+                      icon: const Icon(Icons.fast_rewind_rounded),
+                      label: const Text('Atrasar 0,5 s'),
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    child: Text(ms == 0 ? 'Normal' : '${ms > 0 ? '+' : ''}${(ms / 1000).toStringAsFixed(1)} s',
+                        style: const TextStyle(fontWeight: FontWeight.w900)),
+                  ),
+                  Expanded(
+                    child: OutlinedButton.icon(
+                      onPressed: () => mover(-500),
+                      icon: const Icon(Icons.fast_forward_rounded),
+                      label: const Text('Adelantar 0,5 s'),
+                    ),
+                  ),
+                ]),
+                if (ms != 0)
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton(onPressed: () => mover(-ms), child: const Text('Volver a lo normal')),
+                  ),
+              ]),
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+        listenable: _desfaseCambio,
+        builder: (context, _) {
+          final activo = _desfaseDe(clave) != 0;
+          return Tooltip(
+            message: 'Ajustar la sincronía de la letra',
+            child: GestureDetector(
+              behavior: HitTestBehavior.opaque,
+              onTap: () => _abrir(context),
+              child: Container(
+                padding: EdgeInsets.symmetric(horizontal: compacto ? 8 : 12, vertical: compacto ? 4 : 6),
+                decoration: BoxDecoration(
+                  color: activo ? Colors.white : Colors.white.withValues(alpha: 0.16),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(Icons.av_timer_rounded, size: compacto ? 15 : 18,
+                      color: activo ? const Color(0xFF06070A) : Colors.white),
+                  const SizedBox(width: 5),
+                  Text('Sincronía', style: TextStyle(fontSize: compacto ? 12 : 14, fontWeight: FontWeight.w800,
+                      color: activo ? const Color(0xFF06070A) : Colors.white)),
+                ]),
+              ),
+            ),
+          );
+        },
+      );
 }
 
 /// Enciende o apaga la traduccion bajo la letra (se recuerda).

@@ -195,3 +195,8 @@ h1, h2, h3, .marca { font-family: "Bricolage Grotesque", "Figtree", sans-serif; 
   .donacion { padding: 64px 0; }
   .donacion-rejilla { grid-template-columns: 1fr; gap: 32px; }
 }
+
+/* ---------- lo nuevo (la gran actualización) */
+.lo-nuevo { padding: 84px 0 24px; background: linear-gradient(180deg, rgba(47, 212, 240, .06), transparent 60%); }
+.func.nueva { position: relative; border-color: color-mix(in srgb, var(--acento) 28%, var(--borde)); }
+.func.nueva::after { content: "Nuevo"; position: absolute; top: 16px; right: 16px; font-size: 11px; font-weight: 800; color: var(--acento-texto); background: var(--acento); padding: 2px 9px; border-radius: 99px; }

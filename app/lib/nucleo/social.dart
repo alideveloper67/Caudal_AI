@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart' show compute;
 import 'package:image/image.dart' as img;
 
 import 'coleccion.dart' show Json;
+import 'cosmeticos.dart';
 import 'nube.dart';
 
 /// La parte social de Caudal: perfiles, amigos, me gusta y la música de la
@@ -162,10 +163,16 @@ class PerfilTarjeta {
     this.fundador = false,
     this.titulos = const [],
     this.bannerUrl = '',
+    this.marco = Cosmeticos.ninguno,
+    this.efectoNombre = Cosmeticos.ninguno,
   });
 
   /// Imagen de fondo (ruta `<id>/banner.jpg`), vacía si no tiene.
   final String bannerUrl;
+
+  /// Marco del avatar y efecto del nombre de un donador («ninguno» si no tiene).
+  final String marco;
+  final String efectoNombre;
 
   /// Una de las 100 primeras personas de Caudal («Usuario fundador ★»).
   final bool fundador;
@@ -203,20 +210,22 @@ class PerfilTarjeta {
         fundador: _b(d['fundador']),
         titulos: TituloEspecial.lista(d['titulos'], fundadorCaudal: _b(d['fundador_caudal'])),
         bannerUrl: _s(d['banner_url']),
+        marco: Cosmeticos.marco(d['marco']),
+        efectoNombre: Cosmeticos.efectoNombre(d['efecto_nombre']),
       );
 
   PerfilTarjeta conLike(bool di, int total) => PerfilTarjeta(
         id: id, usuario: usuario, nombre: nombre, fotoUrl: fotoUrl, bio: bio, cancionFav: cancionFav,
         colorPerfil: colorPerfil, relacion: relacion, likes: total, diLike: di, numSubidas: numSubidas,
         esArtista: total >= Social.likesParaArtista || esArtista, fundador: fundador, titulos: titulos,
-        bannerUrl: bannerUrl,
+        bannerUrl: bannerUrl, marco: marco, efectoNombre: efectoNombre,
       );
 
   PerfilTarjeta conRelacion(String r) => PerfilTarjeta(
         id: id, usuario: usuario, nombre: nombre, fotoUrl: fotoUrl, bio: bio, cancionFav: cancionFav,
         colorPerfil: colorPerfil, relacion: r, likes: likes, diLike: diLike, numSubidas: numSubidas,
         esArtista: esArtista, fundador: fundador, titulos: titulos,
-        bannerUrl: bannerUrl,
+        bannerUrl: bannerUrl, marco: marco, efectoNombre: efectoNombre,
       );
 }
 
@@ -306,10 +315,16 @@ class Perfil {
     this.numero,
     this.titulos = const [],
     this.bannerUrl = '',
+    this.marco = Cosmeticos.ninguno,
+    this.efectoNombre = Cosmeticos.ninguno,
   });
 
   /// Imagen de fondo del perfil (ruta `<id>/banner.jpg`), vacía si no tiene.
   final String bannerUrl;
+
+  /// Marco del avatar y efecto del nombre de un donador («ninguno» si no tiene).
+  final String marco;
+  final String efectoNombre;
 
   /// Una de las 100 primeras personas; [numero] es su orden de llegada.
   final bool fundador;
@@ -385,6 +400,8 @@ class Perfil {
       numero: d['numero'] is num ? (d['numero'] as num).toInt() : null,
       titulos: TituloEspecial.lista(d['titulos'], fundadorCaudal: _b(d['fundador_caudal'])),
       bannerUrl: _s(d['banner_url']),
+      marco: Cosmeticos.marco(d['marco']),
+      efectoNombre: Cosmeticos.efectoNombre(d['efecto_nombre']),
     );
   }
 
@@ -399,7 +416,7 @@ class Perfil {
         afinidad: afinidad, likes: likes ?? this.likes, diLike: diLike ?? this.diLike,
         esArtista: (likes ?? this.likes) >= Social.likesParaArtista || esArtista, numSubidas: numSubidas,
         subidas: subidas, fundador: fundador, numero: numero, titulos: titulos,
-        bannerUrl: bannerUrl,
+        bannerUrl: bannerUrl, marco: marco, efectoNombre: efectoNombre,
       );
 }
 
@@ -534,7 +551,13 @@ class Contacto {
     this.relacion = Relacion.ninguna,
     this.solicitudId,
     this.fecha,
+    this.marco = Cosmeticos.ninguno,
+    this.efectoNombre = Cosmeticos.ninguno,
   });
+
+  /// Marco del avatar y efecto del nombre de un donador («ninguno» si no tiene).
+  final String marco;
+  final String efectoNombre;
 
   /// Identificador de la persona (no el de la solicitud).
   final String id;
@@ -558,6 +581,8 @@ class Contacto {
         relacion: Relacion.recibida,
         solicitudId: d['id'] is num ? (d['id'] as num).toInt() : null,
         fecha: _f(d['creado']),
+        marco: Cosmeticos.marco(d['marco']),
+        efectoNombre: Cosmeticos.efectoNombre(d['efecto_nombre']),
       );
 
   /// Solicitud enviada (`mis_enviadas`).
@@ -568,6 +593,8 @@ class Contacto {
         fotoUrl: _s(d['foto_url']),
         relacion: Relacion.enviada,
         fecha: _f(d['creado']),
+        marco: Cosmeticos.marco(d['marco']),
+        efectoNombre: Cosmeticos.efectoNombre(d['efecto_nombre']),
       );
 
   /// Amigo (`mis_amigos`).
@@ -578,6 +605,8 @@ class Contacto {
         fotoUrl: _s(d['foto_url']),
         relacion: Relacion.amigo,
         fecha: _f(d['desde']),
+        marco: Cosmeticos.marco(d['marco']),
+        efectoNombre: Cosmeticos.efectoNombre(d['efecto_nombre']),
       );
 
   /// Bloqueado (`mis_bloqueados`).
@@ -587,6 +616,8 @@ class Contacto {
         nombre: _s(d['nombre']),
         fotoUrl: _s(d['foto_url']),
         relacion: Relacion.bloqueado,
+        marco: Cosmeticos.marco(d['marco']),
+        efectoNombre: Cosmeticos.efectoNombre(d['efecto_nombre']),
       );
 
   /// Resultado de buscar por usuario exacto (`buscar_persona`).
@@ -596,11 +627,13 @@ class Contacto {
         nombre: _s(d['nombre']),
         fotoUrl: _s(d['foto_url']),
         relacion: Relacion.normal(d['relacion']),
+        marco: Cosmeticos.marco(d['marco']),
+        efectoNombre: Cosmeticos.efectoNombre(d['efecto_nombre']),
       );
 
   Contacto conRelacion(String r) => Contacto(
         id: id, usuario: usuario, nombre: nombre, fotoUrl: fotoUrl, relacion: r,
-        solicitudId: solicitudId, fecha: fecha,
+        solicitudId: solicitudId, fecha: fecha, marco: marco, efectoNombre: efectoNombre,
       );
 }
 

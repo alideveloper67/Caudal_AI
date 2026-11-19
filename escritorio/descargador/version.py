@@ -18,7 +18,7 @@ import tempfile
 import urllib.error
 import urllib.request
 
-VERSION = "2.4.4"
+VERSION = "2.5.0"
 
 # usuario/repositorio de GitHub donde publicas las versiones
 ORIGEN = "alideveloper67/Caudal_AI"
@@ -45,9 +45,9 @@ def hay_novedad(instalada, publicada):
 
 MARCA_GRANDE = "[grande]"
 
-# «Edición» de la segunda actualización grande (la presentación a pantalla completa).
+# «Edición» de la tercera actualización grande (la presentación a pantalla completa).
 # Se muestra una sola vez a quien llega a esta versión o a una posterior sin haberla visto.
-EDICION_GRANDE = "2.4.0"
+EDICION_GRANDE = "2.5.0"
 
 
 def alcanza_edicion(version, edicion=None):
@@ -56,7 +56,7 @@ def alcanza_edicion(version, edicion=None):
 
 
 def es_de_la_edicion(version, edicion=None):
-    """True si `version` es de la serie de esa edición (2.4.x para la 2.4.0)."""
+    """True si `version` es de la serie de esa edición (2.5.x para la 2.5.0)."""
     return _numeros(version)[:2] == _numeros(edicion or EDICION_GRANDE)[:2]
 
 

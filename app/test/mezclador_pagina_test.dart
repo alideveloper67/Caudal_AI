@@ -8,6 +8,7 @@ import 'package:caudal/nucleo/mezcla_dj.dart';
 import 'package:caudal/nucleo/ritmo.dart';
 import 'package:caudal/nucleo/streams.dart';
 import 'package:caudal/reproduccion/reproductor.dart';
+import 'package:caudal/ui/comunes.dart';
 import 'package:caudal/ui/paginas/mezclador_ajustes.dart';
 import 'package:caudal/ui/paginas/mezclador_pagina.dart';
 import 'package:caudal/ui/servicios.dart';
@@ -141,11 +142,15 @@ Future<void> _montar(WidgetTester t, Widget hijo, {Size tamano = const Size(411,
 
 void main() {
   group('la mesa del Mezclador', () {
-    testWidgets('vacia: invita a añadir y no deja reproducir ni guardar', (t) async {
+    testWidgets('vacia: explica como funciona y ofrece accesos directos, sin barra de reproducir', (t) async {
       await _montar(t, const MezcladorPagina());
       expect(find.text('Tu mesa está vacía'), findsOneWidget);
-      expect(t.widget<FilledButton>(find.ancestor(of: find.text('Reproducir la mezcla'),
-          matching: find.byWidgetPredicate((w) => w is FilledButton))).onPressed, isNull);
+      expect(find.text('Cómo funciona'), findsOneWidget);
+      expect(find.text('Añade canciones'), findsOneWidget);
+      expect(find.text('Desde tu cola', skipOffstage: false), findsOneWidget);
+      expect(find.text('Desde Tus me gusta', skipOffstage: false), findsOneWidget);
+      expect(find.text('Mezclar una lista como un DJ', skipOffstage: false), findsOneWidget);
+      expect(find.text('Reproducir la mezcla'), findsNothing);
       await t.pump(const Duration(seconds: 6));
       expect(t.takeException(), isNull);
     });
@@ -153,9 +158,12 @@ void main() {
     testWidgets('con canciones: filas, tiempo total y un cambio entre cada dos', (t) async {
       await _montar(t, MezcladorPagina(inicial: [pista(1), pista(2), pista(3)]));
       expect(find.text('Canción 1'), findsOneWidget);
-      expect(find.text('Canción 3'), findsOneWidget);
+      expect(find.text('Canción 3', skipOffstage: false), findsOneWidget);
       expect(find.textContaining('3 canciones · '), findsOneWidget);
-      expect(find.textContaining('Entra la siguiente a 8 s del final'), findsNWidgets(2));
+      expect(find.textContaining('la siguiente entra a 8 s del final'), findsNWidgets(2));
+      expect(find.text('Reproducir la mezcla'), findsOneWidget);
+      // con un set armado, el «como funciona» queda plegado
+      expect(find.text('Cómo funciona'), findsNothing);
       await t.pump(const Duration(seconds: 6));
       expect(t.takeException(), isNull);
     });
@@ -163,11 +171,18 @@ void main() {
     testWidgets('abrir un cambio deja ajustarlo; el cambio de graves se refleja en el resumen', (t) async {
       await _montar(t, MezcladorPagina(inicial: [pista(1), pista(2)]));
       expect(find.textContaining('Cambio de graves de 8 s'), findsOneWidget);
-      await t.tap(find.textContaining('Entra la siguiente a 8 s del final'));
+      await t.tap(find.textContaining('la siguiente entra a 8 s del final'));
       await t.pumpAndSettle();
-      expect(find.text('La siguiente entra cuando falten'), findsOneWidget);
-      expect(find.text('El cambio dura'), findsOneWidget);
+      // lo primero: estilos rapidos y probar; lo avanzado esta plegado
+      expect(find.text('Elige un estilo'.toUpperCase()), findsOneWidget);
       expect(find.text('Probar este cambio', skipOffstage: false), findsOneWidget);
+      expect(find.text('La siguiente empieza cuando falten'), findsNothing);
+      await t.ensureVisible(find.text('Ajustes finos', skipOffstage: false));
+      await t.pumpAndSettle();
+      await t.tap(find.text('Ajustes finos'));
+      await t.pumpAndSettle();
+      expect(find.text('La siguiente empieza cuando falten', skipOffstage: false), findsOneWidget);
+      expect(find.text('Las dos suenan juntas durante', skipOffstage: false), findsOneWidget);
       await t.tap(find.text('Fundido'));
       await t.pumpAndSettle();
       expect(find.textContaining('Cambio de graves de'), findsNothing);
@@ -180,7 +195,7 @@ void main() {
       await t.pumpAndSettle();
       await t.drag(desliz, const Offset(120, 0));
       await t.pumpAndSettle();
-      expect(find.textContaining('Entra la siguiente a 8 s del final'), findsNothing);
+      expect(find.textContaining('la siguiente entra a 8 s del final'), findsNothing);
       await t.pump(const Duration(seconds: 6));
       expect(t.takeException(), isNull);
     });
@@ -196,7 +211,7 @@ void main() {
 
     testWidgets('«Probar este cambio» pide probar ese paso con la cancion siguiente', (t) async {
       await _montar(t, MezcladorPagina(inicial: [pista(1), pista(2), pista(3)]));
-      await t.tap(find.textContaining('Entra la siguiente a 8 s del final').first);
+      await t.tap(find.textContaining('la siguiente entra a 8 s del final').first);
       await t.pumpAndSettle();
       await t.ensureVisible(find.text('Probar este cambio'));
       await t.pumpAndSettle();
@@ -222,7 +237,7 @@ void main() {
       await _montar(t, const MezcladorPagina());
       _r.actual = pista(7);
       _r.proximas = [pista(8), pista(9)];
-      await t.tap(find.text('Añadir canciones').first);
+      await t.tap(find.text('Desde tu cola'));
       await t.pumpAndSettle();
       expect(find.text('Canción 7'), findsOneWidget);
       expect(find.text('Canción 9'), findsOneWidget);
@@ -255,8 +270,64 @@ void main() {
 
     testWidgets('con la letra grande y en pantalla chica no se desborda', (t) async {
       await _montar(t, MezcladorPagina(inicial: [pista(1), pista(2)]), tamano: const Size(320, 568));
-      await t.tap(find.textContaining('Entra la siguiente a 8 s del final'));
+      await t.ensureVisible(find.textContaining('la siguiente entra a 8 s del final'));
       await t.pumpAndSettle();
+      await t.tap(find.textContaining('la siguiente entra a 8 s del final'));
+      await t.pumpAndSettle();
+      await t.ensureVisible(find.text('Ajustes finos', skipOffstage: false));
+      await t.pumpAndSettle();
+      await t.tap(find.text('Ajustes finos'));
+      await t.pumpAndSettle();
+      await t.pump(const Duration(seconds: 6));
+      expect(t.takeException(), isNull);
+    });
+
+    testWidgets('el «?» reabre el como funciona y «Entendido» lo pliega', (t) async {
+      await _montar(t, MezcladorPagina(inicial: [pista(1), pista(2)]));
+      expect(find.text('Cómo funciona'), findsNothing);
+      await t.tap(find.byTooltip('Cómo funciona'));
+      await t.pumpAndSettle();
+      expect(find.text('Cómo funciona'), findsOneWidget);
+      expect(find.text('Mézclalas'), findsOneWidget);
+      await t.tap(find.text('Entendido'));
+      await t.pumpAndSettle();
+      expect(find.text('Cómo funciona'), findsNothing);
+    });
+
+    testWidgets('un estilo rapido cambia el cambio (Corte rápido: 4 s sin tempo)', (t) async {
+      await _montar(t, MezcladorPagina(inicial: [pista(1), pista(2)]));
+      await t.tap(find.textContaining('la siguiente entra a 8 s del final'));
+      await t.pumpAndSettle();
+      await t.tap(find.text('Corte rápido'));
+      await t.pumpAndSettle();
+      expect(find.textContaining('Fundido de 4 s · la siguiente entra a 4 s del final'), findsOneWidget);
+      await t.tap(find.text('Club'));
+      await t.pumpAndSettle();
+      expect(find.textContaining('Cambio de graves de 14 s'), findsOneWidget);
+      await t.pump(const Duration(seconds: 6));
+      expect(t.takeException(), isNull);
+    });
+
+    testWidgets('sin tempo: ofrece «Detectar ritmo» y avisa si no se pudo', (t) async {
+      await _montar(t, MezcladorPagina(inicial: [pista(1), pista(2)]));
+      expect(find.text('Detectar ritmo'), findsNWidgets(2));
+      await t.tap(find.text('Detectar ritmo').first);
+      await t.pump(const Duration(milliseconds: 300));
+      await t.pump(const Duration(milliseconds: 300));
+      expect(find.textContaining('No se pudo saber el ritmo de 1 canción'), findsOneWidget);
+      await t.pump(const Duration(seconds: 6));
+      expect(t.takeException(), isNull);
+    });
+
+    testWidgets('una lista enorme (600 canciones) se monta perezosa y sin limite', (t) async {
+      await _montar(t, MezcladorPagina(inicial: [for (var i = 1; i <= 600; i++) pista(i)]));
+      expect(find.textContaining('600 canciones · '), findsOneWidget);
+      expect(find.text('Canción 1'), findsOneWidget);
+      // solo se construyen las que se ven
+      expect(find.byType(Portada, skipOffstage: false).evaluate().length, lessThan(40));
+      await t.tap(find.text('Reproducir la mezcla'));
+      await t.pump();
+      expect(_r.setReproducido!.length, 600);
       await t.pump(const Duration(seconds: 6));
       expect(t.takeException(), isNull);
     });

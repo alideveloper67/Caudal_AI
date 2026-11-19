@@ -1,11 +1,17 @@
+import 'dart:io';
+
+import 'package:file_picker/file_picker.dart';
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:path/path.dart' as p;
 
 import '../../nucleo/importar.dart';
+import '../../nucleo/importar_archivos.dart';
 import '../servicios.dart';
 import '../tema.dart';
 
-/// Traer a Caudal una lista de Spotify, Apple Music o YouTube Music pegando su enlace.
+/// Traer a Caudal una lista de Spotify, Apple Music o YouTube Music pegando su enlace, o la música de Snaptube.
 class ImportarPagina extends StatefulWidget {
   const ImportarPagina({super.key, this.enlace = ''});
   final String enlace;
@@ -53,8 +59,13 @@ class _ImportarPaginaState extends State<ImportarPagina> {
   }
 
   Future<void> _traer() async {
-    final s = Caudal.leer(context);
     FocusScope.of(context).unfocus();
+    await _procesar(() => Importar.leer(_campo.text));
+  }
+
+  /// Lee la lista con [leer], busca sus canciones en YouTube Music y crea la lista.
+  Future<void> _procesar(Future<ListaExterna> Function() leer) async {
+    final s = Caudal.leer(context);
     setState(() {
       _trabajando = true;
       _error = null;
@@ -63,7 +74,7 @@ class _ImportarPaginaState extends State<ImportarPagina> {
       _total = 0;
     });
     try {
-      final l = await Importar.leer(_campo.text);
+      final l = await leer();
       if (!mounted) return;
       setState(() {
         _fase = 'Buscando las canciones de «${l.titulo}»';
@@ -115,6 +126,81 @@ class _ImportarPaginaState extends State<ImportarPagina> {
     }
   }
 
+  // ------------------------------------------------------------ Snaptube y otras apps
+
+  /// Los nombres de las canciones de una carpeta (sin copiar nada).
+  Future<List<String>> _nombresDe(String carpeta) async {
+    final salida = <String>[];
+    await for (final e in Directory(carpeta).list(recursive: true, followLinks: false)) {
+      if (e is File && ImportarArchivos.extensiones.contains(p.extension(e.path).replaceFirst('.', '').toLowerCase())) {
+        salida.add(p.basename(e.path));
+      }
+    }
+    salida.sort();
+    return salida;
+  }
+
+  Future<void> _desdeCarpeta() async {
+    String? carpeta;
+    try {
+      carpeta = await FilePicker.getDirectoryPath(dialogTitle: 'Elige la carpeta SnapTube Audio');
+    } catch (_) {}
+    if (carpeta == null || !mounted) return;
+    final elegida = carpeta;
+    await _procesar(() async {
+      List<String> nombres;
+      try {
+        nombres = await _nombresDe(elegida);
+      } catch (_) {
+        throw const ErrorImportar('Android no dejó leer esa carpeta. Usa «Elegir canciones» y marca todas las de Snaptube.');
+      }
+      return Importar.deLineas(nombres, titulo: 'Snaptube · ${p.basename(elegida)}');
+    });
+  }
+
+  Future<void> _desdeArchivos() async {
+    final rutas = await ImportarArchivos.elegir();
+    if (rutas.isEmpty || !mounted) return;
+    await _procesar(() async => Importar.deLineas([for (final r in rutas) p.basename(r)], titulo: 'Mi lista de Snaptube'));
+  }
+
+  Future<void> _desdeTexto() async {
+    final c = TextEditingController();
+    final nombre = TextEditingController(text: 'Mi lista');
+    final ok = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: C.superficie2,
+        title: const Text('Pegar nombres de canciones'),
+        content: SingleChildScrollView(
+          child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
+            const Text('Una canción por línea, como «Artista - Título». Sirve cualquier lista que hayas copiado de Snaptube u otra app.',
+                style: estiloSecundario),
+            const SizedBox(height: 12),
+            TextField(controller: nombre, decoration: const InputDecoration(labelText: 'Nombre de la lista')),
+            const SizedBox(height: 8),
+            TextField(
+              controller: c,
+              minLines: 6,
+              maxLines: 12,
+              decoration: const InputDecoration(hintText: 'Bad Bunny - Monaco\nKarol G - Tusa\n…'),
+            ),
+          ]),
+        ),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancelar')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Traer')),
+        ],
+      ),
+    );
+    final texto = c.text;
+    final titulo = nombre.text.trim().isEmpty ? 'Mi lista' : nombre.text.trim();
+    c.dispose();
+    nombre.dispose();
+    if (ok != true || !mounted) return;
+    await _procesar(() async => Importar.deLineas(texto.split(RegExp(r'[\r\n]+')), titulo: titulo, plataforma: 'texto pegado'));
+  }
+
   @override
   Widget build(BuildContext context) {
     final progreso = _total > 0 ? _hechas / _total : null;
@@ -158,6 +244,36 @@ class _ImportarPaginaState extends State<ImportarPagina> {
           _Marca('YouTube Music', Color(0xFFFF3B30)),
         ]),
         const SizedBox(height: Esp.xl),
+        if (!_trabajando) ...[
+          const Text('Snaptube y otras apps', style: estiloTituloSeccion),
+          const SizedBox(height: 4),
+          const Text(
+            'Las listas de Snaptube viven solo dentro de esa app y no tienen enlace. Trae lo que bajaste con ella '
+            '(Caudal busca cada canción para que suene completa, sin límite de cantidad) o pega sus nombres.',
+            style: estiloDetalle,
+          ),
+          const SizedBox(height: Esp.s),
+          Wrap(spacing: Esp.s, runSpacing: Esp.s, children: [
+            if (!kIsWeb && Platform.isAndroid)
+              OutlinedButton.icon(
+                onPressed: _desdeCarpeta,
+                icon: const Icon(Icons.folder_open_rounded),
+                label: const Text('Carpeta de Snaptube'),
+              ),
+            if (!kIsWeb)
+              OutlinedButton.icon(
+                onPressed: _desdeArchivos,
+                icon: const Icon(Icons.audio_file_rounded),
+                label: const Text('Elegir canciones'),
+              ),
+            OutlinedButton.icon(
+              onPressed: _desdeTexto,
+              icon: const Icon(Icons.notes_rounded),
+              label: const Text('Pegar nombres'),
+            ),
+          ]),
+          const SizedBox(height: Esp.xl),
+        ],
         if (_error != null) ...[
           Text(_error!, style: const TextStyle(color: C.error, height: 1.35)),
           const SizedBox(height: Esp.l),

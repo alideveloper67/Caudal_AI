@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+import '../premium/canje_pase.dart';
 import '../servicios.dart';
 import '../tema.dart';
 
@@ -116,6 +117,16 @@ class _DonarDialogo extends StatelessWidget {
               ),
             ]),
             const SizedBox(height: 6),
+            TextButton.icon(
+              onPressed: () {
+                final nav = Navigator.of(context);
+                final ctx = nav.context;
+                nav.pop();
+                mostrarCanjePase(ctx);
+              },
+              icon: const Icon(Icons.confirmation_number_outlined, size: 18),
+              label: const Text('Tengo un código de prueba'),
+            ),
             TextButton(onPressed: () => Navigator.of(context).pop(), child: const Text('Cerrar')),
           ]),
         ),

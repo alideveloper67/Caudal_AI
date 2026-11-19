@@ -790,3 +790,42 @@ def maquina_del_tiempo_en_memoria(col, ahora=None):
     if guardado is not None and (not guardado["usa_hoy"] or guardado["total"] == total):
         return list(guardado["valor"])
     return None
+
+
+# ================================================================ ánimo de una canción
+# Igual que Rasgos.animoDe de la app (app/lib/nucleo/recomendador.dart): se deduce del título y del artista con
+# palabras sueltas (con límite de palabra, así «solomillo» no es «solo») en español e inglés.
+# Manda la tristeza: «Sin ti» es triste aunque hable de amor.
+import re as _re
+
+_L = "a-záéíóúñü"      # letras: el \b de Python no cuenta bien las vocales con tilde pegadas al borde
+
+
+def _palabras(*palabras):
+    return _re.compile(r"(?<![" + _L + r"])(?:" + "|".join(palabras) + r")(?![" + _L + r"])", _re.IGNORECASE)
+
+
+_TRISTE = _palabras(
+    "triste", "tristeza", r"llor\w*", "lágrimas", "lagrimas", "dolor", r"duele\w*", "soledad", "adiós", "adios",
+    r"olvid\w*", "extraño", "extrano", "perdón", "perdon", "ausencia", r"herid\w*", "roto", "rota", "desamor",
+    "despedida", "muerte", "nostalgia", "sad", r"cry\w*", "tears?", "lonely", "alone", r"heartbreak\w*", "broken",
+    "goodbye", r"hurt\w*", r"miss(?:ing)? you", "without you", "sin ti", "pain", "sorry", "farewell",
+    r"depress\w*", "grief", "memories")
+_FIESTA = _palabras(
+    "fiesta", r"baila\w*", "bailar", "perreo", "party", "dance", "dancing", r"goza\w*", "rumba", "prende", "booty",
+    "twerk", "sandungueo", "energy", "energía", "summer", "verano", "bounce", "turn up", "pop off")
+_ROMANTICA = _palabras(
+    "amor", "love", "te quiero", "te amo", r"besos?", "beso", "corazón", "corazon", "heart", "mi vida", "cariño",
+    r"enamorad\w*", "romance", r"romántic\w*", "forever", "eres mi", "contigo")
+
+
+def animo_de(texto):
+    """'triste', 'fiesta', 'romantica' o '' si el texto (título y artista) no lo dice."""
+    t = str(texto or "")
+    if _TRISTE.search(t):
+        return "triste"
+    if _FIESTA.search(t):
+        return "fiesta"
+    if _ROMANTICA.search(t):
+        return "romantica"
+    return ""

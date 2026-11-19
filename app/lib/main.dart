@@ -33,6 +33,7 @@ import 'reproduccion/servicio_audio.dart';
 import 'ui/armazon.dart';
 import 'ui/comunes.dart';
 import 'nucleo/fondo_app.dart';
+import 'nucleo/premium.dart';
 import 'nucleo/mascota_app.dart';
 import 'nucleo/social.dart';
 import 'ui/fondo_capa.dart';
@@ -96,16 +97,32 @@ class _CaudalAppState extends State<CaudalApp> {
     if (mounted) setState(() {}); // el tema cambia (pantallas transparentes) cuando hay fondo
   }
 
+  String _temaPremium = Premium.i.temaEfectivo;
+
+  /// Un tema exclusivo que se pone, se quita o se pierde (la prueba venció): se repinta toda la app.
+  void _alCambiarPremium() {
+    final nuevo = Premium.i.temaEfectivo;
+    if (nuevo == _temaPremium) return;
+    _temaPremium = nuevo;
+    final a = _s?.ajustes;
+    if (a == null) return;
+    Aspecto.aplicar(a.texto('acento'), a.texto('fondo'));
+    if (mounted) setState(() {});
+    WidgetsBinding.instance.reassembleApplication();
+  }
+
   @override
   void initState() {
     super.initState();
     FondoApp.i.addListener(_alCambiarFondo);
+    Premium.i.addListener(_alCambiarPremium);
     _arrancar();
   }
 
   @override
   void dispose() {
     FondoApp.i.removeListener(_alCambiarFondo);
+    Premium.i.removeListener(_alCambiarPremium);
     super.dispose();
   }
 
@@ -211,6 +228,23 @@ class _CaudalAppState extends State<CaudalApp> {
       // los widgets que leen los colores directamente se vuelven a construir
       WidgetsBinding.instance.reassembleApplication();
     });
+    // modo ligero: sin animaciones ni adornos y con menos memoria para imagenes
+    void aplicarLigero() {
+      final cache = PaintingBinding.instance.imageCache;
+      final ligero = ajustes.sino('modo_ligero');
+      cache.maximumSizeBytes = ligero ? 48 << 20 : 100 << 20;
+      cache.maximumSize = ligero ? 400 : 1000;
+    }
+
+    var ligeroAntes = ajustes.sino('modo_ligero');
+    aplicarLigero();
+    ajustes.addListener(() {
+      final ahora = ajustes.sino('modo_ligero');
+      if (ahora == ligeroAntes) return;
+      ligeroAntes = ahora;
+      aplicarLigero();
+      if (mounted) setState(() {});
+    });
     Diagnostico.marcar('biblioteca');
     final coleccion = await _paso('biblioteca', Coleccion.abrir(c.id));
     // las portadas de las tarjetas de género se recuerdan entre sesiones
@@ -289,6 +323,10 @@ class _CaudalAppState extends State<CaudalApp> {
         .iniciar(c.id, c.sesion != null && c.sesion!.acceso.isNotEmpty ? Social(c.sesion!) : null)
         .catchError((_) {}));
     unawaited(MascotaApp.i.iniciar(c.id).catchError((_) {}));
+    // beneficios de donador (marco, efecto del nombre, tema): lo guardado primero, lo de la nube después
+    unawaited(Premium.i
+        .iniciar(c.id, c.sesion != null && c.sesion!.acceso.isNotEmpty ? Social(c.sesion!) : null)
+        .catchError((_) {}));
     unawaited(_buscarVersion());
     unawaited(_buscarAvisos());
     unawaited(_pedirNotificaciones());
@@ -344,6 +382,7 @@ class _CaudalAppState extends State<CaudalApp> {
     _inteligente = null;
     await Cuentas.olvidar(s.cuenta);
     FondoApp.i.reiniciar();
+    Premium.i.reiniciar();
     MascotaApp.i.reiniciar();
     Gustos.actuales = [];
     setState(() {
@@ -420,8 +459,13 @@ class _CaudalAppState extends State<CaudalApp> {
       builder: (context, hijo) {
         // que la letra grande del sistema no rompa el diseno
         final mq = MediaQuery.of(context);
+        // con el modo ligero todo lo que respeta «quitar animaciones» se queda quieto
+        final ligero = s?.ajustes.sino('modo_ligero') ?? false;
         final contenido = MediaQuery(
-          data: mq.copyWith(textScaler: mq.textScaler.clamp(minScaleFactor: 0.85, maxScaleFactor: 1.2)),
+          data: mq.copyWith(
+            textScaler: mq.textScaler.clamp(minScaleFactor: 0.85, maxScaleFactor: 1.2),
+            disableAnimations: mq.disableAnimations || ligero,
+          ),
           child: hijo!,
         );
         if (s == null) return contenido;

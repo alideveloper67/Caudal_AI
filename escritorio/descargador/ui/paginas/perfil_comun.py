@@ -18,6 +18,8 @@ from .. import iconos, imagenes
 from ..componentes import Portada
 from ..gif_animado import GifVivo
 from ..estilos import C, _hex, _luz, _mezcla, _rgb
+from ..premium_estilos import MARCO_ESTILO, ancho_marco, pintar_marco, reloj
+from ...premium_datos import NINGUNO, marco_valido
 
 # ------------------------------------------------------------------ colores
 
@@ -229,9 +231,13 @@ def entrada(widgets, paso=70, ms=260):
 class Avatar(QWidget):
     """Foto redonda de una persona; sin foto, su inicial sobre el color del perfil."""
 
-    def __init__(self, lado=48, nombre="", color=None, foto_url=None, anillo=None, padre=None, animar=False):
+    def __init__(self, lado=48, nombre="", color=None, foto_url=None, anillo=None, padre=None, animar=False,
+                 marco=None, marco_siempre=False):
         super().__init__(padre)
         self.animar = animar          # un GIF se anima solo donde se pide (perfil, editor); en listas, 1.er cuadro
+        self.marco = marco_valido(marco)       # marco premium alrededor de la foto (animado, ver premium_estilos)
+        self.siempre = bool(marco_siempre)     # el marco se anima aunque haya muchos avatares a la vista
+        self._foto_url = foto_url
         self.gif = None
         self.lado = lado
         self.nombre = nombre or ""
@@ -242,6 +248,36 @@ class Avatar(QWidget):
         self.setFixedSize(lado, lado)
         self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self.set_foto(foto_url)
+
+    def _margen(self):
+        """Borde que ocupan el aro de color y el marco; la foto va por dentro."""
+        base = 3 if self.anillo else 0
+        return base + (ancho_marco(self.lado) if self.marco != NINGUNO else 0)
+
+    def set_marco(self, marco):
+        """Cambia el marco (la vista previa de Personalizar y cuando llega el dato de la nube)."""
+        marco = marco_valido(marco)
+        if marco == self.marco:
+            return
+        self.marco = marco
+        self._sincronizar_reloj()
+        self.url = ""                 # la foto se pide otra vez al tamaño que queda dentro del marco
+        self.set_foto(self._foto_url)
+        self.update()
+
+    def _sincronizar_reloj(self):
+        if self.marco != NINGUNO and self.isVisible():
+            reloj().registrar(self)
+        else:
+            reloj().quitar(self)
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        self._sincronizar_reloj()
+
+    def hideEvent(self, e):
+        super().hideEvent(e)
+        reloj().quitar(self)
 
     def _quitar_gif(self):
         if self.gif is not None:
@@ -259,13 +295,14 @@ class Avatar(QWidget):
         self.update()
 
     def set_foto(self, foto_url):
+        self._foto_url = foto_url
         url = S.url_foto(foto_url) if foto_url else ""
         if url == self.url and (self.pm is not None or self.gif is not None or not url):
             return
         self._quitar_gif()
         self.url = url
         self.pm = None
-        interior = self.lado - (6 if self.anillo else 0)
+        interior = int(self.lado - 2 * self._margen())
         if url and self.animar and G.url_es_gif(url):
             yo, objetivo = self, url
 
@@ -293,11 +330,17 @@ class Avatar(QWidget):
     def paintEvent(self, _e):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
-        margen = 3 if self.anillo else 0
+        margen = self._margen()
         if self.anillo:
             p.setPen(Qt.NoPen)
             p.setBrush(QColor(self.anillo))
             p.drawEllipse(QRectF(0, 0, self.lado, self.lado))
+        if self.marco != NINGUNO:
+            fuera = 3 if self.anillo else 0
+            ancho = ancho_marco(self.lado)
+            vueltas = MARCO_ESTILO[self.marco][1]
+            pintar_marco(p, QRectF(fuera, fuera, self.lado - 2 * fuera, self.lado - 2 * fuera), self.marco,
+                         reloj().angulo(self, vueltas), ancho)
         r = QRectF(margen, margen, self.lado - 2 * margen, self.lado - 2 * margen)
         if self.gif is not None and not self.gif.imagen().isNull():
             lado = int(self.lado - 2 * margen)

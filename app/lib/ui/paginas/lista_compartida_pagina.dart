@@ -246,7 +246,7 @@ class _VistaPreviaTarjeta extends StatelessWidget {
           Text(vista.nombre, style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w800)),
           const SizedBox(height: 8),
           Row(children: [
-            AvatarPerfil(nombre: vista.dueno.visible, fotoUrl: vista.dueno.fotoUrl, radio: 12),
+            AvatarPerfil(nombre: vista.dueno.visible, fotoUrl: vista.dueno.fotoUrl, marco: vista.dueno.marco, radio: 12),
             const SizedBox(width: 8),
             Expanded(child: Text('De ${vista.dueno.visible}', style: estiloSecundario, maxLines: 1,
                 overflow: TextOverflow.ellipsis)),
@@ -513,7 +513,7 @@ class _ListaCompartidaPaginaState extends State<ListaCompartidaPagina> {
                 style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w900, height: 1.15)),
             const SizedBox(height: 6),
             Row(children: [
-              AvatarPerfil(nombre: _lista.dueno.visible, fotoUrl: _lista.dueno.fotoUrl, radio: 10),
+              AvatarPerfil(nombre: _lista.dueno.visible, fotoUrl: _lista.dueno.fotoUrl, marco: _lista.dueno.marco, radio: 10),
               const SizedBox(width: 6),
               Expanded(child: Text('Compartida · ${_lista.dueno.visible}', maxLines: 1,
                   overflow: TextOverflow.ellipsis, style: estiloSecundario)),
@@ -613,7 +613,7 @@ class _HojaMiembrosState extends State<_HojaMiembros> {
               child: ListView(shrinkWrap: true, children: [
                 for (final x in m)
                   ListTile(
-                    leading: AvatarPerfil(nombre: x.persona.visible, fotoUrl: x.persona.fotoUrl, radio: 18),
+                    leading: AvatarPerfil(nombre: x.persona.visible, fotoUrl: x.persona.fotoUrl, marco: x.persona.marco, radio: 18),
                     title: Text(x.persona.visible),
                     subtitle: Text(x.esDueno ? 'Dueño' : textoRolLista(x.rol), style: estiloDetalle),
                   ),

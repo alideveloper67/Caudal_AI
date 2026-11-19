@@ -19,6 +19,7 @@ from pathlib import Path
 
 from . import nube
 from .config import carpeta_datos
+from .premium_datos import efecto_valido, marco_valido
 from .nube import ErrorNube, SinConexion  # noqa: F401 - se reexportan para las pantallas
 
 BUCKET_FOTOS = "avatares"
@@ -161,6 +162,7 @@ def perfil_limpio(d):
         "id": _texto(d.get("id")), "usuario": _texto(d.get("usuario")),
         "nombre": _texto(d.get("nombre")), "foto_url": d.get("foto_url") or None,
         "banner_url": d.get("banner_url") or None,
+        "marco": marco_valido(d.get("marco")), "efecto_nombre": efecto_valido(d.get("efecto_nombre")),
         "bio": _texto(d.get("bio"), 300), "frase": _texto(d.get("frase"), 80),
         "cancion_fav": cancion_fav_limpia(d.get("cancion_fav")),
         "artista_fav": _texto(d.get("artista_fav"), 80),
@@ -222,6 +224,7 @@ def persona_limpia(d):
             "solicitud": d.get("id") if "de" in d or "para" in d else None,
             "usuario": _texto(d.get("usuario")), "nombre": _texto(d.get("nombre")),
             "foto_url": d.get("foto_url") or None, "relacion": _texto(d.get("relacion")),
+            "marco": marco_valido(d.get("marco")), "efecto_nombre": efecto_valido(d.get("efecto_nombre")),
             "creado": _texto(d.get("creado") or d.get("desde"))}
 
 
@@ -615,6 +618,26 @@ class Social:
     # ---- fondo de la aplicación (solo Donador o Fundador de Caudal)
     def puede_poner_fondo(self):
         return self.sesion.rpc("puede_poner_fondo") is True
+
+    # ---- premium: estado, pase de prueba y personalización
+    def mi_premium(self):
+        """{premium, tipo, vence} de mi cuenta (donador, fundador o prueba). {} si el servidor no responde algo útil."""
+        d = self.sesion.rpc("mi_premium")
+        return d if isinstance(d, dict) else {}
+
+    def canjear_pase(self, codigo):
+        """Canjea un código de prueba. Devuelve {ok, mensaje, dias, vence}."""
+        d = self.sesion.rpc("canjear_pase", p_codigo=str(codigo or "").strip().upper())
+        return d if isinstance(d, dict) else {"ok": False, "mensaje": "No se pudo comprobar el código."}
+
+    def leer_personalizacion(self):
+        """Mi marco, efecto de nombre y tema, tal como están guardados en mi perfil."""
+        filas = self.sesion.pedir(
+            "GET", f"perfiles?select=marco,efecto_nombre,tema_premium&id=eq.{self.yo}")
+        d = (filas or [{}])[0] or {}
+        from .premium_datos import tema_valido
+        return {"marco": marco_valido(d.get("marco")), "efecto_nombre": efecto_valido(d.get("efecto_nombre")),
+                "tema_premium": tema_valido(d.get("tema_premium"))}
 
     def subir_fondo(self, datos_jpeg):
         return self._subir_imagen_perfil("fondo.jpg", datos_jpeg, "tu fondo")

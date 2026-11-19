@@ -179,7 +179,7 @@ void main() {
       expect(t('No tienes acceso a esa lista.'), contains('Ya no tienes acceso'));
       expect(t('En esta lista solo puedes escuchar: no puedes añadir canciones.'), contains('solo puedes escuchar'));
       expect(t('Solo puedes quitar las canciones que añadiste tú.'), isNotNull);
-      expect(t('Una lista compartida admite hasta 2000 canciones y esta ya tiene 2000.'), contains('2000'));
+      expect(t('Una lista compartida admite hasta 200000 canciones y esta ya tiene 200000.'), contains('200000'));
       expect(t('No estás en esa lista.'), 'Ya no estás en esa lista.');
       expect(t('Solo el dueño de la lista puede quitar a alguien.'), isNotNull);
     });

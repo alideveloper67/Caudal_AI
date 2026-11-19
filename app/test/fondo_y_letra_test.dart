@@ -58,10 +58,10 @@ void main() {
       await t.tap(find.text('abrir'));
       await t.pump(const Duration(milliseconds: 500));
       expect(find.text('Compartir letra'), findsOneWidget);
-      expect(find.text('Compartir imagen'), findsOneWidget);
+      expect(find.text('Compartir en estados y chats'), findsOneWidget);
       expect(t.takeException(), isNull, reason: 'al abrir la hoja');
       // los estilos y formatos que se alcanzan a ver se prueban; no debe haber desbordes en ninguno
-      for (final x in ['Oscuro', 'Claro', 'Historia', 'Cuadrada', 'Vertical', 'Color']) {
+      for (final x in ['Estado', 'Oscuro', 'Claro', 'Historia', 'Cuadrada', 'Vertical', 'Color']) {
         if (find.text(x).evaluate().isEmpty) continue;
         await t.tap(find.text(x), warnIfMissed: false);
         await t.pump(const Duration(milliseconds: 300));

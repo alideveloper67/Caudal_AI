@@ -761,31 +761,133 @@ class LienzoLetra(QWidget):
         return textos[:cuantas]
 
 
-def crear_tarjeta(pista, lineas, portada, paleta):
-    """Imagen vertical 1080x1920, lista para una historia."""
+# estilos de la tarjeta: el clásico es de todos; los otros cuatro son de donadores (y fundadores)
+ESTILOS_TARJETA = {"clasico": "Clásico", "neon": "Neón", "cristal": "Cristal", "papel": "Papel",
+                   "aurora": "Aurora"}
+ESTILOS_EXCLUSIVOS = ("neon", "cristal", "papel", "aurora")
+
+
+def _fondo_neon(p, W, H):
+    p.fillRect(QRectF(0, 0, W, H), QColor("#07040F"))
+    p.setPen(Qt.NoPen)
+    for cx, cy, color in ((W * 0.1, H * 0.12, "#FF2BD6"), (W * 0.95, H * 0.9, "#22E5FF"),
+                          (W * 0.9, H * 0.25, "#7C3AED")):
+        g = QRadialGradient(QPointF(cx, cy), W * 0.85)
+        c0 = QColor(color)
+        c0.setAlpha(120)
+        c1 = QColor(color)
+        c1.setAlpha(0)
+        g.setColorAt(0.0, c0)
+        g.setColorAt(1.0, c1)
+        p.setBrush(QBrush(g))
+        p.drawRect(QRectF(0, 0, W, H))
+    p.setPen(QPen(QColor(255, 255, 255, 9), 2))
+    for y in range(0, H, 64):                       # una rejilla tenue, como una pantalla retro
+        p.drawLine(0, y, W, y)
+
+
+def _fondo_aurora(p, W, H):
+    p.fillRect(QRectF(0, 0, W, H), QColor("#050B14"))
+    p.setPen(Qt.NoPen)
+    bandas = ((0.18, "#34D399", 0.0), (0.38, "#22D3EE", 0.7), (0.62, "#A78BFA", 1.4), (0.84, "#F472B6", 2.1))
+    for fy, color, fase in bandas:
+        p.save()
+        p.translate(W / 2, H * fy)
+        p.rotate(-14 + fase * 3)
+        p.scale(2.9, 1.0)
+        g = QRadialGradient(QPointF(0, 0), H * 0.2)
+        c0 = QColor(color)
+        c0.setAlpha(150)
+        c1 = QColor(color)
+        c1.setAlpha(0)
+        g.setColorAt(0.0, c0)
+        g.setColorAt(1.0, c1)
+        p.setBrush(QBrush(g))
+        p.drawEllipse(QPointF(0, 0), H * 0.2, H * 0.2)
+        p.restore()
+
+
+def _fondo_papel(p, W, H):
+    p.fillRect(QRectF(0, 0, W, H), QColor("#F4EDE0"))
+    p.setPen(QPen(QColor(120, 90, 50, 14), 2))
+    for x in range(-H, W, 46):                      # fibras diagonales muy suaves
+        p.drawLine(x, 0, x + H // 2, H)
+    g = QLinearGradient(0, 0, 0, H)
+    g.setColorAt(0.0, QColor(255, 255, 255, 60))
+    g.setColorAt(1.0, QColor(120, 90, 50, 40))
+    p.fillRect(QRectF(0, 0, W, H), QBrush(g))
+
+
+# colores por estilo: (texto, secundario, firma, brillo de la primera línea o None)
+_TINTA = {
+    "clasico": (QColor(255, 255, 255), QColor(255, 255, 255, 185), QColor(255, 255, 255, 170), QColor(255, 255, 255)),
+    "neon": (QColor("#FFFFFF"), QColor(255, 255, 255, 190), QColor("#7DF9FF"), QColor("#FF2BD6")),
+    "cristal": (QColor(255, 255, 255), QColor(255, 255, 255, 200), QColor(255, 255, 255, 190), QColor(255, 255, 255)),
+    "aurora": (QColor("#F0FFFB"), QColor(240, 255, 251, 190), QColor(240, 255, 251, 190), QColor("#34D399")),
+    "papel": (QColor("#2B2118"), QColor(43, 33, 24, 175), QColor(43, 33, 24, 170), None),
+}
+
+
+def crear_tarjeta(pista, lineas, portada, paleta, estilo="clasico"):
+    """Imagen vertical 1080x1920, lista para una historia. `estilo`: clasico (de todos) o uno de los
+    exclusivos para donadores: neon, cristal, papel, aurora."""
+    estilo = estilo if estilo in ESTILOS_TARJETA else "clasico"
+    tinta, tinta2, firma, brillo = _TINTA[estilo]
     W, H = 1080, 1920
     img = QImage(W, H, QImage.Format_RGB32)
-    fondo = QImage(W // 6, H // 6, QImage.Format_RGB32)
-    p = QPainter(fondo)
-    p.setRenderHint(QPainter.Antialiasing)
-    pintar_fondo(p, fondo.width(), fondo.height(), paleta, desenfocar(portada), 7.0, 0.3)
-    p.end()
     p = QPainter(img)
     p.setRenderHint(QPainter.Antialiasing)
     p.setRenderHint(QPainter.SmoothPixmapTransform)
     p.setRenderHint(QPainter.TextAntialiasing)
-    p.drawImage(QRectF(0, 0, W, H), fondo)
+    if estilo in ("clasico", "cristal"):
+        fondo = QImage(W // 6, H // 6, QImage.Format_RGB32)
+        pf = QPainter(fondo)
+        pf.setRenderHint(QPainter.Antialiasing)
+        pintar_fondo(pf, fondo.width(), fondo.height(), paleta, desenfocar(portada), 7.0, 0.3)
+        pf.end()
+        p.drawImage(QRectF(0, 0, W, H), fondo)
+    elif estilo == "neon":
+        _fondo_neon(p, W, H)
+    elif estilo == "aurora":
+        _fondo_aurora(p, W, H)
+    else:
+        _fondo_papel(p, W, H)
     margen = 96
     # portada con esquinas redondas y sombra
     lado = 560
     caja = QRectF((W - lado) / 2, 250, lado, lado)
-    for n in range(14, 0, -2):
+    if estilo == "cristal":       # el cristal esmerilado detrás de todo el texto
+        p.setPen(QPen(QColor(255, 255, 255, 70), 3))
+        p.setBrush(QColor(255, 255, 255, 30))
+        p.drawRoundedRect(QRectF(56, 190, W - 112, H - 330), 56, 56)
+    p.save()
+    if estilo == "papel":         # foto «pegada» con borde blanco y un poco torcida
+        p.translate(W / 2, caja.center().y())
+        p.rotate(-3)
+        p.translate(-W / 2, -caja.center().y())
         p.setPen(Qt.NoPen)
-        p.setBrush(QColor(0, 0, 0, 9))
-        p.drawRoundedRect(caja.adjusted(-n, -n + 18, n, n + 18), 40 + n, 40 + n)
+        for n in range(14, 0, -2):
+            p.setBrush(QColor(60, 40, 20, 12))
+            p.drawRoundedRect(caja.adjusted(-26 - n, -26 - n + 18, 26 + n, 26 + n + 18), 14 + n, 14 + n)
+        p.setBrush(QColor("#FFFFFF"))
+        p.drawRoundedRect(caja.adjusted(-26, -26, 26, 26), 14, 14)
+    else:
+        for n in range(14, 0, -2):
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(0, 0, 0, 9))
+            p.drawRoundedRect(caja.adjusted(-n, -n + 18, n, n + 18), 40 + n, 40 + n)
+    if estilo == "neon":          # doble filo de neón alrededor de la portada
+        for color, d in (("#FF2BD6", 14), ("#22E5FF", 6)):
+            halo = QColor(color)
+            halo.setAlpha(70)
+            p.setPen(QPen(halo, 14))
+            p.setBrush(Qt.NoBrush)
+            p.drawRoundedRect(caja.adjusted(-d, -d, d, d), 40 + d, 40 + d)
+            p.setPen(QPen(QColor(color), 4))
+            p.drawRoundedRect(caja.adjusted(-d, -d, d, d), 40 + d, 40 + d)
     if portada is not None and not portada.isNull():
         ruta = QPainterPath()
-        ruta.addRoundedRect(caja, 36, 36)
+        ruta.addRoundedRect(caja, 36 if estilo != "papel" else 10, 36 if estilo != "papel" else 10)
         p.save()
         p.setClipPath(ruta)
         cuadro = min(portada.width(), portada.height())
@@ -793,6 +895,7 @@ def crear_tarjeta(pista, lineas, portada, paleta):
                         cuadro, cuadro)
         p.drawImage(caja, portada, origen)
         p.restore()
+    p.restore()
     # titulo y artista
     titulo = (pista or {}).get("titulo") or ""
     artista = ", ".join(a.get("nombre", "") for a in (pista or {}).get("artistas") or []) \
@@ -803,14 +906,14 @@ def crear_tarjeta(pista, lineas, portada, paleta):
     fa = QFont("Segoe UI")
     fa.setPixelSize(34)
     fa.setWeight(QFont.DemiBold)
-    p.setPen(QColor(255, 255, 255))
+    p.setPen(tinta)
     p.setFont(ft)
     y = caja.bottom() + 90
     fm = QFontMetricsF(ft)
     p.drawText(QRectF(margen, y, W - 2 * margen, 60), Qt.AlignHCenter | Qt.AlignVCenter,
                fm.elidedText(titulo, Qt.ElideRight, W - 2 * margen))
     p.setFont(fa)
-    p.setPen(QColor(255, 255, 255, 185))
+    p.setPen(tinta2)
     p.drawText(QRectF(margen, y + 62, W - 2 * margen, 50), Qt.AlignHCenter | Qt.AlignVCenter,
                QFontMetricsF(fa).elidedText(artista, Qt.ElideRight, W - 2 * margen))
     # la letra: la primera bien encendida, las demas un poco menos
@@ -824,15 +927,23 @@ def crear_tarjeta(pista, lineas, portada, paleta):
         for fila in partir(texto, fml, W - 2 * margen):
             if y > H - 220:
                 break
-            if n == 0:
+            if n == 0 and estilo == "papel":       # subrayado de rotulador amarillo
+                p.setPen(Qt.NoPen)
+                p.setBrush(QColor(255, 214, 90, 170))
+                p.drawRoundedRect(QRectF(margen - 12, y + fml.height() * 0.42, fml.horizontalAdvance(fila) + 24,
+                                         fml.height() * 0.5), 10, 10)
+            elif n == 0 and brillo is not None:
                 ruta = QPainterPath()
                 ruta.addText(QPointF(margen, y + fml.ascent()), fl, fila)
-                for ancho, alfa in ((18, 10), (10, 18)):
-                    p.setPen(QPen(QColor(255, 255, 255, alfa), ancho, Qt.SolidLine,
-                                  Qt.RoundCap, Qt.RoundJoin))
+                for ancho, alfa in ((18, 10), (10, 18)) if estilo != "neon" else ((22, 40), (12, 70), (6, 120)):
+                    halo = QColor(brillo)
+                    halo.setAlpha(alfa)
+                    p.setPen(QPen(halo, ancho, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
                     p.setBrush(Qt.NoBrush)
                     p.drawPath(ruta)
-            p.setPen(QColor(255, 255, 255, 255 if n == 0 else 150))
+            color = QColor(tinta)
+            color.setAlpha(255 if n == 0 else 150)
+            p.setPen(color)
             p.drawText(QPointF(margen, y + fml.ascent()), fila)
             y += fml.height() * 1.05
         y += 26
@@ -841,7 +952,7 @@ def crear_tarjeta(pista, lineas, portada, paleta):
     fc.setPixelSize(30)
     fc.setWeight(QFont.Bold)
     p.setFont(fc)
-    p.setPen(QColor(255, 255, 255, 170))
+    p.setPen(firma)
     p.drawPixmap(QRectF(W / 2 - 112, H - 140, 40, 40).toRect(), iconos.icono_app(80))
     p.drawText(QRectF(W / 2 - 62, H - 140, 200, 40), Qt.AlignLeft | Qt.AlignVCenter, "Caudal")
     p.end()
@@ -912,10 +1023,15 @@ class PaginaLetra(QWidget):
         self.bt_imagen.setToolTip("Una tarjeta vertical con la portada y estas líneas, "
                                   "lista para tus historias (también queda copiada)")
         self.bt_imagen.clicked.connect(self._tarjeta)
+        # «Guardar imagen» sigue siendo un solo clic (con el último estilo elegido); el estilo se cambia aparte
+        self.estilo_tarjeta = "clasico"
+        self.bt_estilo = QPushButton("Estilo")
+        self.bt_estilo.setToolTip("Elegir cómo se ve la tarjeta. Neón, Cristal, Papel y Aurora son para donadores")
+        self.bt_estilo.clicked.connect(self._cambiar_estilo)
         self.bt_volver = QPushButton("Cerrar")
         self.bt_volver.setToolTip("Volver a donde estabas")
         self.bt_volver.clicked.connect(self.volver.emit)
-        for b in (self.bt_traducir, self.bt_imagen, self.bt_volver):
+        for b in (self.bt_traducir, self.bt_estilo, self.bt_imagen, self.bt_volver):
             b.setCursor(Qt.PointingHandCursor)
             b.setStyleSheet(_BOTON)
             h.addWidget(b, 0, Qt.AlignVCenter)
@@ -961,13 +1077,54 @@ class PaginaLetra(QWidget):
         self.ctx.ajustes.guardar()
         self.lienzo.pedir_traduccion()
 
+    def _es_premium(self):
+        g = getattr(self.ctx, "premium", None)
+        return bool(g is not None and g.premium)
+
+    def _mostrar_menu(self, menu):
+        """Abre el menú junto al ratón y devuelve la opción elegida (aparte para poder probarlo sin ventana)."""
+        from PySide6.QtGui import QCursor
+        return menu.exec(QCursor.pos())
+
+    def _elegir_estilo_tarjeta(self):
+        """Menú de estilos de la tarjeta. Los exclusivos llevan candado si la cuenta no es de donador:
+        al elegirlos se abre «Donar aquí» en vez de guardar. None si se cancela."""
+        from PySide6.QtWidgets import QMenu
+        menu = QMenu(self)
+        premium = self._es_premium()
+        acciones = {}
+        for clave, nombre in ESTILOS_TARJETA.items():
+            exclusivo = clave in ESTILOS_EXCLUSIVOS
+            texto = nombre if not exclusivo or premium else f"🔒 {nombre} · para donadores"
+            acciones[menu.addAction(texto)] = clave
+        elegida = self._mostrar_menu(menu)
+        clave = acciones.get(elegida)
+        if clave is None:
+            return None
+        if clave in ESTILOS_EXCLUSIVOS and not premium:
+            from .donar import abrir_donar
+            abrir_donar(self)
+            return None
+        return clave
+
+    def _cambiar_estilo(self):
+        estilo = self._elegir_estilo_tarjeta()
+        if estilo is None:
+            return
+        self.estilo_tarjeta = estilo
+        self.bt_estilo.setText("Estilo" if estilo == "clasico" else f"Estilo: {ESTILOS_TARJETA[estilo]}")
+        self.ctx.avisar(f"Estilo «{ESTILOS_TARJETA[estilo]}»: se usará al guardar la imagen")
+
     def _tarjeta(self):
         lineas = self.lienzo.lineas_para_tarjeta()
         pista = self.ctx.reproductor.actual
         if not lineas or not pista:
             self.ctx.avisar("Primero pon una canción que tenga letra.")
             return
-        img = crear_tarjeta(pista, lineas, self.lienzo.portada, self.lienzo.paleta)
+        estilo = self.estilo_tarjeta
+        if estilo in ESTILOS_EXCLUSIVOS and not self._es_premium():
+            estilo = "clasico"                    # se acabó la prueba (o ya no es donador): vuelve el clásico
+        img = crear_tarjeta(pista, lineas, self.lienzo.portada, self.lienzo.paleta, estilo)
         nombre = _nombre_archivo(f"{pista.get('titulo') or 'Letra'} - {lineas[0][:30]}")
         ruta = os.path.join(carpeta_imagenes(), nombre + ".png")
         n = 2

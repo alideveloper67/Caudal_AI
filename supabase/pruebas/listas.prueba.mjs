@@ -330,10 +330,9 @@ const mil = JSON.stringify(Array.from({ length: 1000 }, (_, i) => ({ clave: 'x' 
 comprobar('primer lote de 1000 entra', (await uno(`select agregar_a_lista_compartida($1, $2::jsonb)`, [gran, mil])) === 1000);
 const mil2 = JSON.stringify(Array.from({ length: 1000 }, (_, i) => ({ clave: 'y' + i, datos: {} })));
 comprobar('segundo lote de 1000 entra (2000 en total)', (await uno(`select agregar_a_lista_compartida($1, $2::jsonb)`, [gran, mil2])) === 1000);
-const msgTope = await mensajeDeError(() => q(`select agregar_a_lista_compartida($1, $2::jsonb)`, [gran, items('z1')]));
-comprobar('la canción 2001 no entra, con frase clara', msgTope && /2000 canciones/.test(msgTope), String(msgTope));
+comprobar('la canción 2001 ya sí entra: sin tope de importación', (await uno(`select agregar_a_lista_compartida($1, $2::jsonb)`, [gran, items('z1')])) === 1);
 await admin();
-comprobar('sigue habiendo 2000', (await uno(`select count(*)::int from lista_items where lista_id = $1`, [gran])) === 2000);
+comprobar('hay 2001', (await uno(`select count(*)::int from lista_items where lista_id = $1`, [gran])) === 2001);
 await como('ana');
 comprobar('con la lista llena, repetir canciones existentes devuelve 0 sin error', (await uno(`select agregar_a_lista_compartida($1, $2::jsonb)`, [gran, items('x1')])) === 0);
 await q(`select dejar_de_compartir_lista($1)`, [gran]);

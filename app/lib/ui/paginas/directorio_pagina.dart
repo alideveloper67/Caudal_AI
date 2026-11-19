@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../../nucleo/nube.dart';
 import '../../nucleo/social.dart';
 import '../comunes.dart';
+import '../premium/marcos.dart';
 import '../servicios.dart';
 import '../tema.dart';
 import 'perfil_comun.dart';
@@ -293,12 +294,12 @@ class TarjetaPerfil extends StatelessWidget {
                   child: Container(
                     padding: const EdgeInsets.all(3),
                     decoration: BoxDecoration(shape: BoxShape.circle, color: C.superficie),
-                    child: AvatarPerfil(nombre: p.visible, fotoUrl: p.fotoUrl, color: color, radio: 32),
+                    child: AvatarPerfil(nombre: p.visible, fotoUrl: p.fotoUrl, marco: p.marco, color: color, radio: 32),
                   ),
                 ),
                 const SizedBox(height: 6),
-                Text(p.visible, maxLines: 1, overflow: TextOverflow.ellipsis, textAlign: TextAlign.center,
-                    style: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w800)),
+                NombreEfecto(p.visible, efecto: p.efectoNombre, textAlign: TextAlign.center,
+                    estilo: const TextStyle(fontSize: 15.5, fontWeight: FontWeight.w800)),
                 Text('@${p.usuario}', maxLines: 1, overflow: TextOverflow.ellipsis, style: estiloDetalle),
                 const SizedBox(height: 4),
                 SizedBox(

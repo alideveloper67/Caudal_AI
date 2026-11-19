@@ -227,7 +227,8 @@ class PaginaListaCompartida(Pagina):
             _borrar_layout(zona)
             for m in miembros:
                 fila = QHBoxLayout()
-                fila.addWidget(Avatar(34, LC.nombre_persona(m), C["acento"], m.get("foto_url")))
+                fila.addWidget(Avatar(34, LC.nombre_persona(m), C["acento"], m.get("foto_url"),
+                                      marco=m.get("marco")))
                 quien = LC.nombre_persona(m) + ("  ·  dueño" if m["es_dueno"] else "")
                 et = QLabel(f"<b>{quien}</b><br><span style='color:{C['texto3']};font-size:11px'>@{m['usuario']}</span>")
                 fila.addWidget(et, 1)

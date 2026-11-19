@@ -748,6 +748,10 @@ class Coleccion extends ChangeNotifier {
 
   Future<void> borrarBusquedas() async => db.delete('busquedas');
 
+  /// Quita una sola búsqueda de las recientes.
+  Future<void> borrarBusqueda(String texto) async =>
+      db.delete('busquedas', where: 'texto = ?', whereArgs: [texto]);
+
   // ------------------------------------------------------------ estado
 
   Future<void> guardarEstado(String clave, Object? valor) async => db.insert(

@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'coleccion.dart';
+import 'cosmeticos.dart';
 import 'nube.dart';
 import 'social.dart' show Relacion;
 import 'tarjeta_lista.dart';
@@ -11,7 +12,11 @@ import 'tarjeta_lista.dart';
 class ResumenChat {
   ResumenChat({required this.id, required this.otro, required this.usuario, required this.nombre,
       required this.ultimo, this.ultimoTexto = '', this.ultimaPista, this.ultimaLista, this.ultimoMio = false, this.sinLeer = 0,
-      this.fotoUrl = ''});
+      this.fotoUrl = '', this.marco = Cosmeticos.ninguno, this.efectoNombre = Cosmeticos.ninguno});
+
+  /// Marco del avatar y efecto del nombre de un donador («ninguno» si no tiene).
+  final String marco;
+  final String efectoNombre;
 
   final String id;
   final String otro;
@@ -55,6 +60,8 @@ class ResumenChat {
         ultimoMio: '${d['ultimo_autor']}' == yo,
         sinLeer: (d['sin_leer'] as num?)?.toInt() ?? 0,
         fotoUrl: '${d['foto_url'] ?? ''}',
+        marco: Cosmeticos.marco(d['marco']),
+        efectoNombre: Cosmeticos.efectoNombre(d['efecto_nombre']),
       );
 }
 
@@ -80,7 +87,10 @@ class Mensaje {
 }
 
 class Persona {
-  Persona(this.id, this.usuario, this.nombre, {this.fotoUrl = '', this.relacion = 'ninguna'});
+  Persona(this.id, this.usuario, this.nombre,
+      {this.fotoUrl = '', this.relacion = 'ninguna', this.marco = Cosmeticos.ninguno, this.efectoNombre = Cosmeticos.ninguno});
+  final String marco;
+  final String efectoNombre;
   final String id;
   final String usuario;
   final String nombre;
@@ -117,7 +127,8 @@ class Chat {
     if (l.isEmpty || l.first is! Map) return null;
     final d = l.first as Map;
     return Persona('${d['id']}', '${d['usuario']}', '${d['nombre'] ?? ''}',
-        fotoUrl: '${d['foto_url'] ?? ''}', relacion: Relacion.normal(d['relacion']));
+        fotoUrl: '${d['foto_url'] ?? ''}', relacion: Relacion.normal(d['relacion']),
+        marco: Cosmeticos.marco(d['marco']), efectoNombre: Cosmeticos.efectoNombre(d['efecto_nombre']));
   }
 
   /// Abre (o crea) el chat con un amigo. Con alguien que no es amigo la base

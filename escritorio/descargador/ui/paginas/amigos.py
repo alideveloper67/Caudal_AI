@@ -19,6 +19,7 @@ from ...hilos import en_segundo_plano
 from .. import iconos
 from ..componentes import Pagina
 from ..estilos import C, hoja
+from ..premium_estilos import nombre_efecto
 from . import perfil_comun as PC
 
 
@@ -37,10 +38,11 @@ def fila_persona(p, compacto=False, acciones=(), al_abrir=None, detalle=""):
     h = QHBoxLayout(f)
     h.setContentsMargins(10, 8, 10, 8)
     h.setSpacing(10)
-    h.addWidget(PC.Avatar(40 if compacto else 46, S.nombre_visible(p), None, p.get("foto_url")))
+    h.addWidget(PC.Avatar(40 if compacto else 46, S.nombre_visible(p), None, p.get("foto_url"),
+                          marco=p.get("marco")))
     col = QVBoxLayout()
     col.setSpacing(0)
-    n = PC.etiqueta(S.nombre_visible(p), "font-size:13.5px;font-weight:700;", False)
+    n = nombre_efecto(S.nombre_visible(p), "font-size:13.5px;font-weight:700;", p.get("efecto_nombre"), False)
     n.setMinimumWidth(30)
     n.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
     col.addWidget(n)

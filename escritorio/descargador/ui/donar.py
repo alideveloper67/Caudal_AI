@@ -37,7 +37,8 @@ class DialogoDonar(QDialog):
         t.setAlignment(Qt.AlignCenter)
         v.addWidget(t)
         s = QLabel("Caudal es gratis. Si lo apoyas, tu cuenta pasa a ser «Donador de Caudal»: fondo propio "
-                   "en toda la app, GIF en tu perfil y una mascotita en la barra de la canción.")
+                   "en toda la app, GIF en tu perfil, una mascotita en la barra de la canción, marcos animados "
+                   "y efectos para tu nombre, temas de colores y tarjetas de letra exclusivas.")
         s.setObjectName("secundario")
         s.setWordWrap(True)
         s.setAlignment(Qt.AlignCenter)
@@ -85,6 +86,15 @@ class DialogoDonar(QDialog):
         self.estado.setObjectName("secundario")
         self.estado.setAlignment(Qt.AlignCenter)
         v.addWidget(self.estado)
+        # ¿un amigo te pasó un código de prueba? (solo si hay una sesión desde la que canjearlo)
+        ctx = getattr(padre.window(), "ctx", None) if padre is not None else None
+        if ctx is not None and getattr(ctx, "premium", None) is not None:
+            from .canje_pase import abrir_canje
+            self.bt_codigo = QPushButton("Tengo un código de prueba")
+            self.bt_codigo.setObjectName("contorno")
+            self.bt_codigo.setCursor(Qt.PointingHandCursor)
+            self.bt_codigo.clicked.connect(lambda: abrir_canje(ctx, self) and self.accept())
+            v.addWidget(self.bt_codigo, 0, Qt.AlignHCenter)
         cerrar = QPushButton("Cerrar")
         cerrar.setObjectName("contorno")
         cerrar.clicked.connect(self.accept)

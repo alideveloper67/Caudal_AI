@@ -2,7 +2,9 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 
 import '../nucleo/fondo_app.dart';
+import '../nucleo/premium.dart';
 import 'plataforma.dart';
+import 'premium/temas_premium.dart';
 
 /// La paleta de Caudal (la misma que el escritorio): oscuro profundo y un solo
 /// acento. El acento y el fondo se pueden cambiar en Ajustes → Aspecto
@@ -148,6 +150,21 @@ class Aspecto {
   }
 
   static void aplicar(String acento, String fondo) {
+    // un tema exclusivo (solo con los beneficios vigentes) manda sobre el acento y el fondo elegidos
+    final premium = TemasPremium.de(Premium.i.temaEfectivo);
+    if (premium != null) {
+      C.acento = premium.acento;
+      C.acentoAlto = premium.acentoAlto;
+      C.acentoTexto = premium.acentoTexto;
+      patron = null;
+      C.fondo = premium.capas[0];
+      C.panel = premium.capas[1];
+      C.superficie = premium.capas[2];
+      C.superficie2 = premium.capas[3];
+      C.superficie3 = premium.capas[4];
+      C.borde = premium.capas[5];
+      return;
+    }
     final a = acentoDe(acento);
     C.acento = a.$2;
     C.acentoAlto = a.$3;

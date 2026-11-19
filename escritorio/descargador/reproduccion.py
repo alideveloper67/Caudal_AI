@@ -247,7 +247,10 @@ class Motor(QObject):
             demuxer_max_bytes="150MiB" if wid is not None else "32MiB",
             demuxer_max_back_bytes="50MiB" if wid is not None else "16MiB",
             demuxer_readahead_secs=40, audio_client_name="Caudal",
-            volume_max=100, msg_level="all=no", network_timeout=25,
+            volume_max=100, msg_level="all=no", network_timeout=12,
+            # si la conexión se cae a mitad de canción, ffmpeg la retoma solo (sin cortar la música)
+            stream_lavf_o="reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,"
+                          "reconnect_on_http_error=5xx,reconnect_delay_max=4",
             audio_pitch_correction="yes",
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
                        "(KHTML, like Gecko) Chrome/130.0 Safari/537.36",
@@ -674,9 +677,17 @@ class Reproductor(QObject):
         # entre estrofa y estribillo; loudnorm los dejaba en 6,9).
         if self.ajustes["normalizar"] or nivel > 0:
             partes.append("dynaudnorm=f=500:g=61:p=0.9:m=4")
+        if self.ajustes["modo_noche"]:
+            # compresor suave: lo fuerte baja y lo bajo sube un poco, para escuchar de noche sin sustos
+            partes.append("acompressor=threshold=0.089:ratio=4:attack=20:release=300:makeup=2.5")
+        if self.ajustes["sonido_envolvente"]:
+            # un poco de mezcla entre canales y retardo: el sonido se abre, sin tocar el tono
+            partes.append("stereowiden=delay=20:feedback=0.25:crossfeed=0.25:drymix=0.85")
         if nivel > 0:
             # mas fuerte de forma fija y un limitador rapido para los picos
             partes.append(f"volume={GANANCIA_SUPER_VOLUMEN.get(nivel, 5)}dB")
+            partes.append("alimiter=limit=0.95:attack=5:release=80:level=disabled")
+        if (self.ajustes["modo_noche"] or self.ajustes["sonido_envolvente"]) and nivel == 0:
             partes.append("alimiter=limit=0.95:attack=5:release=80:level=disabled")
         if not partes:
             return ""
@@ -1599,6 +1610,20 @@ class Reproductor(QObject):
         else:
             self._fijar_estado("pausa" if m.en_pausa() else "sonando")
 
+    def _corte_prematuro(self):
+        """¿El «fin» llegó mucho antes de lo que dura la canción? Pasa cuando la red se corta y
+        el servidor cierra sin error: se retoma donde iba en vez de saltar o quedarse en silencio."""
+        try:
+            pista = self.actual
+            dur = float(self._duracion or 0)
+            if not pista or (self._fuente or {}).get("local") or dur < 60:
+                return False
+            if getattr(self, "_reintentos", 0) >= 3 or self._apagar_al_final:
+                return False
+            return self._posicion < dur - 8 and self._posicion > 1
+        except Exception:  # noqa: BLE001
+            return False
+
     def _al_terminar(self, m, razon, detalle):
         t = self._traspaso
         if t:
@@ -1615,6 +1640,9 @@ class Reproductor(QObject):
             return
         if not self._es_actual(m):
             return
+        if razon == "eof" and self._corte_prematuro():
+            razon = "error"
+            detalle = "la conexión se cortó"
         if razon == "eof":
             if self._apagar_al_final:
                 self._apagar_al_final = False

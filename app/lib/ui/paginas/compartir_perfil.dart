@@ -221,7 +221,7 @@ class TarjetaPerfilCompartible extends StatelessWidget {
                   border: Border.all(color: claro ? color : color.withValues(alpha: 0.95), width: 2.5 * k),
                   boxShadow: [BoxShadow(color: color.withValues(alpha: 0.45), blurRadius: 26 * k)],
                 ),
-                child: AvatarPerfil(nombre: nombre, fotoUrl: p.fotoUrl, color: color, radio: 52 * k),
+                child: AvatarPerfil(nombre: nombre, fotoUrl: p.fotoUrl, color: color, radio: 52 * k, marco: p.marco),
               ),
               SizedBox(height: 12 * k),
               Text(nombre,

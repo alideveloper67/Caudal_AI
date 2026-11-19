@@ -308,6 +308,32 @@ class Catalogo {
     String extra = '',
     String visitante = '',
   }) async {
+    try {
+      return await _enviar(metodo, cuerpo, cliente: cliente, extra: extra, visitante: visitante);
+    } on CatalogoError {
+      // En la web ya se pasa por la función de Caudal. En el móvil y el escritorio, si YouTube
+      // rechaza o no contesta a esta conexión (suele pedir «confirma que no eres un bot» a
+      // ciertas redes), se repite la consulta por esa misma función, que sale desde un servidor.
+      // El audio nunca pasa por ahí: solo las consultas del catálogo.
+      if (kIsWeb || cliente == 'movil') rethrow;
+      try {
+        return await _enviar(metodo, cuerpo,
+            cliente: cliente, extra: extra, visitante: visitante, porFuncion: true);
+      } catch (_) {
+        rethrow; // se muestra el fallo de la vía directa, que es el más claro
+      }
+    }
+  }
+
+  static Future<Map<String, dynamic>> _enviar(
+    String metodo,
+    Map<String, dynamic> cuerpo, {
+    String cliente = 'remix',
+    String extra = '',
+    String visitante = '',
+    bool porFuncion = false,
+  }) async {
+    final delaFuncion = kIsWeb || porFuncion;
     final Map<String, dynamic> contexto;
     String dominio = _dominio;
     if (cliente == 'web') {
@@ -339,14 +365,14 @@ class Catalogo {
     };
     // en el navegador YouTube Music no contesta a otras webs: se pasa por la
     // funcion de la propia web de Caudal (netlify/functions/yt.mjs)
-    final uri = kIsWeb
-        ? Uri.parse('/api/yt').replace(queryParameters: {
+    final uri = delaFuncion
+        ? Uri.parse(kIsWeb ? '/api/yt' : 'https://caudal-musica.netlify.app/api/yt').replace(queryParameters: {
             'm': metodo,
             'd': dominio.contains('music.') ? 'music' : 'www',
             if (extra.isNotEmpty) 'extra': extra,
           })
         : Uri.parse('$dominio/youtubei/v1/$metodo?prettyPrint=false$extra');
-    final cabeceras = kIsWeb
+    final cabeceras = delaFuncion
         ? <String, String>{'content-type': 'application/json'}
         : <String, String>{
       'user-agent': _agente,
@@ -362,7 +388,7 @@ class Catalogo {
     // la de un visitante nuevo y YouTube entrega la portada estandar (con
     // "Selección rápida"), sin personalizar segun lo buscado antes.
     if (visitante.isNotEmpty) cabeceras['x-goog-visitor-id'] = visitante;
-    if (kIsWeb) cabeceras.remove('user-agent');
+    if (delaFuncion) cabeceras.remove('user-agent');
     http.Response r;
     try {
       r = await _http
@@ -1725,7 +1751,7 @@ class Catalogo {
           ])));
       _pistasWeb(items, pistas, limite);
       var vueltas = 0;
-      while (token != null && pistas.length < limite && vueltas < 30) {
+      while (token != null && pistas.length < limite && vueltas < 5000) {
         vueltas++;
         Map<String, dynamic> mas;
         try {
@@ -1865,10 +1891,23 @@ class Catalogo {
     }
     cuerpo['playlistId'] = _sinVL(pid!);
     if (radio) cuerpo['params'] = 'wAEB';
-    final r = await _post('next', cuerpo);
-    final w = _mapa(_nav(r, [
-      'contents', 'singleColumnMusicWatchNextResultsRenderer', 'tabbedRenderer', 'watchNextTabbedResultsRenderer'
-    ]));
+    var r = await _post('next', cuerpo);
+    Map<String, dynamic> pestanas(Map<String, dynamic> x) => _mapa(_nav(x, [
+          'contents', 'singleColumnMusicWatchNextResultsRenderer', 'tabbedRenderer', 'watchNextTabbedResultsRenderer'
+        ]));
+    var w = pestanas(r);
+    // YouTube a veces contesta "bien" pero sin cola a conexiones que sospecha de bots:
+    // se repite por la función de Caudal antes de rendirse
+    if (!kIsWeb && _nav(w, ['tabs', 0, 'tabRenderer', 'content', 'musicQueueRenderer', 'content', 'playlistPanelRenderer']) is! Map) {
+      try {
+        final otra = await _enviar('next', cuerpo, porFuncion: true);
+        final wo = pestanas(otra);
+        if (_nav(wo, ['tabs', 0, 'tabRenderer', 'content', 'musicQueueRenderer', 'content', 'playlistPanelRenderer']) is Map) {
+          r = otra;
+          w = wo;
+        }
+      } catch (_) {/* se sigue con lo que contestó la vía directa */}
+    }
     String letrasId = '';
     String relacionadosId = '';
     for (final t in _lista(w['tabs'])) {
@@ -2030,6 +2069,10 @@ class Catalogo {
 
   // ------------------------------------------------------------ letras
 
+  /// Lo más que puede diferir (en segundos) la duración de la letra de la de la canción
+  /// para fiarse de sus tiempos: más allá, la letra llegaría corrida.
+  static const int _desfaseMaxLetra = 3;
+
   /// Letra de una pista: {sincronizada, lineas: [[ms, texto]...], texto, fuente}.
   /// Primero LRCLIB (sincronizadas, gratis); si no, YouTube Music.
   static Future<Map<String, dynamic>> letras(Map<String, dynamic> pista) async {
@@ -2065,15 +2108,19 @@ class Catalogo {
           }
           datos = null;
           for (final c in candidatos) {
-            if (_cadena(c['syncedLyrics']).isNotEmpty) {
-              datos = c;
-              break;
-            }
+            if (_cadena(c['syncedLyrics']).isEmpty) continue;
+            // otra versión (en vivo, remix, con intro) más larga o corta: la letra se desfasaría
+            final d = c['duration'] is num ? c['duration'] as num : 0;
+            if (dur > 0 && d > 0 && (d - dur).abs() > _desfaseMaxLetra) continue;
+            datos = c;
+            break;
           }
           datos ??= candidatos.isNotEmpty ? candidatos.first : null;
         }
         if (datos is Map) {
-          if (_cadena(datos['syncedLyrics']).isNotEmpty) {
+          final dDatos = datos['duration'] is num ? datos['duration'] as num : 0;
+          final casa = dur <= 0 || dDatos <= 0 || (dDatos - dur).abs() <= _desfaseMaxLetra;
+          if (_cadena(datos['syncedLyrics']).isNotEmpty && casa) {
             return {
               'sincronizada': true,
               'lineas': lrcALineas(_cadena(datos['syncedLyrics'])),
@@ -2081,15 +2128,15 @@ class Catalogo {
               'fuente': 'LRCLIB',
             };
           }
-          if (_cadena(datos['plainLyrics']).isNotEmpty) {
-            // solo texto: antes de rendirse, ver si hay otra versión con tiempos
+          if (_cadena(datos['plainLyrics']).isNotEmpty || _cadena(datos['syncedLyrics']).isNotEmpty) {
+            // solo texto (o con tiempos que no casan): antes de rendirse, ver si hay otra versión con tiempos
             try {
               final crudo = await _getJson(Uri.https('lrclib.net', '/api/search', {'q': '$artista $titulo'}),
                   cabeceras: cab);
               num durDe(Map c) => c['duration'] is num ? c['duration'] as num : 0;
               final con = _lista(crudo).whereType<Map>().where((c) => _cadena(c['syncedLyrics']).isNotEmpty).toList();
               if (dur > 0) con.sort((a, b) => (durDe(a) - dur).abs().compareTo((durDe(b) - dur).abs()));
-              if (con.isNotEmpty && (dur <= 0 || (durDe(con.first) - dur).abs() <= 6)) {
+              if (con.isNotEmpty && (dur <= 0 || (durDe(con.first) - dur).abs() <= _desfaseMaxLetra)) {
                 return {
                   'sincronizada': true,
                   'lineas': lrcALineas(_cadena(con.first['syncedLyrics'])),

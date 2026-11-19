@@ -438,9 +438,54 @@ class _BuscarPaginaState extends State<BuscarPagina> with AutomaticKeepAliveClie
           ),
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: Esp.lado),
-            child: Wrap(children: [
-              for (final r in _recientes) Pildora(texto: r, activa: false, alPulsar: () => _buscar(r)),
-            ]),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(14),
+              child: Material(
+                color: C.superficie,
+                child: Column(children: [
+                  for (final (i, r) in _recientes.take(8).indexed) ...[
+                    if (i > 0) Divider(height: 1, indent: 52, color: C.borde),
+                    InkWell(
+                      onTap: () => _buscar(r),
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(14, 2, 2, 2),
+                        child: Row(children: [
+                          const Icon(Icons.history_rounded, size: 20, color: C.texto3),
+                          const SizedBox(width: 14),
+                          Expanded(
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              child: Text(r, maxLines: 1, overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600)),
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: 'Poner en el buscador',
+                            visualDensity: VisualDensity.compact,
+                            icon: const Icon(Icons.north_west_rounded, size: 18, color: C.texto3),
+                            onPressed: () {
+                              _campo.text = r;
+                              _campo.selection = TextSelection.collapsed(offset: r.length);
+                              _foco.requestFocus();
+                              setState(() {});
+                            },
+                          ),
+                          IconButton(
+                            tooltip: 'Quitar de recientes',
+                            visualDensity: VisualDensity.compact,
+                            icon: const Icon(Icons.close_rounded, size: 18, color: C.texto3),
+                            onPressed: () async {
+                              await Caudal.leer(context).coleccion.borrarBusqueda(r);
+                              if (mounted) setState(() => _recientes = [..._recientes]..remove(r));
+                            },
+                          ),
+                        ]),
+                      ),
+                    ),
+                  ],
+                ]),
+              ),
+            ),
           ),
           const SizedBox(height: Esp.xl),
         ],
