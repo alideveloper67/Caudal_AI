@@ -573,6 +573,11 @@ class PaginaAjustes(Pagina):
         self.bt_version = QPushButton("Buscar actualizaciones")
         self.bt_version.clicked.connect(lambda: ctx.ventana.buscar_version(False))
         self.et_version = s.fila(f"Caudal {version.VERSION}", "", self.bt_version)
+        bt_volver = QPushButton("Elegir versión")
+        bt_volver.clicked.connect(self._volver_version)
+        s.fila("Volver a una versión anterior", "Si algo falla en esta versión, instala una "
+                                                "anterior. Tus listas y descargas se quedan.",
+               bt_volver)
         bt_defecto = QPushButton("Restaurar")
         bt_defecto.setObjectName("peligro")
         bt_defecto.clicked.connect(self._restaurar)
@@ -796,6 +801,10 @@ class PaginaAjustes(Pagina):
 
         en_segundo_plano(leer, ok=pintar, error=lambda _e: self.et_motor.setText("Motor: no se pudo leer"),
                          dueno=self)
+
+    def _volver_version(self):
+        from ..actualizador import DialogoVolverVersion
+        DialogoVolverVersion(self).exec()
 
     def _actualizar_motor(self):
         if getattr(sys, "frozen", False):

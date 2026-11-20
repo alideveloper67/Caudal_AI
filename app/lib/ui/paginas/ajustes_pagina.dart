@@ -38,6 +38,7 @@ import 'mezclador_pagina.dart';
 import 'modo_gamer_pagina.dart';
 import 'privacidad_pagina.dart';
 import 'sonido.dart';
+import 'volver_version.dart';
 
 class AjustesPagina extends StatefulWidget {
   const AjustesPagina({super.key});
@@ -525,6 +526,14 @@ class _AjustesPaginaState extends State<AjustesPagina> {
               : null,
           onTap: _buscandoVersion || actualizaLaTienda ? null : _buscarVersion,
         ),
+        if (Plataforma.esAndroid && !actualizaLaTienda)
+          ListTile(
+            leading: const Icon(Icons.history_rounded, color: C.texto2),
+            title: const Text('Volver a una versión anterior'),
+            subtitle: const Text('Si algo falla en esta versión', style: estiloSecundario),
+            trailing: const Icon(Icons.chevron_right_rounded, color: C.texto3),
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const VolverVersionPagina())),
+          ),
         const Padding(
           padding: EdgeInsets.fromLTRB(Esp.lado, Esp.m, Esp.lado, 0),
           child: Text('Sin anuncios, en segundo plano, a la máxima calidad. Tu cuenta sirve también en Caudal '
@@ -650,6 +659,8 @@ class _HojaVersionState extends State<_HojaVersion> {
               runSpacing: 8,
               children: [
                 TextButton(onPressed: _bajando ? null : () => Navigator.pop(context), child: const Text('Más tarde')),
+                if (instalable)
+                  TextButton(onPressed: _bajando ? null : _verComo, child: const Text('Bajar por el navegador')),
                 FilledButton.icon(
                   onPressed: _bajando ? null : (instalable ? _instalar : _verComo),
                   icon: Icon(instalable ? Icons.download_rounded : Icons.open_in_new_rounded),

@@ -1078,8 +1078,9 @@ def _opciones_ytdlp(ajustes=None):
     if shutil.which("node"):
         o["js_runtimes"] = {"node": {}}
     if ajustes is not None:
-        nav = ajustes["navegador_cookies"]
-        if nav and nav != "ninguno":
+        from .config import navegador_cookies_usable
+        nav = navegador_cookies_usable(ajustes["navegador_cookies"])
+        if nav:
             o["cookiesfrombrowser"] = (nav,)
         archivo = ajustes["archivo_cookies"]
         if archivo:

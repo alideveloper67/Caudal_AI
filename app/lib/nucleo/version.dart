@@ -12,6 +12,7 @@ import 'package:flutter/services.dart' show appFlavor;
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart' show sha256;
 import 'package:dio/dio.dart';
 import 'package:open_filex/open_filex.dart';
 import 'package:permission_handler/permission_handler.dart';
@@ -20,7 +21,7 @@ import 'package:path_provider/path_provider.dart';
 import 'plataforma.dart';
 
 /// Version que lleva esta copia. Sube tambien la de pubspec.yaml al publicar.
-const String versionApp = '2.7.1';
+const String versionApp = '2.7.2';
 
 /// Instalada desde una tienda (variante "play" de Android): las versiones
 /// nuevas llegan por la tienda, no por la propia app.
@@ -56,6 +57,9 @@ class Novedad {
   final String pagina;
   final int peso;
 
+  /// SHA-256 del APK tal como lo publica GitHub («sha256:…» en la release). Vacío si no lo dio.
+  final String huella;
+
   /// En iPhone, el .ipa adjunto (se instala por sideload, nunca desde la app).
   final String ipa;
 
@@ -66,6 +70,7 @@ class Novedad {
     required this.pagina,
     required this.peso,
     this.ipa = '',
+    this.huella = '',
   });
 
   /// En iPhone no se puede instalar desde dentro: Apple no lo permite.
@@ -184,32 +189,74 @@ Novedad? novedadDe(List publicadas, {bool? ios, String? abi}) {
     apk: apk,
     pagina: pagina,
     peso: (elegido?['size'] as num?)?.toInt() ?? 0,
+    huella: huellaDe(elegido?['digest']),
   );
 }
 
+/// «sha256:abc…» → «abc…» (en minúsculas). Cualquier otra cosa → ''.
+String huellaDe(Object? digest) {
+  final t = '${digest ?? ''}'.trim().toLowerCase();
+  if (!t.startsWith('sha256:')) return '';
+  final h = t.substring(7);
+  return RegExp(r'^[0-9a-f]{64}$').hasMatch(h) ? h : '';
+}
+
+/// La descarga en curso por versión: si se toca «Instalar» en dos sitios (o dos veces),
+/// las dos esperan a la misma descarga en vez de escribir a la vez el mismo archivo.
+final Map<String, Future<String>> _bajandoApk = {};
+
 /// Trae el APK nuevo y lo deja listo para instalar. Devuelve su ruta.
+///
+/// Solo devuelve un archivo comprobado: tamaño exacto, cabecera de ZIP y, si GitHub dio su
+/// huella, el mismo SHA-256 byte a byte. Un APK cortado o mezclado es lo que hace que Android
+/// diga «se produjo un error durante el análisis del paquete»: así no se le entrega nunca.
 Future<String> descargarApk(
   Novedad novedad, {
   void Function(double)? alProgresar,
   CancelToken? cancelar,
-}) async {
+}) {
   if (!novedad.sePuedeInstalar) {
-    throw UnsupportedError('Esta version no se puede instalar desde la app.');
+    return Future.error(UnsupportedError('Esta version no se puede instalar desde la app.'));
   }
-  final carpeta = await getTemporaryDirectory();
+  final clave = novedad.apk;
+  final enCurso = _bajandoApk[clave];
+  if (enCurso != null) return enCurso;
+  final f = _descargarApk(novedad, alProgresar, cancelar);
+  _bajandoApk[clave] = f;
+  f.whenComplete(() => _bajandoApk.remove(clave)).ignore();
+  return f;
+}
+
+Future<String> _descargarApk(Novedad novedad, void Function(double)? alProgresar, CancelToken? cancelar) async {
+  // en la carpeta privada de archivos (no en la caché, que Android puede vaciar mientras
+  // el instalador todavía lo está leyendo)
+  final carpeta = Directory('${(await getApplicationSupportDirectory()).path}/actualizacion');
+  await carpeta.create(recursive: true);
   final destino = '${carpeta.path}/Caudal-${novedad.version}.apk';
+  // lo que dejaron versiones anteriores ya no sirve (también los APK que las versiones de
+  // antes dejaban en la caché): libera espacio, que el instalador necesita
+  try {
+    await for (final e in carpeta.list()) {
+      if (e is File && e.path != destino) await e.delete();
+    }
+    await for (final e in (await getTemporaryDirectory()).list()) {
+      final nombre = e.path.split(RegExp(r'[\\/]')).last;
+      if (e is File && nombre.startsWith('Caudal-') && (nombre.endsWith('.apk') || nombre.endsWith('.parcial'))) {
+        await e.delete();
+      }
+    }
+  } catch (_) {}
 
   final ya = File(destino);
-  if (await ya.exists() && novedad.peso > 0 && await ya.length() == novedad.peso) {
+  if (await apkCompleto(ya, novedad.peso, huella: novedad.huella)) {
     alProgresar?.call(100);
-    return destino;                      // ya estaba bajado entero
+    return destino;                      // ya estaba bajado y comprobado
   }
+  if (await ya.exists()) await ya.delete();
 
-  // Se baja a un archivo aparte y solo se da por bueno si llegó ENTERO: un APK cortado (señal
-  // que se cae, pantalla apagada) hace que Android diga «error durante el análisis del paquete».
   final parcial = File('$destino.parcial');
   Object? ultimoFallo;
-  for (var intento = 0; intento < 2; intento++) {
+  for (var intento = 0; intento < 3; intento++) {
     try {
       if (await parcial.exists()) await parcial.delete();
       await Dio().download(
@@ -221,15 +268,14 @@ Future<String> descargarApk(
           if (total > 0) alProgresar?.call(hecho / total * 100);
         },
       );
-      if (await apkCompleto(parcial, novedad.peso)) {
-        if (await ya.exists()) await ya.delete();
+      if (await apkCompleto(parcial, novedad.peso, huella: novedad.huella)) {
         await parcial.rename(destino);
         return destino;
       }
-      ultimoFallo = 'incompleto';
+      ultimoFallo = 'el archivo llegó dañado';
     } on DioException catch (e) {
       if (CancelToken.isCancel(e)) rethrow;
-      ultimoFallo = e;
+      ultimoFallo = e.message ?? e.type.name;
     }
   }
   try {
@@ -238,18 +284,22 @@ Future<String> descargarApk(
   throw StateError('La descarga llegó incompleta ($ultimoFallo). Revisa tu internet y vuelve a tocar «Instalar».');
 }
 
-/// ¿El APK bajado está entero? Tamaño exacto (si GitHub lo dijo) y cabecera de ZIP («PK»).
-Future<bool> apkCompleto(File archivo, int peso) async {
+/// ¿El APK bajado está entero? Tamaño exacto (si GitHub lo dijo), cabecera de ZIP («PK») y,
+/// si hay [huella], el mismo SHA-256 que el publicado.
+Future<bool> apkCompleto(File archivo, int peso, {String huella = ''}) async {
   if (!await archivo.exists()) return false;
   final largo = await archivo.length();
   if (largo < 1024 || (peso > 0 && largo != peso)) return false;
   final raf = await archivo.open();
   try {
     final cabeza = await raf.read(2);
-    return cabeza.length == 2 && cabeza[0] == 0x50 && cabeza[1] == 0x4B;
+    if (cabeza.length != 2 || cabeza[0] != 0x50 || cabeza[1] != 0x4B) return false;
   } finally {
     await raf.close();
   }
+  if (huella.isEmpty) return true;
+  final calculada = await sha256.bind(archivo.openRead()).first;
+  return calculada.toString() == huella;
 }
 
 /// Lanza el instalador de Android. El sistema pide permiso la primera vez.
@@ -296,4 +346,51 @@ Map? elegirApk(List adjuntos, String abi) {
   return apks.where((a) => tiene(a, marca)).firstOrNull ??
       apks.where((a) => !otras.any((o) => tiene(a, o))).firstOrNull ??
       apks.first;
+}
+
+
+/// Una versión anterior del móvil, para volver a ella si la nueva falla.
+class VersionAnterior {
+  final String version;
+  final String apk;
+  final String fecha;
+  const VersionAnterior({required this.version, required this.apk, required this.fecha});
+}
+
+/// Las versiones del móvil más viejas que esta (de la más nueva a la más vieja), con el APK
+/// de la arquitectura del teléfono. null si no se pudo preguntar.
+Future<List<VersionAnterior>?> versionesAnteriores({int limite = 6}) async {
+  try {
+    final dio = Dio(BaseOptions(
+      connectTimeout: const Duration(seconds: 12),
+      receiveTimeout: const Duration(seconds: 12),
+      headers: {'User-Agent': 'Caudal', 'Accept': 'application/vnd.github+json'},
+      responseType: ResponseType.plain,
+    ));
+    final r = await dio.get(_api);
+    if (r.statusCode != 200) return null;
+    return anterioresDe(jsonDecode(r.data as String) as List, limite: limite);
+  } catch (_) {
+    return null;
+  }
+}
+
+/// Lo mismo que [versionesAnteriores] a partir de la lista de releases (para probarlo).
+List<VersionAnterior> anterioresDe(List publicadas, {int limite = 6, String? abi, String? actual}) {
+  final esta = actual ?? versionApp;
+  final salida = <VersionAnterior>[];
+  for (final r in publicadas.whereType<Map>()) {
+    if (r['draft'] == true || r['prerelease'] == true) continue;
+    final etiqueta = '${r['tag_name'] ?? ''}';
+    if (!etiqueta.startsWith(prefijo)) continue;
+    final v = etiqueta.substring(prefijo.length);
+    if (!hayNovedad(v, esta)) continue;            // solo las MÁS viejas que esta
+    final elegido = elegirApk(r['assets'] as List? ?? const [], abi ?? abiDelTelefono());
+    final apk = '${elegido?['browser_download_url'] ?? ''}';
+    if (apk.isEmpty) continue;
+    final fecha = '${r['published_at'] ?? ''}';
+    salida.add(VersionAnterior(version: v, apk: apk, fecha: fecha.length >= 10 ? fecha.substring(0, 10) : ''));
+  }
+  salida.sort((a, b) => hayNovedad(a.version, b.version) ? 1 : (hayNovedad(b.version, a.version) ? -1 : 0));
+  return salida.take(limite).toList();
 }

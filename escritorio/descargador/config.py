@@ -222,3 +222,24 @@ class Ajustes:
 
     def get(self, clave, defecto=None):
         return self.datos.get(clave, defecto if defecto is not None else DEFECTOS.get(clave))
+
+
+_NAVEGADORES_PROBADOS = {}
+
+
+def navegador_cookies_usable(nav):
+    """El navegador del que se pueden leer las cookies, o None.
+
+    Chrome y Edge recientes cifran sus cookies de forma que ningún programa externo puede leerlas
+    («Failed to decrypt with DPAPI», yt-dlp #10927). Si eso pasa, se sigue SIN cookies en lugar
+    de hacer fallar cada canción. Se prueba una vez por navegador y sesión."""
+    if not nav or nav == "ninguno":
+        return None
+    if nav not in _NAVEGADORES_PROBADOS:
+        try:
+            from yt_dlp.cookies import extract_cookies_from_browser
+            extract_cookies_from_browser(nav)
+            _NAVEGADORES_PROBADOS[nav] = True
+        except Exception:  # noqa: BLE001 - cualquier fallo al leerlas: sin cookies
+            _NAVEGADORES_PROBADOS[nav] = False
+    return nav if _NAVEGADORES_PROBADOS[nav] else None

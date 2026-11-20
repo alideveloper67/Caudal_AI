@@ -820,7 +820,9 @@ def _youtube(url: str, ajustes) -> dict:
         nav = (ajustes["navegador_cookies"] if ajustes else "ninguno") or "ninguno"
     except (KeyError, TypeError):
         nav = "ninguno"
-    if nav and nav != "ninguno":
+    from .config import navegador_cookies_usable
+    nav = navegador_cookies_usable(nav)
+    if nav:
         opciones["cookiesfrombrowser"] = (nav,)
 
     try:

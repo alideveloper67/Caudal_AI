@@ -10,7 +10,7 @@ import requests
 from PySide6.QtCore import QObject, QRunnable, QThreadPool, Signal
 
 from . import redes, telegram_dl
-from .config import carpeta_caratulas, ruta_ffmpeg
+from .config import carpeta_caratulas, ruta_ffmpeg, navegador_cookies_usable
 
 
 EN_COLA, ANALIZANDO, DESCARGANDO, PROCESANDO = "en_cola", "analizando", "descargando", "procesando"
@@ -338,8 +338,8 @@ class TrabajoAnalisis(QRunnable):
         return entradas
 
     def _extras_red(self, opciones):
-        nav = self.ajustes["navegador_cookies"]
-        if nav and nav != "ninguno":
+        nav = navegador_cookies_usable(self.ajustes["navegador_cookies"])
+        if nav:
             opciones["cookiesfrombrowser"] = (nav,)
         archivo = self.ajustes["archivo_cookies"]
         if archivo and os.path.exists(archivo):
@@ -457,8 +457,8 @@ class TrabajoDescarga(QRunnable):
                 "key": "EmbedThumbnail", "already_have_thumbnail": False,
             })
 
-        nav = a["navegador_cookies"]
-        if nav and nav != "ninguno":
+        nav = navegador_cookies_usable(a["navegador_cookies"])
+        if nav:
             opciones["cookiesfrombrowser"] = (nav,)
         archivo = a["archivo_cookies"]
         if archivo and os.path.exists(archivo):

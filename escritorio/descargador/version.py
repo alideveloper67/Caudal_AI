@@ -18,7 +18,7 @@ import tempfile
 import urllib.error
 import urllib.request
 
-VERSION = "2.8.0"
+VERSION = "2.8.1"
 
 # usuario/repositorio de GitHub donde publicas las versiones
 ORIGEN = "alideveloper67/Caudal_AI"
@@ -120,11 +120,47 @@ def buscar_actualizacion(espera=12):
     }
 
 
+# Versiones publicadas con fallos conocidos: no se ofrecen para volver atrás.
+RETIRADAS = {"2.8.0"}
+
+
+def versiones_anteriores(espera=12, limite=6):
+    """Las versiones del escritorio más antiguas que esta, de la más nueva a la más vieja.
+
+    Cada una: {"version", "instalador", "fecha"}. Lanza OSError si no se pudo preguntar."""
+    peticion = urllib.request.Request(API, headers=CABECERAS)
+    with urllib.request.urlopen(peticion, timeout=espera) as r:
+        publicadas = json.loads(r.read().decode())
+    salida = []
+    for datos in publicadas or []:
+        if not isinstance(datos, dict) or datos.get("draft") or datos.get("prerelease"):
+            continue
+        etiqueta = str(datos.get("tag_name") or "")
+        if not etiqueta.startswith(PREFIJO):
+            continue
+        numero = etiqueta[len(PREFIJO):]
+        if not hay_novedad(numero, VERSION) or numero in RETIRADAS:   # solo las MÁS viejas y sanas
+            continue
+        instalador = next((a.get("browser_download_url") for a in datos.get("assets") or []
+                           if str(a.get("name") or "").lower().endswith(".exe")
+                           and a.get("browser_download_url")), "")
+        if instalador:
+            salida.append({"version": numero, "instalador": instalador,
+                           "fecha": str(datos.get("published_at") or "")[:10]})
+    salida.sort(key=lambda d: _numeros(d["version"]), reverse=True)
+    return salida[:limite]
+
+
 def descargar(url, al_progresar=None):
-    """Trae el instalador nuevo a una carpeta temporal y devuelve su ruta."""
+    """Trae el instalador a una carpeta temporal y devuelve su ruta.
+
+    Solo lo da por bueno si llegó entero (tamaño exacto y cabecera de programa de Windows):
+    un instalador cortado no se ejecuta nunca."""
     destino = os.path.join(tempfile.gettempdir(), "CaudalInstalador.exe")
-    peticion = urllib.request.Request(url, headers={"User-Agent": "Caudal"})
-    with urllib.request.urlopen(peticion, timeout=60) as r, open(destino, "wb") as f:
+    parcial = destino + ".parcial"
+    peticion = urllib.request.Request(url, headers={"User-Agent": "Caudal",
+                                                    "Accept-Encoding": "identity"})
+    with urllib.request.urlopen(peticion, timeout=60) as r, open(parcial, "wb") as f:
         total = int(r.headers.get("Content-Length", 0))
         hecho = 0
         while True:
@@ -135,6 +171,15 @@ def descargar(url, al_progresar=None):
             hecho += len(trozo)
             if al_progresar and total:
                 al_progresar(hecho / total * 100)
+    with open(parcial, "rb") as f:
+        cabeza = f.read(2)
+    if (total and hecho != total) or cabeza != b"MZ":
+        try:
+            os.remove(parcial)
+        except OSError:
+            pass
+        raise OSError("la descarga llegó incompleta; revisa tu internet y vuelve a intentarlo")
+    os.replace(parcial, destino)
     return destino
 
 
