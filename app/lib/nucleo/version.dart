@@ -20,7 +20,7 @@ import 'package:path_provider/path_provider.dart';
 import 'plataforma.dart';
 
 /// Version que lleva esta copia. Sube tambien la de pubspec.yaml al publicar.
-const String versionApp = '2.7.0';
+const String versionApp = '2.7.1';
 
 /// Instalada desde una tienda (variante "play" de Android): las versiones
 /// nuevas llegan por la tienda, no por la propia app.
@@ -205,16 +205,51 @@ Future<String> descargarApk(
     return destino;                      // ya estaba bajado entero
   }
 
-  await Dio().download(
-    novedad.apk,
-    destino,
-    cancelToken: cancelar,
-    options: Options(headers: {'User-Agent': 'Caudal'}),
-    onReceiveProgress: (hecho, total) {
-      if (total > 0) alProgresar?.call(hecho / total * 100);
-    },
-  );
-  return destino;
+  // Se baja a un archivo aparte y solo se da por bueno si llegó ENTERO: un APK cortado (señal
+  // que se cae, pantalla apagada) hace que Android diga «error durante el análisis del paquete».
+  final parcial = File('$destino.parcial');
+  Object? ultimoFallo;
+  for (var intento = 0; intento < 2; intento++) {
+    try {
+      if (await parcial.exists()) await parcial.delete();
+      await Dio().download(
+        novedad.apk,
+        parcial.path,
+        cancelToken: cancelar,
+        options: Options(headers: {'User-Agent': 'Caudal', 'Accept-Encoding': 'identity'}),
+        onReceiveProgress: (hecho, total) {
+          if (total > 0) alProgresar?.call(hecho / total * 100);
+        },
+      );
+      if (await apkCompleto(parcial, novedad.peso)) {
+        if (await ya.exists()) await ya.delete();
+        await parcial.rename(destino);
+        return destino;
+      }
+      ultimoFallo = 'incompleto';
+    } on DioException catch (e) {
+      if (CancelToken.isCancel(e)) rethrow;
+      ultimoFallo = e;
+    }
+  }
+  try {
+    if (await parcial.exists()) await parcial.delete();
+  } catch (_) {}
+  throw StateError('La descarga llegó incompleta ($ultimoFallo). Revisa tu internet y vuelve a tocar «Instalar».');
+}
+
+/// ¿El APK bajado está entero? Tamaño exacto (si GitHub lo dijo) y cabecera de ZIP («PK»).
+Future<bool> apkCompleto(File archivo, int peso) async {
+  if (!await archivo.exists()) return false;
+  final largo = await archivo.length();
+  if (largo < 1024 || (peso > 0 && largo != peso)) return false;
+  final raf = await archivo.open();
+  try {
+    final cabeza = await raf.read(2);
+    return cabeza.length == 2 && cabeza[0] == 0x50 && cabeza[1] == 0x4B;
+  } finally {
+    await raf.close();
+  }
 }
 
 /// Lanza el instalador de Android. El sistema pide permiso la primera vez.

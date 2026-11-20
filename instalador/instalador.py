@@ -184,6 +184,52 @@ foreach ($sitio in ($env:CAUDAL_SITIOS -split '\|')) {
 
 # ---------------------------------------------------------------- instalar
 
+SUFIJO_APARTADO = ".caudal-viejo"
+
+
+def _apartar(ruta):
+    """Un archivo en uso (un Caudal que no terminó de cerrarse, un antivirus mirándolo) no se puede
+    sobrescribir ni borrar, pero Windows sí deja RENOMBRARLO: se aparta y el nuevo ocupa su sitio.
+    Lo apartado se borra en la próxima instalación (o al reiniciar)."""
+    destino = f"{ruta}.{int(time.time() * 1000)}{SUFIJO_APARTADO}"
+    os.replace(ruta, destino)
+    try:
+        import ctypes
+        ctypes.windll.kernel32.MoveFileExW(destino, None, 4)   # MOVEFILE_DELAY_UNTIL_REBOOT
+    except Exception:  # noqa: BLE001
+        pass
+
+
+def _extraer(z, miembro, carpeta):
+    """Extrae un archivo; si el de antes está bloqueado, lo aparta y vuelve a probar."""
+    for intento in range(6):
+        try:
+            z.extract(miembro, carpeta)
+            return
+        except PermissionError:
+            ruta = os.path.join(carpeta, *miembro.filename.split("/"))
+            if os.path.isfile(ruta):
+                try:
+                    _apartar(ruta)
+                    continue
+                except OSError:
+                    pass
+            if intento == 2:
+                cerrar_app()
+            time.sleep(0.5)
+    z.extract(miembro, carpeta)          # último intento: si aun falla, que se vea el error
+
+
+def _limpiar_apartados(carpeta):
+    for raiz, _dirs, archivos in os.walk(carpeta):
+        for nombre in archivos:
+            if nombre.endswith(SUFIJO_APARTADO):
+                try:
+                    os.remove(os.path.join(raiz, nombre))
+                except OSError:
+                    pass                 # sigue en uso: se borra al reiniciar
+
+
 def instalar(carpeta, al_progresar=None, crear_escritorio=True):
     """Copia la aplicacion y deja todo listo. Devuelve la ruta del ejecutable."""
     paquete = os.path.join(recursos(), PAQUETE)
@@ -196,6 +242,7 @@ def instalar(carpeta, al_progresar=None, crear_escritorio=True):
         al_progresar(3, "Preparando la carpeta")
 
     os.makedirs(carpeta, exist_ok=True)
+    _limpiar_apartados(carpeta)
 
     # el programa principal se quita primero: si alguien abre Caudal (acceso
     # directo, reinicio de la propia app) mientras se copia, no arranca una
@@ -232,7 +279,7 @@ def instalar(carpeta, al_progresar=None, crear_escritorio=True):
                           key=lambda m: os.path.basename(m.filename) == f"{APP}.exe")
         total = len(miembros) or 1
         for i, miembro in enumerate(miembros):
-            z.extract(miembro, carpeta)
+            _extraer(z, miembro, carpeta)
             if al_progresar and i % 25 == 0:
                 al_progresar(8 + (i / total) * 82, "Copiando los archivos")
 

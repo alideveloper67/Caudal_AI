@@ -67,3 +67,6 @@ salida_local/
 build_local/
 escritorio/salida_local/
 escritorio/build_local/
+
+# lo genera crear_instalador.py (va dentro del .exe, no al repositorio)
+instalador/caudal_app.zip
