@@ -881,6 +881,11 @@ def radio(video_id=None, playlist_id=None, limite=50):
     su primera cancion o, de ultimo, con las canciones de la propia lista."""
     import time
     ultimo = []
+    # la radio de una canción se guarda (recientes, inicio) con el id de su VIDEO: si llega
+    # como emisora, YouTube la busca como lista privada y falla. Un id de 11 caracteres es
+    # un video, no una lista (las listas empiezan por PL, RD, OL, VL… y son más largas).
+    if playlist_id and not video_id and re.fullmatch(r"[A-Za-z0-9_-]{11}", str(playlist_id)):
+        video_id, playlist_id = str(playlist_id), None
 
     def intentar(**kw):
         for vez in range(2):
@@ -974,7 +979,8 @@ def letras(pista):
             if datos:
                 if datos.get("syncedLyrics"):
                     return {"sincronizada": True, "lineas": _lrc_a_lineas(datos["syncedLyrics"]),
-                            "texto": datos.get("plainLyrics") or "", "fuente": "LRCLIB"}
+                            "texto": datos.get("plainLyrics") or "", "fuente": "LRCLIB",
+                            "duracion": float(datos.get("duration") or 0)}
                 if datos.get("plainLyrics"):
                     return {"sincronizada": False, "lineas": [],
                             "texto": datos["plainLyrics"], "fuente": "LRCLIB"}
@@ -1038,7 +1044,7 @@ def letras_alternativas(pista, limite=8):
         if c.get("syncedLyrics"):
             salida.append({"sincronizada": True, "lineas": _lrc_a_lineas(c["syncedLyrics"]),
                            "texto": c.get("plainLyrics") or "", "fuente": "LRCLIB",
-                           "etiqueta": etiqueta})
+                           "etiqueta": etiqueta, "duracion": float(seg or 0)})
         else:
             salida.append({"sincronizada": False, "lineas": [], "texto": c["plainLyrics"],
                            "fuente": "LRCLIB", "etiqueta": etiqueta + " · sin sincronizar"})

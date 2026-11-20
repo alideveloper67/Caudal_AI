@@ -718,7 +718,8 @@ class Reproductor extends ChangeNotifier {
     secuencia = [pista];
     pos = 0;
     this.contexto = contexto ??
-        {'tipo': 'radio', 'id': pista['video_id'] ?? pista['clave'], 'titulo': 'Radio de ${pista['titulo']}'};
+        {'tipo': 'radio', 'id': pista['video_id'] ?? pista['clave'], 'titulo': 'Radio de ${pista['titulo']}',
+         'miniatura': pista['miniatura'] ?? ''};
     if (modo != null) this.modo = modo;
     await _cargar(pista);
     if (conRadio && '${pista['video_id'] ?? ''}'.isNotEmpty && _autoplay) {
@@ -727,7 +728,8 @@ class Reproductor extends ChangeNotifier {
   }
 
   Future<void> iniciarRadio(Json pista) => reproducirPista(pista,
-      contexto: {'tipo': 'radio', 'id': pista['video_id'], 'titulo': 'Radio de ${pista['titulo']}'});
+      contexto: {'tipo': 'radio', 'id': pista['video_id'], 'titulo': 'Radio de ${pista['titulo']}',
+                 'miniatura': pista['miniatura'] ?? ''});
 
   Future<void> reproducirRadioId(String playlistId, String titulo) async {
     _aviso('Preparando la radio…');
@@ -737,7 +739,8 @@ class Reproductor extends ChangeNotifier {
           .timeout(const Duration(seconds: 40));
       final pistas = List<Json>.from(datos['pistas'] as List);
       if (pistas.isEmpty) return _aviso('Esa radio no tiene canciones ahora mismo.');
-      await reproducirLista(pistas, contexto: {'tipo': 'radio', 'id': playlistId, 'titulo': titulo});
+      await reproducirLista(pistas, contexto: {'tipo': 'radio', 'id': playlistId, 'titulo': titulo,
+          'miniatura': '${pistas.first['miniatura'] ?? ''}'});
     } catch (e) {
       _aviso('$e');
     }

@@ -232,3 +232,55 @@ def test_clics_en_rectangulos_escalados(app, ancho, alto):
     QTest.mouseClick(w, Qt.LeftButton, Qt.NoModifier, w.rect_corazon().center().toPoint())
     QTest.mouseClick(w, Qt.LeftButton, Qt.NoModifier, w.rect_boton_letra().center().toPoint())
     assert cuenta == {"letra": 1, "gusta": 1}
+
+
+def test_clic_en_traducir_emite_solo_traducir(app):
+    w = _tarjeta(app)
+    w.poner(PISTA)
+    cuenta = {"letra": 0, "traducir": 0, "gusta": 0}
+    w.pidio_otra_letra.connect(lambda: cuenta.__setitem__("letra", cuenta["letra"] + 1))
+    w.pidio_traducir.connect(lambda: cuenta.__setitem__("traducir", cuenta["traducir"] + 1))
+    w.pidio_me_gusta.connect(lambda: cuenta.__setitem__("gusta", cuenta["gusta"] + 1))
+    QTest.mouseClick(w, Qt.LeftButton, Qt.NoModifier, w.rect_boton_traducir().center().toPoint())
+    assert cuenta == {"letra": 0, "traducir": 1, "gusta": 0}
+
+
+def test_clic_en_otra_letra_no_emite_traducir(app):
+    w = _tarjeta(app)
+    w.poner(PISTA)
+    cuenta = {"letra": 0, "traducir": 0}
+    w.pidio_otra_letra.connect(lambda: cuenta.__setitem__("letra", cuenta["letra"] + 1))
+    w.pidio_traducir.connect(lambda: cuenta.__setitem__("traducir", cuenta["traducir"] + 1))
+    QTest.mouseClick(w, Qt.LeftButton, Qt.NoModifier, w.rect_boton_letra().center().toPoint())
+    assert cuenta == {"letra": 1, "traducir": 0}
+
+
+@pytest.mark.parametrize("ancho,alto", [(360, 520), (180, 260)])
+def test_pildoras_no_se_solapan(app, ancho, alto):
+    w = _tarjeta(app)
+    w.resize(ancho, alto)
+    app.processEvents()
+    w._timer.stop()
+    letra, traducir = w.rect_boton_letra(), w.rect_boton_traducir()
+    assert not letra.intersects(traducir)
+    assert letra.right() < traducir.left()
+    # separación de 8 px en el espacio de diseño, escalada como el resto
+    assert traducir.left() - letra.right() == pytest.approx(8 * w._factor())
+    assert letra.height() == pytest.approx(traducir.height())
+    assert letra.top() == pytest.approx(traducir.top())
+    # el par queda dentro del widget
+    assert letra.left() >= 0 and traducir.right() <= w.width()
+
+
+def test_fijar_traduccion_no_rompe_render(app):
+    w = _tarjeta(app)
+    w.poner(PISTA)
+    w.poner_portada(_portada())
+    w.fijar_traduccion(True)
+    assert w._traduccion_activa is True
+    img = _render(w)
+    assert not img.isNull()
+    assert img.pixelColor(180, 200).alpha() > 0
+    w.fijar_traduccion(False)
+    assert w._traduccion_activa is False
+    assert not _render(w).isNull()

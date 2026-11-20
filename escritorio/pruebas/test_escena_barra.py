@@ -146,9 +146,9 @@ def test_render_de_todos_los_estados_sin_errores(app):
     w.fijar_estado("parado")
 
 
-def test_tamano_sugerido_es_660_por_92(app):
+def test_tamano_sugerido_es_698_por_92(app):
     w = BarraMini()
-    assert w.sizeHint().width() == 660
+    assert w.sizeHint().width() == 698
     assert w.sizeHint().height() == 92
 
 
@@ -156,3 +156,27 @@ def test_rect_boton_nombre_invalido_falla(app):
     w = BarraMini()
     with pytest.raises(KeyError):
         w.rect_boton("no_existe")
+
+
+def test_boton_buscar_no_vacio_ni_solapado(app):
+    w = BarraMini()
+    w.resize(ANCHO, ALTO)
+    w.show()
+    r = w.rect_boton("buscar")
+    assert not r.isEmpty()
+    for otro in ("anterior", "alternar", "siguiente", "aleatorio", "repetir",
+                 "fondo", "abrir", "salir"):
+        assert not r.intersects(w.rect_boton(otro)), f"«buscar» se solapa con «{otro}»"
+
+
+def test_clic_en_buscar_emite_pidio_buscar_una_vez_y_ninguna_otra(app):
+    w = BarraMini()
+    w.resize(ANCHO, ALTO)
+    w.show()
+    recibidas = []
+    for nombre in ("anterior", "alternar", "siguiente", "aleatorio", "repetir",
+                   "cambiar_fondo", "abrir_caudal", "salir", "pidio_buscar"):
+        getattr(w, nombre).connect(lambda nombre=nombre: recibidas.append(nombre))
+    w.buscar_pos.connect(lambda f: recibidas.append("buscar_pos"))
+    _clic(w, w.rect_boton("buscar").center())
+    assert recibidas == ["pidio_buscar"]

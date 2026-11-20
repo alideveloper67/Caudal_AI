@@ -319,6 +319,7 @@ class _CaudalAppState extends State<CaudalApp> {
     // «Modo gamer»: XP por escuchar, ahorro, sonido y listas por situación
     final gamer = ModoGamerControl(
       ajustes: ajustes,
+      sesion: c.sesion,
       aplicarSonido: reproductor.aplicarSonido,
       lanzar: (pistas, contexto) => reproductor.reproducirLista(pistas, contexto: contexto),
       alSubirNivel: (n) {

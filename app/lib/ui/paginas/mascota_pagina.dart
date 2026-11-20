@@ -177,7 +177,7 @@ class _Miniatura extends StatelessWidget {
               width: mascota.ancho * mascota.cuadros * 3.0,
               height: mascota.alto * 3.0,
               fit: BoxFit.fill,
-              filterQuality: FilterQuality.none,
+              filterQuality: filtroMascota(mascota.densidad),
               excludeFromSemantics: true,
             ),
           ),

@@ -2011,6 +2011,13 @@ class Catalogo {
   /// canción o, como último recurso, con las canciones de la propia lista.
   static Future<Map<String, dynamic>> radio(
       {String? videoId, String? playlistId, int limite = 50, String respaldo = ''}) async {
+    // la radio de una canción se guarda (recientes, inicio) con el id de su VIDEO: si llega
+    // como emisora, YouTube la busca como lista privada y falla. 11 caracteres = un video.
+    if ((videoId == null || videoId.isEmpty) && playlistId != null &&
+        RegExp(r'^[A-Za-z0-9_-]{11}$').hasMatch(playlistId)) {
+      videoId = playlistId;
+      playlistId = null;
+    }
     final conVideo = videoId != null && videoId.isNotEmpty;
     final conLista = playlistId != null && playlistId.isNotEmpty;
     final soloVideo = conVideo && !conLista;

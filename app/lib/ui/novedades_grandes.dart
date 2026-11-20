@@ -378,12 +378,6 @@ class _NovedadesGrandesState extends State<_AvisoActualizacion> with TickerProvi
                               label: Text(n == null ? 'Empezar' : (instalable ? 'Actualizar ahora' : 'Ver cómo actualizar')),
                             ),
                           ),
-                          if (n != null && instalable)
-                            TextButton(
-                              onPressed: _bajando ? null : _verComo,
-                              child: const Text('¿No se instala? Bájala desde el navegador',
-                                  textAlign: TextAlign.center, style: TextStyle(color: C.texto2)),
-                            ),
                           if (n != null)
                             TextButton(
                               onPressed: _bajando ? null : _cerrar,

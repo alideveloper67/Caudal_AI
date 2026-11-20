@@ -7,23 +7,29 @@ import 'dart:math' as math;
 
 const int nivelMaximo = 99;
 
+/// Días máximos que se guardan de actividad (para la racha entre equipos).
+const int maxDiasGuardados = 120;
+
 /// XP total necesaria para LLEGAR al nivel [n] (el 1 es el de partida: 0 XP).
-/// Curva suave: 40 · (n-1)^1.5 → nivel 2 a los 40 min, 5 a las 5 h, 10 a las 18 h.
+/// Misma fórmula que la app de PC: 25 · n · (n-1) → nivel 2 a 50 XP, 3 a 150, 4 a 300.
 int xpParaNivel(int n) {
   if (n <= 1) return 0;
-  return (40 * math.pow(n - 1, 1.5)).round();
+  return 25 * n * (n - 1);
 }
 
+/// El mayor nivel cuya XP total ya se alcanzó (nunca más de [nivelMaximo]).
 int nivelDeXp(int xp) {
   if (xp <= 0) return 1;
-  var n = (math.pow(xp / 40, 2 / 3)).floor() + 1;
+  final estimado = ((1 + math.sqrt(1 + 4 * xp / 25)) / 2).floor();
+  var n = estimado.clamp(1, nivelMaximo);
+  // la estimación puede pasarse o quedarse corta por redondeo: se corrige a mano
   while (n < nivelMaximo && xpParaNivel(n + 1) <= xp) {
     n++;
   }
   while (n > 1 && xpParaNivel(n) > xp) {
     n--;
   }
-  return n.clamp(1, nivelMaximo);
+  return n;
 }
 
 /// 0..1: lo que lleva del nivel actual al siguiente (1 en el nivel máximo).
@@ -126,9 +132,13 @@ class ProgresoGamer {
     this.nuevasHoy = const [],
     this.completadas = const [],
     this.vistas = const [],
+    this.dias = const [],
   });
 
   final int xp;
+
+  /// Días (AAAA-MM-DD, ordenados) con actividad en ESTE equipo; se guardan los últimos [maxDiasGuardados].
+  final List<String> dias;
 
   /// Segundos que aún no suman un minuto entero (1 XP por minuto).
   final int segPendientes;
@@ -202,6 +212,14 @@ class ProgresoGamer {
       if (vis.length > _tope) vis = vis.sublist(vis.length - _tope);
     }
 
+    // el día cuenta como activo en cuanto hay algo escuchado
+    var diasNuevos = p.dias;
+    final hoy = claveDia(ahora);
+    if (seg > 0 && !diasNuevos.contains(hoy)) {
+      diasNuevos = [...diasNuevos, hoy]..sort();
+      if (diasNuevos.length > maxDiasGuardados) diasNuevos = diasNuevos.sublist(diasNuevos.length - maxDiasGuardados);
+    }
+
     var q = p._copiar(
       xp: xpNuevo,
       segPendientes: pend % 60,
@@ -210,6 +228,7 @@ class ProgresoGamer {
       artistasHoy: art,
       nuevasHoy: nue,
       vistas: vis,
+      dias: diasNuevos,
     );
 
     // la racha cuenta el día en cuanto lleva un minuto escuchado
@@ -248,8 +267,10 @@ class ProgresoGamer {
     List<String>? nuevasHoy,
     List<String>? completadas,
     List<String>? vistas,
+    List<String>? dias,
   }) =>
       ProgresoGamer(
+        dias: dias ?? this.dias,
         xp: xp ?? this.xp,
         segPendientes: segPendientes ?? this.segPendientes,
         segTotales: segTotales ?? this.segTotales,
@@ -264,6 +285,14 @@ class ProgresoGamer {
         vistas: vistas ?? this.vistas,
       );
 
+  /// Lo que este equipo aporta a la cuenta: su XP, sus minutos totales y sus días activos.
+  /// Cada equipo escribe solo su fila; el total de la cuenta es la suma de todas.
+  Map<String, Object> aporte() => {
+        'xp': xp,
+        'minutos': segTotales ~/ 60,
+        'dias': [...dias]..sort(),
+      };
+
   String aTexto() => jsonEncode({
         'xp': xp,
         'sp': segPendientes,
@@ -277,6 +306,7 @@ class ProgresoGamer {
         'nh': nuevasHoy,
         'c': completadas,
         'v': vistas,
+        'ds': dias,
       });
 
   /// Tolera texto vacío o roto: arranca de cero en vez de fallar.
@@ -288,6 +318,8 @@ class ProgresoGamer {
       int n(String k) => (j[k] is num) ? (j[k] as num).toInt().clamp(0, 1 << 40) : 0;
       String s(String k) => j[k] is String ? j[k] as String : '';
       List<String> l(String k) => j[k] is List ? [for (final e in j[k] as List) '$e'] : const [];
+      // se copia antes de ordenar: la lista vacía por defecto es constante
+      final ds = [...l('ds')]..sort();
       return ProgresoGamer(
         xp: n('xp'),
         segPendientes: n('sp') % 60,
@@ -301,6 +333,7 @@ class ProgresoGamer {
         nuevasHoy: l('nh'),
         completadas: l('c'),
         vistas: l('v'),
+        dias: ds.length > maxDiasGuardados ? ds.sublist(ds.length - maxDiasGuardados) : ds,
       );
     } catch (_) {
       return const ProgresoGamer();

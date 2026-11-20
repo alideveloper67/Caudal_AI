@@ -144,6 +144,8 @@ DEFECTOS = {
     "eq_preset": "Plano",
     "segundo_plano": True,           # (antiguo) se sustituye por al_cerrar
     "al_cerrar": "preguntar",        # preguntar | bandeja | salir (con musica sonando)
+    "escena_piezas": {},             # dónde y de qué tamaño puso cada pieza de la escena (o si la ocultó)
+    "letra_desfases": {},            # ajuste fino de la letra por canción (ms), con Ctrl+←/→ en la escena
     "escena_fondo": "video",         # fondo de la escena de escritorio: video | ambiente
     "mini_encima": True,             # el mini reproductor queda por encima de todo
     "letras_auto": False,            # abrir las letras al reproducir

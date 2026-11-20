@@ -26,8 +26,9 @@ import re
 import time
 
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import (QBrush, QColor, QFont, QFontMetricsF, QImage, QLinearGradient,
-                           QPainter, QPainterPath, QPen, QRadialGradient)
+from PySide6.QtGui import (QBrush, QColor, QFont, QFontMetricsF, QImage, QKeySequence,
+                           QLinearGradient, QPainter, QPainterPath, QPen, QRadialGradient,
+                           QShortcut)
 from PySide6.QtWidgets import (QApplication, QHBoxLayout, QLabel, QPushButton, QVBoxLayout,
                                QWidget)
 
@@ -201,6 +202,21 @@ def _suave(actual, objetivo, dt, rapidez):
     return actual + (objetivo - actual) * (1 - math.exp(-dt * rapidez))
 
 
+def _clave_pista_desfase(p):
+    """Clave con la que se guarda el desfase de la letra de una pista (ajustes «letra_desfases»)."""
+    if not p:
+        return ""
+    return p.get("video_id") or p.get("archivo") or p.get("url") or ""
+
+
+def _texto_desfase(ms):
+    """Aviso breve con el desfase actual: «Letra adelantada 0,25 s», «Letra atrasada 0,50 s»."""
+    if not ms:
+        return "Letra a tiempo"
+    cantidad = f"{abs(ms) / 1000:.2f}".replace(".", ",") + " s"
+    return f"Letra adelantada {cantidad}" if ms > 0 else f"Letra atrasada {cantidad}"
+
+
 # ------------------------------------------------------------------- lienzo
 
 class LienzoLetra(QWidget):
@@ -250,6 +266,14 @@ class LienzoLetra(QWidget):
         r.posicion_cambio.connect(self._posicion)
         r.estado_cambio.connect(self._al_estado)
 
+        # Ctrl+→ / Ctrl+← mueven la letra 250 ms; Ctrl+0 la vuelve a tiempo. Hace falta haber
+        # pinchado la letra (ClickFocus) para que el atajo le llegue.
+        self.setFocusPolicy(Qt.ClickFocus)
+        for tecla, delta in (("Ctrl+Right", 250), ("Ctrl+Left", -250), ("Ctrl+0", None)):
+            atajo = QShortcut(QKeySequence(tecla), self)
+            atajo.setContext(Qt.WidgetWithChildrenShortcut)
+            atajo.activated.connect(lambda d=delta: self.ajustar_desfase(d))
+
     # ----------------------------------------------------------- tiempo
     def _posicion(self, seg):
         seg = float(seg or 0)
@@ -291,7 +315,7 @@ class LienzoLetra(QWidget):
         # justo antes de que entre la siguiente linea se pasa a fluido: el salto se ve suave
         sig = self._actual + 1
         if 0 <= sig < len(self.lineas) and self.lineas[sig]["ms"] is not None:
-            falta = self.lineas[sig]["ms"] - (self.ahora_ms() + ADELANTO_MS)
+            falta = self.lineas[sig]["ms"] - (self.ahora_ms() + self._adelanto())
             if falta < FPS_REPOSO + 10:
                 return FPS_SONANDO
         return FPS_REPOSO
@@ -448,11 +472,46 @@ class LienzoLetra(QWidget):
         self._ancho_hecho = self.width()
         self._rutas = {}
 
+    def _desfase_ms(self):
+        """Desfase guardado para la canción que suena (ms, puede ser negativo). Si falta o algo
+        falla, 0. Se lee en cada cálculo: puede cambiar en vivo."""
+        try:
+            mapa = self.ctx.ajustes.get("letra_desfases") or {}
+            return int(mapa.get(_clave_pista_desfase(self.pista)) or 0)
+        except Exception:  # noqa: BLE001
+            return 0
+
+    def _adelanto(self):
+        """Cuánto se adelanta la letra respecto a la música: el ajuste fijo más el desfase."""
+        return ADELANTO_MS + self._desfase_ms()
+
+    def ajustar_desfase(self, delta):
+        """Mueve la letra de la canción actual `delta` ms (None = volver a 0), la guarda y avisa.
+        Se guarda como copia del dict, sin la clave si queda en 0, con tope de ±10000 ms."""
+        clave = _clave_pista_desfase(self.pista)
+        if not clave:
+            return
+        try:
+            mapa = dict(self.ctx.ajustes.get("letra_desfases") or {})
+        except Exception:  # noqa: BLE001
+            mapa = {}
+        nuevo = 0 if delta is None else self._desfase_ms() + delta
+        nuevo = max(-10000, min(10000, nuevo))
+        if nuevo:
+            mapa[clave] = nuevo
+        else:
+            mapa.pop(clave, None)
+        self.ctx.ajustes["letra_desfases"] = mapa
+        self.ctx.ajustes.guardar()
+        self._despertar()
+        self.update()
+        self.ctx.avisar(_texto_desfase(nuevo))
+
     def _indice(self, ms):
         if not self.sincronizada or not self.lineas:
             return -1
         tiempos = [ln["ms"] for ln in self.lineas]
-        return bisect.bisect_right(tiempos, ms + ADELANTO_MS) - 1
+        return bisect.bisect_right(tiempos, ms + self._adelanto()) - 1
 
     # ----------------------------------------------------------- animacion
     def _cuadro(self):
@@ -605,7 +664,7 @@ class LienzoLetra(QWidget):
             return 0.0
         ln = self.lineas[k]
         canto = ln.get("canto") or 1500
-        return max(0.0, min(1.0, (ms + ADELANTO_MS - ln["ms"]) / canto))
+        return max(0.0, min(1.0, (ms + self._adelanto() - ln["ms"]) / canto))
 
     def _pluma(self, n, it, progreso, k):
         """Blanco hasta donde se canto y apagado despues, con borde suave."""
@@ -1029,10 +1088,18 @@ class PaginaLetra(QWidget):
         self.bt_estilo = QPushButton("Estilo")
         self.bt_estilo.setToolTip("Elegir cómo se ve la tarjeta. Neón, Cristal, Papel y Aurora son para donadores")
         self.bt_estilo.clicked.connect(self._cambiar_estilo)
+        # ajuste fino de la letra de esta canción (se guarda); mismos atajos que el lienzo
+        self.bt_antes = QPushButton("Letra antes (Ctrl+→)")
+        self.bt_antes.setToolTip("Adelanta la letra 250 ms en esta canción (se guarda)")
+        self.bt_antes.clicked.connect(lambda _c=False: self.lienzo.ajustar_desfase(250))
+        self.bt_despues = QPushButton("Letra después (Ctrl+←)")
+        self.bt_despues.setToolTip("Atrasa la letra 250 ms en esta canción (se guarda)")
+        self.bt_despues.clicked.connect(lambda _c=False: self.lienzo.ajustar_desfase(-250))
         self.bt_volver = QPushButton("Cerrar")
         self.bt_volver.setToolTip("Volver a donde estabas")
         self.bt_volver.clicked.connect(self.volver.emit)
-        for b in (self.bt_traducir, self.bt_estilo, self.bt_imagen, self.bt_volver):
+        for b in (self.bt_traducir, self.bt_antes, self.bt_despues, self.bt_estilo,
+                  self.bt_imagen, self.bt_volver):
             b.setCursor(Qt.PointingHandCursor)
             b.setStyleSheet(_BOTON)
             h.addWidget(b, 0, Qt.AlignVCenter)

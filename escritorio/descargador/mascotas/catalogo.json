@@ -639,7 +639,7 @@
   "estela_ancho": 11,
   "estela_alto": 11,
   "cuadros": 4,
-  "densidad": 2
+  "densidad": 4
  },
  {
   "clave": "wos",
@@ -653,7 +653,7 @@
   "estela_ancho": 11,
   "estela_alto": 11,
   "cuadros": 4,
-  "densidad": 2
+  "densidad": 4
  },
  {
   "clave": "nightwing",
@@ -667,7 +667,7 @@
   "estela_ancho": 11,
   "estela_alto": 11,
   "cuadros": 4,
-  "densidad": 2
+  "densidad": 4
  },
  {
   "clave": "goku_ultra",
@@ -681,7 +681,7 @@
   "estela_ancho": 11,
   "estela_alto": 11,
   "cuadros": 4,
-  "densidad": 2
+  "densidad": 4
  },
  {
   "clave": "goku_blue",
@@ -695,7 +695,7 @@
   "estela_ancho": 11,
   "estela_alto": 11,
   "cuadros": 4,
-  "densidad": 2
+  "densidad": 4
  },
  {
   "clave": "wanda",
@@ -709,7 +709,7 @@
   "estela_ancho": 11,
   "estela_alto": 11,
   "cuadros": 4,
-  "densidad": 2
+  "densidad": 4
  },
  {
   "clave": "loki",
@@ -723,7 +723,7 @@
   "estela_ancho": 11,
   "estela_alto": 11,
   "cuadros": 4,
-  "densidad": 2
+  "densidad": 4
  },
  {
   "clave": "jake",
@@ -737,7 +737,7 @@
   "estela_ancho": 11,
   "estela_alto": 11,
   "cuadros": 4,
-  "densidad": 2
+  "densidad": 4
  },
  {
   "clave": "finn",
@@ -751,7 +751,7 @@
   "estela_ancho": 11,
   "estela_alto": 11,
   "cuadros": 4,
-  "densidad": 2
+  "densidad": 4
  },
  {
   "clave": "marceline",
@@ -765,7 +765,7 @@
   "estela_ancho": 11,
   "estela_alto": 11,
   "cuadros": 4,
-  "densidad": 2
+  "densidad": 4
  },
  {
   "clave": "pan_canela",
@@ -779,7 +779,7 @@
   "estela_ancho": 11,
   "estela_alto": 11,
   "cuadros": 4,
-  "densidad": 2
+  "densidad": 4
  },
  {
   "clave": "rigby",
@@ -793,7 +793,7 @@
   "estela_ancho": 11,
   "estela_alto": 11,
   "cuadros": 4,
-  "densidad": 2
+  "densidad": 4
  },
  {
   "clave": "steven",
@@ -807,7 +807,7 @@
   "estela_ancho": 11,
   "estela_alto": 11,
   "cuadros": 4,
-  "densidad": 2
+  "densidad": 4
  },
  {
   "clave": "perla",
@@ -821,7 +821,7 @@
   "estela_ancho": 11,
   "estela_alto": 11,
   "cuadros": 4,
-  "densidad": 2
+  "densidad": 4
  },
  {
   "clave": "lapislazuli",
@@ -835,7 +835,7 @@
   "estela_ancho": 11,
   "estela_alto": 11,
   "cuadros": 4,
-  "densidad": 2
+  "densidad": 4
  },
  {
   "clave": "jaspe",
@@ -849,7 +849,7 @@
   "estela_ancho": 11,
   "estela_alto": 11,
   "cuadros": 4,
-  "densidad": 2
+  "densidad": 4
  },
  {
   "clave": "garnet",
@@ -863,7 +863,7 @@
   "estela_ancho": 11,
   "estela_alto": 11,
   "cuadros": 4,
-  "densidad": 2
+  "densidad": 4
  },
  {
   "clave": "peridot",
@@ -877,7 +877,7 @@
   "estela_ancho": 11,
   "estela_alto": 11,
   "cuadros": 4,
-  "densidad": 2
+  "densidad": 4
  },
  {
   "clave": "amatista",
@@ -891,7 +891,7 @@
   "estela_ancho": 11,
   "estela_alto": 11,
   "cuadros": 4,
-  "densidad": 2
+  "densidad": 4
  },
  {
   "clave": "leon",
@@ -905,7 +905,7 @@
   "estela_ancho": 11,
   "estela_alto": 11,
   "cuadros": 4,
-  "densidad": 2
+  "densidad": 4
  },
  {
   "clave": "richard",
@@ -919,7 +919,7 @@
   "estela_ancho": 11,
   "estela_alto": 11,
   "cuadros": 4,
-  "densidad": 2
+  "densidad": 4
  },
  {
   "clave": "gumball",
@@ -933,7 +933,7 @@
   "estela_ancho": 11,
   "estela_alto": 11,
   "cuadros": 4,
-  "densidad": 2
+  "densidad": 4
  },
  {
   "clave": "darwin",
@@ -947,7 +947,7 @@
   "estela_ancho": 11,
   "estela_alto": 11,
   "cuadros": 4,
-  "densidad": 2
+  "densidad": 4
  },
  {
   "clave": "mordecai",
@@ -961,6 +961,6 @@
   "estela_ancho": 11,
   "estela_alto": 11,
   "cuadros": 4,
-  "densidad": 2
+  "densidad": 4
  }
 ]

@@ -30,6 +30,12 @@ GAP_FILAS = 0.10              # separación entre filas, en fracción del tamañ
 PAD = 28.0                    # margen del widget
 RESERVA = 44.0                # alto que se deja abajo para la línea siguiente
 PERIODO_PUNTOS = 1.1          # s de un latido completo de los puntos de pausa
+TAM_TRADUCCION = 0.42         # tamaño de la traducción respecto al de la línea principal
+TAM_MIN_TRADUCCION = 13       # px mínimos de la traducción
+GAP_TRADUCCION = 0.30         # separación entre el bloque principal y la traducción (fracción)
+ALFA_TRADUCCION = 200         # alfa del texto traducido (de 0 a 255)
+DURACION_TRADUCCION = 0.35    # s del fundido de la traducción al cambiar de línea
+ALTO_LINEA_TRADUCCION = 1.4   # alto de la fila de la traducción, en veces su tamaño de letra
 
 
 # --------------------------------------------------------------------------- funciones puras
@@ -114,14 +120,15 @@ class _Item:
 
 class _Disposicion:
     """Disposición de una línea (o trozo) para el tamaño actual; se guarda en caché."""
-    __slots__ = ("tipo", "items", "ms_palabras", "puntos", "radio")
+    __slots__ = ("tipo", "items", "ms_palabras", "puntos", "radio", "tam")
 
-    def __init__(self, tipo, items=(), ms_palabras=(), puntos=(), radio=0.0):
+    def __init__(self, tipo, items=(), ms_palabras=(), puntos=(), radio=0.0, tam=0.0):
         self.tipo = tipo              # "palabras", "pausa" o "vacia"
         self.items = list(items)
         self.ms_palabras = list(ms_palabras)
         self.puntos = list(puntos)
         self.radio = radio
+        self.tam = tam                # tamaño base de la línea (sin el de la palabra fuerte)
 
 
 class LetraCinetica(QWidget):
@@ -141,6 +148,7 @@ class LetraCinetica(QWidget):
         self._dominante = QColor(DOMINANTE)
         self._segundo = QColor(SEGUNDO)
         self._brillo = QColor(BRILLO)
+        self._trad = []               # traducción por línea original (None = sin traducción)
         self._ef = None               # entradas efectivas: líneas partidas en trozos si hace falta
         self._ef_clave = None         # tamaño con el que se construyeron
         self._cache = {}              # índice efectivo -> disposición (válida para _ef_clave)
@@ -158,6 +166,7 @@ class LetraCinetica(QWidget):
         self._lineas = [dict(linea) for linea in (lineas or [])]
         self._sincronizada = bool(sincronizada) and any(
             linea.get("ms") is not None for linea in self._lineas)
+        self._trad = []               # una letra nueva borra las traducciones de la anterior
         self._ef = None
         self._cache.clear()
         self._indice = -1
@@ -183,6 +192,19 @@ class LetraCinetica(QWidget):
     def poner_mensaje(self, texto):
         """Muestra un mensaje centrado en lugar de la letra. Cadena vacía lo quita."""
         self._mensaje = str(texto or "")
+        self._arrancar()
+        self.update()
+
+    def fijar_traducciones(self, traducciones):
+        """Traducción de cada línea, con el mismo índice que las líneas de la letra. None o cadena
+        vacía = sin traducción para esa línea. None, lista vacía o de otro largo quitan todas."""
+        if not isinstance(traducciones, (list, tuple)) or not traducciones \
+                or len(traducciones) != len(self._lineas):
+            self._trad = []
+        else:
+            self._trad = [None if t is None or not str(t).strip() else str(t).strip()
+                          for t in traducciones]
+        self._cache.clear()           # el tamaño de la línea cambia si ahora lleva traducción
         self._arrancar()
         self.update()
 
@@ -238,6 +260,9 @@ class LetraCinetica(QWidget):
         if any(ahora - t0 < DURACION_ENTRADA for t0 in self._entradas.values()):
             return True
         if self._indice >= 0 and self._efectivas()[self._indice]["pausa"]:
+            return True
+        # el fundido de la traducción también necesita repintar mientras dura
+        if self._traduccion_actual() is not None and ahora - self._t_linea < DURACION_TRADUCCION:
             return True
         return False
 
@@ -397,9 +422,10 @@ class LetraCinetica(QWidget):
             altos.append(max(medidas[k][3] for k in fila) + max(medidas[k][4] for k in fila))
         return max(anchos), sum(altos) + tam * GAP_FILAS * (len(filas) - 1)
 
-    def _ajustar(self, palabras):
+    def _ajustar(self, palabras, con_traduccion=False):
         """(medidas, filas, tamaño, cabe): el mayor tamaño que deja el bloque dentro del 92% del
-        ancho y el 70% del alto, con 4 filas como máximo. cabe=False si ni al tamaño mínimo."""
+        ancho y el 70% del alto, con 4 filas como máximo. cabe=False si ni al tamaño mínimo.
+        Con con_traduccion se deja sitio debajo para la fila de la traducción."""
         fuerte = palabra_fuerte(palabras)
         area = self._area()
         ancho_max = ANCHO_MAX * self.width()
@@ -409,7 +435,9 @@ class LetraCinetica(QWidget):
             medidas = self._medir(palabras, fuerte, tam)
             filas = self._partir_en_filas(medidas, tam, ancho_max)
             bw, bh = self._tamano_bloque(medidas, filas, tam)
-            if len(filas) <= MAX_FILAS and bw <= ancho_max and bh <= alto_max:
+            reserva = tam * (GAP_TRADUCCION + TAM_TRADUCCION * ALTO_LINEA_TRADUCCION) \
+                if con_traduccion else 0.0
+            if len(filas) <= MAX_FILAS and bw <= ancho_max and bh + reserva <= alto_max:
                 return medidas, filas, tam, True
             if tam <= TAM_MIN:
                 return medidas, filas, tam, False
@@ -432,7 +460,8 @@ class LetraCinetica(QWidget):
 
     def _disponer_palabras(self, entrada):
         palabras = entrada["texto"].split()
-        medidas, filas, tam, _ = self._ajustar(palabras)
+        con_trad = self._traduccion_de(entrada["orig"]) is not None
+        medidas, filas, tam, _ = self._ajustar(palabras, con_trad)
         bw, bh = self._tamano_bloque(medidas, filas, tam)
         area = self._area()
         separacion = tam * GAP_PALABRAS
@@ -455,7 +484,7 @@ class LetraCinetica(QWidget):
         if entrada["ms"] is not None:
             ms_palabras = [ms for _, ms in repartir_palabras(entrada["texto"], entrada["ms"],
                                                              entrada["canto"])]
-        return _Disposicion("palabras", items, ms_palabras)
+        return _Disposicion("palabras", items, ms_palabras, tam=tam)
 
     def _disponer_pausa(self):
         area = self._area()
@@ -512,6 +541,53 @@ class LetraCinetica(QWidget):
             p.setOpacity(opacidad * (0.45 + 0.55 * s))
             p.drawEllipse(QPointF(c.x(), c.y() + dy), r, r)
         p.setOpacity(opacidad)
+
+    def _traduccion_de(self, orig):
+        """Traducción de la línea original orig, o None si no tiene."""
+        return self._trad[orig] if 0 <= orig < len(self._trad) else None
+
+    def _traduccion_actual(self):
+        """Texto traducido de la línea que suena, o None si no hay (o si es una pausa)."""
+        if not self._trad or self._indice < 0:
+            return None
+        entrada = self._efectivas()[self._indice]
+        if entrada["pausa"]:
+            return None
+        return self._traduccion_de(entrada["orig"])
+
+    def _capa_traduccion(self, disp):
+        """Qué dibujar de la traducción: (desplazamiento del bloque principal, texto ya recortado,
+        fuente, rectángulo). None si no hay traducción o no cabe debajo del bloque."""
+        texto = self._traduccion_actual()
+        if not texto or not disp.items:
+            return None
+        area = self._area()
+        f = fuente_impacto(max(TAM_MIN_TRADUCCION, int(round(disp.tam * TAM_TRADUCCION))))
+        alto_linea = QFontMetricsF(f).height()
+        texto = QFontMetrics(f).elidedText(texto, Qt.ElideRight, max(1, int(area.width())))
+        bloque_top = min(it.rect.top() for it in disp.items)
+        bloque_bottom = max(it.rect.bottom() for it in disp.items)
+        separacion = disp.tam * GAP_TRADUCCION
+        # el bloque sube solo lo justo para que la traducción quepa en el área
+        exceso = bloque_bottom + separacion + alto_linea - area.bottom()
+        desplazamiento = -max(0.0, exceso)
+        if bloque_top + desplazamiento < 0:
+            return None                       # ni subiendo cabe: se omite antes que salirse
+        y = bloque_bottom + desplazamiento + separacion
+        return desplazamiento, texto, f, QRectF(area.left(), y, area.width(), alto_linea)
+
+    def _pintar_traduccion(self, p, capa, ahora):
+        """Texto traducido en blanco translúcido, con fundido al cambiar de línea."""
+        _, texto, f, rect = capa
+        fundido = min(1.0, max(0.0, (ahora - self._t_linea) / DURACION_TRADUCCION))
+        alfa = int(ALFA_TRADUCCION * fundido)
+        if alfa <= 0:
+            return
+        p.save()
+        p.setFont(f)
+        p.setPen(QColor(255, 255, 255, alfa))
+        p.drawText(rect, Qt.AlignLeft | Qt.AlignVCenter, texto)
+        p.restore()
 
     def _pintar_mensaje(self, p):
         p.setFont(fuente(16))
@@ -578,7 +654,12 @@ class LetraCinetica(QWidget):
             if self._indice >= 0:
                 disp = self._disposicion(self._indice)
                 if disp.tipo == "palabras":
-                    self._pintar_items(p, disp, self._entradas, ahora, 0.0, 1.0, color_fuerte)
+                    capa = self._capa_traduccion(disp)
+                    desplazamiento = capa[0] if capa else 0.0
+                    self._pintar_items(p, disp, self._entradas, ahora, desplazamiento, 1.0,
+                                       color_fuerte)
+                    if capa:
+                        self._pintar_traduccion(p, capa, ahora)
                 elif disp.tipo == "pausa":
                     self._pintar_pausa(p, disp, ahora, 0.0, 1.0, color_fuerte)
         finally:

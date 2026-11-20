@@ -789,7 +789,7 @@ void _pintarMascota(Canvas canvas, _Hoja h, double x, double yBarra, double esca
     Rect.fromLTWH(cuadro * fw, 0, fw, fh),
     Rect.fromLTWH(x - w / 2, arriba, w, alto),
     Paint()
-      ..filterQuality = FilterQuality.none
+      ..filterQuality = filtroMascota(m.densidad)
       ..color = Color.fromRGBO(255, 255, 255, opacidad),
   );
 }
@@ -1121,7 +1121,7 @@ class _Telefono extends StatelessWidget {
           right: ancho - g.pantalla.right + ancho * 0.05,
           bottom: alto - g.mini.top + alto * 0.012,
           child: Image.asset(personaje,
-              height: alto * 0.17, filterQuality: FilterQuality.none, excludeFromSemantics: true, gaplessPlayback: true),
+              height: alto * 0.17, filterQuality: FilterQuality.medium, excludeFromSemantics: true, gaplessPlayback: true),
         ),
         Positioned.fill(
           child: ClipRRect(
@@ -1306,7 +1306,7 @@ class _Muestra extends StatelessWidget {
         border: Border.all(color: t.$2.withValues(alpha: 0.5), width: 1.5),
       ),
       padding: EdgeInsets.all(lado * 0.16),
-      child: Image.asset(Aspecto.patronDe(tema)!, filterQuality: FilterQuality.none, excludeFromSemantics: true),
+      child: Image.asset(Aspecto.patronDe(tema)!, filterQuality: FilterQuality.medium, excludeFromSemantics: true),
     );
   }
 }

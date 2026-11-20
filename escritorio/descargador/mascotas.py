@@ -238,6 +238,28 @@ class GestorMascota(QObject):
 COLORES_ARCOIRIS = ("#ff0000", "#ff9900", "#ffff00", "#33ff00", "#0099ff", "#6633ff")
 
 
+_REDUCIDAS = {}
+
+
+def _reducida(clave, i, pm, ancho, alto, dpr):
+    """El cuadro `i` reducido con filtro de calidad a `ancho`×`alto` píxeles reales (se guarda: la barra lo
+    pide en cada cuadro). Si no hace falta reducir más de 2:1, se devuelve tal cual."""
+    if ancho <= 0 or alto <= 0 or pm.height() <= alto * 2:
+        return pm
+    clave_c = (clave, i, ancho, alto)
+    r = _REDUCIDAS.get(clave_c)
+    if r is None:
+        from PySide6.QtCore import Qt
+        from PySide6.QtGui import QPixmap
+        if len(_REDUCIDAS) > 256:
+            _REDUCIDAS.clear()
+        img = pm.toImage().scaled(ancho, alto, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+        r = QPixmap.fromImage(img)
+        r.setDevicePixelRatio(dpr)
+        _REDUCIDAS[clave_c] = r
+    return r
+
+
 def pintar(p, datos, x, y, margen, ancho_total, cuadro, fase, escala=1, gorro=False):
     """Dibuja la mascota con los pies sobre la línea `y`, centrada en `x`.
 
@@ -267,10 +289,14 @@ def pintar(p, datos, x, y, margen, ancho_total, cuadro, fase, escala=1, gorro=Fa
     elif datos.get("estela"):
         _pintar_estela(p, datos["clave"], x, y, margen, w, h, fase, escala)
     pm = cuadros_[cuadro % len(cuadros_)]
-    # hoja con más detalle que la pantalla (densidad 2 en una pantalla al 100 %): se reduce suave para no perder
-    # trazos; si la pantalla tiene densidad suficiente se dibuja nítido, píxel a píxel
-    reducir = densidad(datos) > 1 and p.device() is not None and p.device().devicePixelRatioF() < densidad(datos)
+    # hoja con más detalle que la pantalla (densidad 2 o 4 en una pantalla al 100 %): se reduce suave para no
+    # perder trazos; si la pantalla tiene densidad suficiente se dibuja nítido, píxel a píxel
+    dpr = p.device().devicePixelRatioF() if p.device() is not None else 1.0
+    reducir = densidad(datos) > 1 and dpr < densidad(datos)
     if reducir:
+        # a más de 2:1 el filtro bilineal del pintor se salta píxeles (sale granulado): se reduce una vez con
+        # el filtro bueno al tamaño real en pantalla y se guarda
+        pm = _reducida(datos["clave"], cuadro % len(cuadros_), pm, round(w * dpr), round(h * dpr), dpr)
         p.setRenderHint(QPainter.SmoothPixmapTransform, True)
     p.drawPixmap(QRectF(izq, arriba, w, h), pm, QRectF(pm.rect()))
     if reducir:

@@ -743,7 +743,10 @@ class Coleccion extends ChangeNotifier {
 
   Future<List<Json>> contextosRecientes([int n = 12]) async {
     final filas = await db.query('contextos_recientes', orderBy: 'fecha DESC', limit: n);
-    return [for (final f in filas) Map<String, dynamic>.from(jsonDecode('${f['datos']}') as Map)];
+    return [
+      for (final f in filas)
+        conPortadaDeRadio(Map<String, dynamic>.from(jsonDecode('${f['datos']}') as Map))
+    ];
   }
 
   Future<List<Json>> artistasFrecuentes([int n = 8]) async {
@@ -924,4 +927,15 @@ String nuevoUuid() {
   final s = List.generate(16, h).join();
   return '${s.substring(0, 8)}-${s.substring(8, 12)}-${s.substring(12, 16)}-'
       '${s.substring(16, 20)}-${s.substring(20)}';
+}
+
+
+/// Las radios guardadas antes no traían imagen: se saca de su canción semilla (el id de la
+/// radio es el del video, o «RDAMVM» + el del video). Lo demás se devuelve tal cual.
+Map<String, dynamic> conPortadaDeRadio(Map<String, dynamic> c) {
+  if (c['tipo'] != 'radio' || '${c['miniatura'] ?? ''}'.isNotEmpty) return c;
+  final id = '${c['id'] ?? ''}';
+  final m = RegExp(r'^(?:RDAMVM|RDAO|RD)?([A-Za-z0-9_-]{11})$').firstMatch(id);
+  if (m == null) return c;
+  return {...c, 'miniatura': 'https://i.ytimg.com/vi/${m.group(1)}/hqdefault.jpg'};
 }

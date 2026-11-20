@@ -178,6 +178,19 @@ PREMIUM_TEMAS = {
     "oceano": ("Océano", "#38BDF8", "#04101A", "#38BDF8"),
     "medianoche": ("Medianoche", "#A78BFA", "#0A0A1F", "#818CF8"),
     "ambar": ("Ámbar", "#FBBF24", "#130E04", "#FBBF24"),
+    "retro": ("Retro", "#FFB347", "#140C06", "#FF8C42"),
+    "cyberpunk": ("Cyberpunk", "#00F0FF", "#0A0414", "#FF2A6D"),
+    "samurai": ("Japón samurái", "#EA5863", "#120A08", "#C9A227"),
+    "boxeo": ("Boxeo", "#EA606C", "#0E0A0A", "#F5C518"),
+    "gym": ("Gym", "#A3E635", "#0A0C08", "#A3E635"),
+    "fan_kitty": ("Fan de Hello Kitty", "#FF5C8A", "#1A0A10", "#FFB3C7"),
+    "gotico": ("Gótico", "#CD5E74", "#0A0608", "#6B21A8"),
+    "lofi": ("Lo-fi", "#C4A7E7", "#120F18", "#E9B872"),
+    "est_kuromi": ("Estética Kuromi", "#FF77B7", "#0F0A16", "#8B5CF6"),
+    "est_cinnamoroll": ("Estética Cinnamoroll", "#7CC6FF", "#08101A", "#9ACDF2"),
+    "est_pompompurin": ("Estética Pompompurin", "#FFD45C", "#140F06", "#A0522D"),
+    "est_hellokitty": ("Estética Hello Kitty", "#FF4D6D", "#18090D", "#FF8FA3"),
+    "est_mymelody": ("Estética My Melody", "#FF9EC8", "#160B12", "#FFC2DC"),
 }
 _FRACCIONES_PREMIUM = (0.0, 0.045, 0.075, 0.105, 0.15, 0.125, 0.12)   # fondo, panel, sup, sup2, sup3, hover, borde
 

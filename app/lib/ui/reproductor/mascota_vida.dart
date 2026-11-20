@@ -425,7 +425,7 @@ class _PintorSuelto extends CustomPainter {
     final baja = dormida ? size.height * 0.03 : 0.0;
     final destino = Rect.fromLTWH(0, salto + baja, size.width, size.height);
     canvas.drawImageRect(hoja, Rect.fromLTWH(cuadro * fw, 0, fw, fh), destino,
-        Paint()..filterQuality = FilterQuality.none);
+        Paint()..filterQuality = filtroMascota(mascota.densidad));
     pintarGorro(canvas, fiesta, Offset(size.width * 0.55, destino.top + size.height * 0.1), size.width * 0.42);
     if (dormida) {
       pintarZzz(canvas, Offset(size.width * 0.72, destino.top + size.height * 0.18), size.height * 0.26,

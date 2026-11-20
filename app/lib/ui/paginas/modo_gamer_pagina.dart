@@ -199,8 +199,12 @@ class _TarjetaNivel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = control.progreso.alDia(control.ahora);
-    final racha = p.rachaVigente(control.ahora);
-    final tope = p.nivel >= nivelMaximo;
+    final racha = control.rachaTotal;
+    // nivel y barra sobre el total de la cuenta (todos los equipos)
+    final xp = control.xpTotal;
+    final nivel = nivelDeXp(xp);
+    final tope = nivel >= nivelMaximo;
+    final baseNivel = xpParaNivel(nivel), sigNivel = xpParaNivel(math.min(nivel + 1, nivelMaximo));
     return BordeRgb(
       animado: control.activo,
       child: Container(
@@ -217,15 +221,15 @@ class _TarjetaNivel extends StatelessWidget {
                 color: C.superficie2,
                 border: Border.all(color: _neon[2], width: 2),
               ),
-              child: Text('${p.nivel}', style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w900)),
+              child: Text('$nivel', style: const TextStyle(fontSize: 24, fontWeight: FontWeight.w900)),
             ),
             const SizedBox(width: 14),
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('Nivel ${p.nivel}', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
+                Text('Nivel $nivel', style: const TextStyle(fontSize: 18, fontWeight: FontWeight.w800)),
                 const SizedBox(height: 2),
                 Text(
-                  tope ? 'Nivel máximo' : '${p.xp - p.xpNivelActual} / ${p.xpSiguiente - p.xpNivelActual} XP para el ${p.nivel + 1}',
+                  tope ? 'Nivel máximo' : '${xp - baseNivel} / ${sigNivel - baseNivel} XP para el ${nivel + 1}',
                   style: estiloSecundario,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
@@ -237,13 +241,13 @@ class _TarjetaNivel extends StatelessWidget {
           ClipRRect(
             borderRadius: BorderRadius.circular(6),
             child: LinearProgressIndicator(
-                value: p.fraccion, minHeight: 8, color: _neon[0], backgroundColor: C.superficie3),
+                value: fraccionNivel(xp), minHeight: 8, color: _neon[0], backgroundColor: C.superficie3),
           ),
           const SizedBox(height: 14),
           Wrap(spacing: 8, runSpacing: 8, children: [
             _Dato(Icons.local_fire_department_rounded, racha == 1 ? '1 día de racha' : '$racha días de racha', _neon[3]),
             _Dato(Icons.timer_outlined, '${p.minutosHoy} min hoy', _neon[4]),
-            _Dato(Icons.bolt_rounded, '${p.xp} XP', _neon[1]),
+            _Dato(Icons.bolt_rounded, '$xp XP', _neon[1]),
           ]),
         ]),
       ),

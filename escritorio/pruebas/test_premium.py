@@ -96,7 +96,7 @@ def test_validadores_aceptan_lo_conocido_y_nada_mas():
     assert D.marco_valido("hackeado") == "ninguno" and D.marco_valido(None) == "ninguno"
     assert D.efecto_valido(" Neon ") == "neon" and D.efecto_valido("x") == "ninguno"
     assert D.tema_valido("oceano") == "oceano" and D.tema_valido("rosa") == "ninguno"
-    assert len(D.MARCOS) == 8 and len(D.EFECTOS) == 5 and len(D.TEMAS) == 7
+    assert len(D.MARCOS) == 8 and len(D.EFECTOS) == 5 and len(D.TEMAS) == 20   # «ninguno» + 19 temas
 
 
 def test_estado_prueba_vigente_y_vencida():

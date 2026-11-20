@@ -17,6 +17,7 @@ import os
 import random
 import sys
 import time
+import uuid
 from datetime import date, datetime, timedelta
 
 from PySide6.QtCore import QAbstractNativeEventFilter, QObject, QTimer, Signal
@@ -24,6 +25,7 @@ from PySide6.QtCore import QAbstractNativeEventFilter, QObject, QTimer, Signal
 from . import catalogo
 from .config import carpeta_perfil
 from .hilos import en_segundo_plano
+from .social import Social
 
 # ===================================================================== atajos
 
@@ -316,7 +318,11 @@ class Progreso:
         self.archivo = archivo or (carpeta_perfil() / "modo_gamer_progreso.json")
         self._hoy = hoy or date.today
         self.d = {"xp": 0, "racha": 0, "mejor_racha": 0, "ultimo_activo": "", "dia": "",
-                  "cont": {}, "cobradas": [], "resto": 0.0, "minutos_total": 0}
+                  "cont": {}, "cobradas": [], "resto": 0.0, "minutos_total": 0, "dias": []}
+        # lo que aportan los OTROS equipos de la cuenta (solo en memoria, lo trae la nube)
+        self.nube_xp = 0
+        self.nube_minutos = 0
+        self.nube_dias = set()
         self._cargar()
         self._girar_dia()
 
@@ -331,6 +337,11 @@ class Progreso:
         except (OSError, ValueError):
             pass
         self.d["xp"] = max(0, int(self.d["xp"]))
+        # solo fechas ISO válidas (texto), sin repetir y las 120 más recientes
+        self.d["dias"] = sorted({x for x in self.d["dias"] if isinstance(x, str)})[-120:]
+        # progreso anterior a «dias»: el último día activo cuenta como día de racha
+        if not self.d["dias"] and self.d["ultimo_activo"]:
+            self.d["dias"] = [self.d["ultimo_activo"]]
 
     def guardar(self):
         try:
@@ -351,17 +362,57 @@ class Progreso:
     # --- lectura
     @property
     def xp(self):
-        return self.d["xp"]
+        """XP de este equipo más el de los otros de la cuenta."""
+        return self.d["xp"] + self.nube_xp
 
     def racha(self):
-        """Dias seguidos activos; se corta si ayer no se escucho lo suficiente."""
-        ult = self.d["ultimo_activo"]
-        if not ult:
-            return 0
+        """Dias seguidos activos; se corta si ayer no se escucho lo suficiente.
+        Cuenta con los días de todos los equipos de la cuenta (la unión)."""
         hoy = self._hoy()
-        if ult in (hoy.isoformat(), (hoy - timedelta(days=1)).isoformat()):
-            return self.d["racha"]
-        return 0
+        union = set(self.d["dias"]) | self.nube_dias
+        if union:
+            calculada = self._racha_de(union, hoy)
+        else:
+            ult = self.d["ultimo_activo"]
+            calculada = 0
+            if ult and ult in (hoy.isoformat(), (hoy - timedelta(days=1)).isoformat()):
+                calculada = self.d["racha"]
+        self.d["mejor_racha"] = max(self.d["mejor_racha"], calculada)
+        return calculada
+
+    @staticmethod
+    def _racha_de(dias, hoy):
+        """Días consecutivos que terminan hoy o ayer (si hoy aún no cuenta)."""
+        cursor = hoy if hoy.isoformat() in dias else hoy - timedelta(days=1)
+        n = 0
+        while cursor.isoformat() in dias:
+            n += 1
+            cursor -= timedelta(days=1)
+        return n
+
+    def aporte(self):
+        """Lo que este equipo pone en la nube: solo lo suyo, nunca lo de los otros."""
+        return {"xp": self.d["xp"], "minutos": self.d["minutos_total"],
+                "dias": sorted(self.d["dias"])[-120:]}
+
+    def aplicar_otros(self, filas, mi_dispositivo):
+        """Toma las filas de la nube de los OTROS equipos (snapshot: reemplaza lo anterior).
+        Ignora la fila de este equipo y las filas mal formadas."""
+        xp = minutos = 0
+        dias = set()
+        for fila in filas or []:
+            try:
+                if not isinstance(fila, dict) or fila.get("dispositivo") == mi_dispositivo:
+                    continue
+                fx, fm = int(fila.get("xp") or 0), int(fila.get("minutos") or 0)
+                lista = fila.get("dias")
+                fd = {d for d in (lista if isinstance(lista, list) else []) if isinstance(d, str)}
+            except (TypeError, ValueError):
+                continue
+            xp += fx
+            minutos += fm
+            dias |= fd
+        self.nube_xp, self.nube_minutos, self.nube_dias = xp, minutos, dias
 
     def contador(self, nombre):
         self._girar_dia()
@@ -402,6 +453,8 @@ class Progreso:
         if self.contador("minutos") < MINUTOS_DIA_ACTIVO:
             return
         hoy = self._hoy()
+        if hoy.isoformat() not in self.d["dias"]:
+            self.d["dias"] = sorted(set(self.d["dias"]) | {hoy.isoformat()})[-120:]
         if self.d["ultimo_activo"] == hoy.isoformat():
             return
         ayer = (hoy - timedelta(days=1)).isoformat()
@@ -641,9 +694,45 @@ class _FiltroHotkey(QAbstractNativeEventFilter):
         return False, 0
 
 
+# ===================================================================== nube (progreso entre equipos)
+
+def dispositivo_id():
+    """Identificador de este equipo: un uuid que se crea una vez y se reutiliza."""
+    ruta = carpeta_perfil() / "dispositivo.txt"
+    try:
+        valor = ruta.read_text(encoding="utf-8").strip()
+        if valor:
+            return valor
+    except OSError:
+        pass
+    valor = str(uuid.uuid4())
+    try:
+        ruta.write_text(valor, encoding="utf-8")
+    except OSError:
+        pass
+    return valor
+
+
+def sincronizar(sesion, progreso):
+    """Sube la fila de este equipo y baja las de todos. Bloquea: úsala con `en_segundo_plano`.
+    Devuelve las filas de la cuenta ([] si no hay sesión)."""
+    if sesion is None:
+        return []
+    yo = Social(sesion).yo
+    if not yo:
+        return []
+    sesion.pedir("POST", "gamer_aportes?on_conflict=user_id,dispositivo",
+                 json={"user_id": yo, "dispositivo": dispositivo_id(), **progreso.aporte()},
+                 cabeceras={"Prefer": "resolution=merge-duplicates,return=minimal"})
+    filas = sesion.pedir("GET", f"gamer_aportes?select=dispositivo,xp,minutos,dias&user_id=eq.{yo}")
+    return filas or []
+
+
 # ===================================================================== el gestor
 
 ID_BASE = 0x6A01
+CADA_SYNC_MS = 5 * 60 * 1000     # sincronizar cada 5 minutos
+REBOTE_SYNC_MS = 20 * 1000       # tras una misión o un nivel: espera 20 s para no saturar
 PASO_RAMPA_MS = 30
 
 
@@ -694,7 +783,18 @@ class GestorGamer(QObject):
         self._t_xp.timeout.connect(self._tic_xp)
         self._ultimo_tic = time.monotonic()
         self._nivel_mostrado = nivel_de_xp(self.progreso.xp)
+        self._n_cobradas = len(self.progreso.d["cobradas"])
         self._t_xp.start()
+        # nube: sincroniza al arrancar (5 s después), cada 5 min y con antirrebote tras cobrar
+        self._t_nube = QTimer(self)
+        self._t_nube.setInterval(CADA_SYNC_MS)
+        self._t_nube.timeout.connect(self.sincronizar_ahora)
+        self._t_nube.start()
+        self._t_rebote = QTimer(self)
+        self._t_rebote.setSingleShot(True)
+        self._t_rebote.setInterval(REBOTE_SYNC_MS)
+        self._t_rebote.timeout.connect(self.sincronizar_ahora)
+        QTimer.singleShot(5000, self.sincronizar_ahora)
         # OBS
         if self.r is not None:
             self.r.pista_cambio.connect(self._al_pista)
@@ -1147,12 +1247,41 @@ class GestorGamer(QObject):
         self._nivel_mostrado = nivel
         if ganado or escuchado:
             self.progreso.guardar()
+        cobro = len(self.progreso.d["cobradas"]) != self._n_cobradas
+        self._n_cobradas = len(self.progreso.d["cobradas"])
         if nivel > antes:
             self.subio_nivel.emit(nivel)
             try:
                 self.ctx.aviso.emit(f"¡Subiste al nivel {nivel}!")
             except Exception:  # noqa: BLE001
                 pass
+        if nivel > antes or cobro:
+            self._pedir_sync()
+        self.progreso_cambio.emit()
+
+    # ------------------------------------------------------------ nube (XP entre equipos)
+
+    def _sesion(self):
+        cuenta = getattr(self.ctx, "cuenta", None)
+        return cuenta.get("sesion") if isinstance(cuenta, dict) else None
+
+    def _pedir_sync(self):
+        """Antirrebote: si ya hay una sincronización en cola, no añade otra."""
+        if not self._t_rebote.isActive():
+            self._t_rebote.start()
+
+    def sincronizar_ahora(self):
+        """Sincroniza en segundo plano. Sin sesión o sin red no hace nada: el progreso local sigue."""
+        sesion = self._sesion()
+        if sesion is None:
+            return
+        en_segundo_plano(sincronizar, sesion, self.progreso, ok=self._sync_ok,
+                         error=lambda _e: None, dueno=self)
+
+    def _sync_ok(self, filas):
+        self.progreso.aplicar_otros(filas, dispositivo_id())
+        # lo que traen los otros equipos no es un nivel «nuevo» para este: no avisar de nada
+        self._nivel_mostrado = nivel_de_xp(self.progreso.xp)
         self.progreso_cambio.emit()
 
     # ------------------------------------------------------------ OBS
@@ -1194,6 +1323,8 @@ class GestorGamer(QObject):
     def cerrar(self):
         """Libera los atajos, devuelve el volumen y la prioridad, y guarda."""
         self._t_xp.stop()
+        self._t_nube.stop()
+        self._t_rebote.stop()
         self._t_sondeo.stop()
         self._t_tecla.stop()
         self._rampa.stop()

@@ -19,12 +19,15 @@ void main() {
       expect(nivelDeXp(1 << 40), nivelMaximo);
     });
 
-    test('suave: el siguiente nivel cuesta poco más que el anterior', () {
+    test('misma fórmula que la PC: 25 · n · (n-1), cada nivel cuesta 50 más que el anterior', () {
+      expect(xpParaNivel(1), 0);
+      expect(xpParaNivel(2), 50);
+      expect(xpParaNivel(3), 150);
+      expect(xpParaNivel(4), 300);
       for (var n = 2; n < 40; n++) {
         final a = xpParaNivel(n + 1) - xpParaNivel(n);
         final b = xpParaNivel(n + 2) - xpParaNivel(n + 1);
-        expect(b, greaterThanOrEqualTo(a));
-        expect(b / a, lessThan(1.6));
+        expect(b - a, 50);
       }
     });
 

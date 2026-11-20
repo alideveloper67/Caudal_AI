@@ -17,7 +17,7 @@ from ..componentes import a_la_vista
 from .estilo import (BRILLO, DOMINANTE, SEGUNDO, TEXTO, TEXTO_2, TEXTO_3, acento_legible, con_alfa,
                      fuente, pintar_vidrio, preparar_transparente)
 
-ANCHO, ALTO = 660, 92              # tamaño de la ventanita (incluye margen para la sombra)
+ANCHO, ALTO = 698, 92              # tamaño de la ventanita (incluye margen para la sombra)
 PILDORA_X, PILDORA_Y = 20, 16      # la píldora queda centrada
 PILDORA_ANCHO, PILDORA_ALTO = 620, 60
 RADIO_PILDORA = 30
@@ -38,6 +38,7 @@ _SENALES = {
     "fondo": "cambiar_fondo",
     "abrir": "abrir_caudal",
     "salir": "salir",
+    "buscar": "pidio_buscar",
 }
 
 
@@ -63,6 +64,7 @@ class BarraMini(QWidget):
     cambiar_fondo = Signal()
     abrir_caudal = Signal()
     salir = Signal()
+    pidio_buscar = Signal()        # el usuario pulsó la lupa (buscar)
     buscar_pos = Signal(float)     # fracción 0..1 de la canción
 
     def __init__(self, padre=None):
@@ -139,7 +141,7 @@ class BarraMini(QWidget):
 
     def fijar_fondo(self, modo):
         """modo: "video" (videoclip) | "ambiente" (carátula)."""
-        self._fondo = "ambiente" if modo == "ambiente" else "video"
+        self._fondo = modo if modo in ("video", "ambiente") else ("escenario" if modo else "video")
         self.update()
 
     def poner_colores(self, dominante, segundo, brillo):
@@ -150,7 +152,7 @@ class BarraMini(QWidget):
 
     def rect_boton(self, nombre):
         """Rectángulo de un botón por su nombre: anterior, alternar, siguiente, aleatorio,
-        repetir, fondo, abrir o salir."""
+        repetir, fondo, abrir, buscar o salir."""
         return QRectF(self._geometria()["botones"][nombre])
 
     def rect_progreso(self):
@@ -176,7 +178,7 @@ class BarraMini(QWidget):
         x_txt = portada.right() + 10
 
         x = pildora.right() - PAD
-        for nombre in ("salir", "abrir", "fondo"):
+        for nombre in ("salir", "abrir", "fondo", "buscar"):
             botones[nombre] = QRectF(x - BOTON, cy - BOTON / 2, BOTON, BOTON)
             x -= BOTON + ESPACIO
         x_fin = x - 12
@@ -254,8 +256,9 @@ class BarraMini(QWidget):
             "aleatorio": ("aleatorio", acento if self._aleatorio else TEXTO_2),
             "repetir": ("repetir_una" if self._repetir == "una" else "repetir",
                         acento if self._repetir != "no" else TEXTO_2),
-            "fondo": ("video" if self._fondo == "video" else "disco", TEXTO_2),
+            "fondo": ({"video": "video", "escenario": "ecualizador"}.get(self._fondo, "disco"), TEXTO_2),
             "abrir": ("abrir", TEXTO_2),
+            "buscar": ("lupa", TEXTO_2),
             "salir": ("salir_pantalla", TEXTO_2),
         }
         for nombre, (icono, color) in cfg.items():
@@ -381,11 +384,11 @@ class BarraMini(QWidget):
             return {"no": "Repetir: desactivado", "todo": "Repetir: todo",
                     "una": "Repetir: una canción"}[self._repetir]
         if nombre == "fondo":
-            return "Fondo: videoclip" if self._fondo == "video" else "Fondo: carátula"
+            return "Elegir fondo: videoclip, carátula o escenarios"
         if nombre == "aleatorio":
             return "Aleatorio: activado" if self._aleatorio else "Aleatorio: desactivado"
         return {"anterior": "Anterior", "siguiente": "Siguiente", "abrir": "Volver a Caudal",
-                "salir": "Salir de la escena (Esc)"}[nombre]
+                "buscar": "Buscar", "salir": "Salir de la escena (Esc)"}[nombre]
 
     def mouseMoveEvent(self, ev):
         g = self._geometria()

@@ -21,9 +21,18 @@ EFECTOS = ("ninguno", "brillo", "degradado", "arcoiris", "neon")
 NOMBRES_EFECTO = {"ninguno": "Normal", "brillo": "Brillo", "degradado": "Degradado",
                   "arcoiris": "Arcoíris", "neon": "Neón"}
 
-TEMAS = ("ninguno", "atardecer", "bosque", "sakura", "oceano", "medianoche", "ambar")
+# Las mismas claves que PREMIUM_TEMAS de ui/estilos.py (sin el prefijo «premium_»). Si se añade un tema
+# allí, añadirlo también aquí: tema_valido() lo devolvería a «ninguno» al leerlo del servidor.
+TEMAS = ("ninguno", "atardecer", "bosque", "sakura", "oceano", "medianoche", "ambar",
+         "retro", "cyberpunk", "samurai", "boxeo", "gym", "fan_kitty", "gotico", "lofi",
+         "est_kuromi", "est_cinnamoroll", "est_pompompurin", "est_hellokitty", "est_mymelody")
 NOMBRES_TEMA = {"ninguno": "Tema normal", "atardecer": "Atardecer", "bosque": "Bosque profundo",
-                "sakura": "Sakura", "oceano": "Océano", "medianoche": "Medianoche", "ambar": "Ámbar"}
+                "sakura": "Sakura", "oceano": "Océano", "medianoche": "Medianoche", "ambar": "Ámbar",
+                "retro": "Retro", "cyberpunk": "Cyberpunk", "samurai": "Japón samurái", "boxeo": "Boxeo",
+                "gym": "Gym", "fan_kitty": "Fan de Hello Kitty", "gotico": "Gótico", "lofi": "Lo-fi",
+                "est_kuromi": "Estética Kuromi", "est_cinnamoroll": "Estética Cinnamoroll",
+                "est_pompompurin": "Estética Pompompurin", "est_hellokitty": "Estética Hello Kitty",
+                "est_mymelody": "Estética My Melody"}
 
 TIPOS = ("donador", "fundador", "prueba")
 

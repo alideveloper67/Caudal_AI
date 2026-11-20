@@ -197,7 +197,7 @@ class _PintorMascota extends CustomPainter {
     final fw = (mascota.ancho * mascota.densidad).toDouble(), fh = (mascota.alto * mascota.densidad).toDouble();
     final origen = Rect.fromLTWH(cuadro * fw, 0, fw, fh);
     final destino = Rect.fromLTWH(x - w / 2, arriba, w, h);
-    canvas.drawImageRect(hoja, origen, destino, Paint()..filterQuality = FilterQuality.none);
+    canvas.drawImageRect(hoja, origen, destino, Paint()..filterQuality = filtroMascota(mascota.densidad));
     // el gorrito de las fiestas (Navidad, Año Nuevo) y, tras dos minutos en pausa, las «z»
     if (cumple) {
       pintarGorroCumple(canvas, Offset(x + w * 0.05, arriba + h * 0.1), w * 0.34);

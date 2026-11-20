@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 
+import '../../nucleo/cosmeticos.dart';
 import '../../nucleo/mascota_app.dart';
+import '../../nucleo/premium.dart';
+import 'perfil_comun.dart' show socialDe;
 import '../servicios.dart';
 import '../tema.dart';
 
@@ -16,6 +19,17 @@ class AspectoPagina extends StatefulWidget {
 
 class _AspectoPaginaState extends State<AspectoPagina> {
   Future<void> _poner(String clave, Object valor) async {
+    // elegir un fondo es cambiar de aspecto: si había un tema exclusivo puesto, se quita para que el fondo
+    // elegido (con su personaje y sus colores) se vea de verdad
+    if (clave == 'fondo' && Premium.i.tema != Cosmeticos.ninguno) {
+      final social = socialDe(context);
+      if (social != null) {
+        try {
+          await Premium.i.guardar(social, tema: Cosmeticos.ninguno);
+        } catch (_) {}
+      }
+    }
+    if (!mounted) return;
     await Caudal.leer(context).ajustes.poner(clave, valor);
     if (mounted) setState(() {});
   }
@@ -468,20 +482,19 @@ class _TarjetaFondo extends StatelessWidget {
           duration: const Duration(milliseconds: 200),
           decoration: BoxDecoration(
             color: cs?[0] ?? C.superficie,
-            image: patron == null
-                ? null
-                : DecorationImage(
-                    // el personaje, chico, en la esquina (como en la app)
-                    image: AssetImage(patron!),
-                    alignment: const Alignment(0.92, 0.45),
-                    scale: 2.6,
-                    filterQuality: FilterQuality.none,
-                  ),
             borderRadius: BorderRadius.circular(14),
             border: Border.all(color: elegido ? C.acento : (cs?[5] ?? C.superficie3), width: elegido ? 2.5 : 1),
           ),
           padding: const EdgeInsets.all(10),
-          child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          child: Stack(fit: StackFit.expand, children: [
+            if (patron != null)
+              // el personaje, chico, en la esquina (como en la app)
+              Align(
+                alignment: const Alignment(0.98, 0.3),
+                child: Image.asset(patron!, height: 37, filterQuality: FilterQuality.medium,
+                    excludeFromSemantics: true, errorBuilder: (_, _, _) => const SizedBox.shrink()),
+              ),
+            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             if (cs != null) ...[
               Container(height: 10, width: 40,
                   decoration: BoxDecoration(color: cs[3], borderRadius: BorderRadius.circular(4))),
@@ -496,6 +509,7 @@ class _TarjetaFondo extends StatelessWidget {
                   style: const TextStyle(fontSize: 12.5, fontWeight: FontWeight.w700))),
               if (elegido) Icon(Icons.check_circle_rounded, size: 16, color: C.acento),
             ]),
+          ]),
           ]),
         ),
       ),

@@ -202,7 +202,7 @@ void main() {
     });
 
     test('al subir de nivel avisa una sola vez', () async {
-      await crear(prefs: {'aj.t.gamer_progreso': jsonEncode({'xp': 39, 'd': '2026-11-19'})});
+      await crear(prefs: {'aj.t.gamer_progreso': jsonEncode({'xp': 49, 'd': '2026-11-19'})});
       await g.activar(true);
       g.alReproductor(true, pista('a'));
       ahora = ahora.add(const Duration(seconds: 60));
@@ -224,7 +224,7 @@ void main() {
     });
 
     test('un aviso de nivel que falla no rompe la escucha', () async {
-      SharedPreferences.setMockInitialValues({'aj.t.gamer_progreso': jsonEncode({'xp': 39, 'd': '2026-11-19'})});
+      SharedPreferences.setMockInitialValues({'aj.t.gamer_progreso': jsonEncode({'xp': 49, 'd': '2026-11-19'})});
       a = await Ajustes.cargar('t');
       ahora = DateTime(2026, 11, 19, 20);
       g = ModoGamerControl(
@@ -238,7 +238,7 @@ void main() {
       g.alReproductor(true, pista('a'));
       ahora = ahora.add(const Duration(seconds: 60));
       g.alReproductor(false, pista('a'));
-      expect(g.progreso.xp, 40);
+      expect(g.progreso.xp, 50);
     });
   });
 }

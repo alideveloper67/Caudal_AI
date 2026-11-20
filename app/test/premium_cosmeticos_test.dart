@@ -441,10 +441,10 @@ void main() {
       expect(find.text('Exclusivo para donadores'), findsOneWidget);
       expect(find.text('Donar aquí'), findsOneWidget);
       expect(find.text('Tengo un código'), findsOneWidget);
-      // 7 marcos + 4 efectos + 6 temas con candado (las opciones «Ninguno» y «Normal» no lo llevan),
+      // 7 marcos + 4 efectos + 19 temas con candado (las opciones «Ninguno» y «Normal» no lo llevan),
       // y la paleta «Color del nombre» (9 colores + «Personalizado»). «Más para quienes donan» queda
       // fuera de lo que la lista construye a esta altura.
-      expect(find.byIcon(Icons.lock_rounded), findsNWidgets(27));
+      expect(find.byIcon(Icons.lock_rounded), findsNWidgets(40));
       await t.tap(find.text('Aurora'));
       await t.pump(const Duration(milliseconds: 300));
       expect(ses.patches, isEmpty);

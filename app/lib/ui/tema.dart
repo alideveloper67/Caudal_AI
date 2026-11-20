@@ -180,7 +180,8 @@ class Aspecto {
       C.acento = premium.acento;
       C.acentoAlto = premium.acentoAlto;
       C.acentoTexto = premium.acentoTexto;
-      patron = null;
+      // el personaje del fondo elegido se queda: solo se quita si la persona elige un fondo sin él
+      patron = patronDe(fondo);
       C.fondo = premium.capas[0];
       C.panel = premium.capas[1];
       C.superficie = premium.capas[2];

@@ -144,7 +144,7 @@ class _FiguraCumple extends StatelessWidget {
         height: lado,
         child: Stack(alignment: Alignment.bottomCenter, clipBehavior: Clip.none, children: [
           Image.asset(personaje,
-              height: lado * 0.8, filterQuality: FilterQuality.none, excludeFromSemantics: true,
+              height: lado * 0.8, filterQuality: FilterQuality.medium, excludeFromSemantics: true,
               errorBuilder: (_, _, _) => const SizedBox.shrink()),
           Positioned(top: 0, child: GorroFiesta(ancho: lado * 0.3)),
         ]),
@@ -179,7 +179,7 @@ class _PintorMascotaGorro extends CustomPainter {
     final w = ancho * escala, h = alto * escala;
     final destino = Rect.fromLTWH((size.width - w) / 2, size.height - h, w, h);
     final fw = (ancho * densidad).toDouble(), fh = (alto * densidad).toDouble();
-    canvas.drawImageRect(hoja, Rect.fromLTWH(0, 0, fw, fh), destino, Paint()..filterQuality = FilterQuality.none);
+    canvas.drawImageRect(hoja, Rect.fromLTWH(0, 0, fw, fh), destino, Paint()..filterQuality = filtroMascota(densidad));
     pintarGorroCumple(canvas, Offset(size.width / 2 + w * 0.04, destino.top + h * 0.08), w * 0.34);
   }
 

@@ -181,9 +181,11 @@ void main() {
   testWidgets('el nivel y las misiones salen del progreso guardado', (t) async {
     await montar(t, prefs: {
       'aj.t.gamer_activo': true,
-      'aj.t.gamer_progreso': '{"xp":500,"d":"2026-11-19","sh":600,"r":4,"ud":"2026-11-19"}',
+      'aj.t.gamer_progreso': '{"xp":500,"d":"2026-11-19","sh":600,"r":4,"ud":"2026-11-19",'
+          '"ds":["2026-11-16","2026-11-17","2026-11-18","2026-11-19"]}',
     });
-    expect(find.text('Nivel 6'), findsOneWidget);
+    // 500 XP = nivel 5 exacto con la fórmula de la PC (25 · n · (n-1))
+    expect(find.text('Nivel 5'), findsOneWidget);
     expect(find.text('4 días de racha'), findsOneWidget);
     expect(find.text('10 min hoy'), findsOneWidget);
     expect(find.text('Misiones de hoy'), findsOneWidget);

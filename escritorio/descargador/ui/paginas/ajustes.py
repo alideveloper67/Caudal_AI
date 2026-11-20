@@ -751,8 +751,19 @@ class PaginaAjustes(Pagina):
             self.cookies.setText(archivo)
             self._poner("archivo_cookies", archivo)
 
+    def showEvent(self, ev):
+        # la página se guarda entre visitas: al volver, se refresca lo que pudo cambiar fuera
+        super().showEvent(ev)
+        if getattr(self, "_ya_mostrada", False):
+            self._pintar_cache()
+        self._ya_mostrada = True
+
     def _pintar_cache(self):
-        self.et_cache.setText(formato_bytes(imagenes.tamano_cache()))
+        # miles de portadas en disco: sumarlas en el hilo de la interfaz trababa Ajustes al abrir
+        from ...hilos import en_segundo_plano
+        self.et_cache.setText("Calculando…")
+        en_segundo_plano(imagenes.tamano_cache,
+                         ok=lambda n: self.et_cache.setText(formato_bytes(n)), dueno=self)
 
     def _vaciar_cache(self):
         for f in imagenes.carpeta_cache().glob("*.img"):

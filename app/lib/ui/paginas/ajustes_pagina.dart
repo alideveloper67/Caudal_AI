@@ -272,7 +272,7 @@ class _AjustesPaginaState extends State<AjustesPagina> {
             title: const Text('Modo gamer'),
             subtitle: Text(
                 s.gamer!.activo
-                    ? 'Activo · nivel ${s.gamer!.progreso.nivel}'
+                    ? 'Activo · nivel ${s.gamer!.nivelTotal}'
                     : 'Ahorro, sonido por juego, listas por situación y niveles',
                 style: estiloSecundario),
             trailing: const Icon(Icons.chevron_right_rounded, color: C.texto3),
@@ -659,8 +659,6 @@ class _HojaVersionState extends State<_HojaVersion> {
               runSpacing: 8,
               children: [
                 TextButton(onPressed: _bajando ? null : () => Navigator.pop(context), child: const Text('Más tarde')),
-                if (instalable)
-                  TextButton(onPressed: _bajando ? null : _verComo, child: const Text('Bajar por el navegador')),
                 FilledButton.icon(
                   onPressed: _bajando ? null : (instalable ? _instalar : _verComo),
                   icon: Icon(instalable ? Icons.download_rounded : Icons.open_in_new_rounded),

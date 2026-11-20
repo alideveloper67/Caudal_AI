@@ -12,7 +12,11 @@ class Cosmeticos {
   static const efectosNombre = ['ninguno', 'brillo', 'degradado', 'arcoiris', 'neon'];
 
   /// Temas de color exclusivos.
-  static const temas = ['ninguno', 'atardecer', 'bosque', 'sakura', 'oceano', 'medianoche', 'ambar'];
+  static const temas = [
+    'ninguno', 'atardecer', 'bosque', 'sakura', 'oceano', 'medianoche', 'ambar',
+    'retro', 'cyberpunk', 'samurai', 'boxeo', 'gym', 'fan_kitty', 'gotico', 'lofi',
+    'est_kuromi', 'est_cinnamoroll', 'est_pompompurin', 'est_hellokitty', 'est_mymelody',
+  ];
 
   static String _en(Object? v, List<String> validos) {
     final t = '${v ?? ''}'.trim().toLowerCase();

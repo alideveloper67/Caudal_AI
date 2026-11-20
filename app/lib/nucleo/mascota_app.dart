@@ -3,6 +3,7 @@ import 'dart:math' as math;
 import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/painting.dart' show FilterQuality;
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -198,3 +199,8 @@ class MascotaApp extends ChangeNotifier {
     }
   }
 }
+
+
+/// Cómo se pinta la hoja de una mascota: las de densidad 4 (el doble de detalle que la pantalla de un
+/// teléfono) se reducen con suavizado para no perder trazos; las de siempre, píxel a píxel.
+FilterQuality filtroMascota(int densidad) => densidad >= 3 ? FilterQuality.medium : FilterQuality.none;

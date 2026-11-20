@@ -24,7 +24,8 @@ from .panel_lateral import PanelLateral
 EXT_AUDIO = {".mp3", ".m4a", ".opus", ".ogg", ".flac", ".wav", ".aac", ".wma", ".webm"}
 EXT_VIDEO = {".mp4", ".mkv", ".mov", ".avi", ".webm", ".m4v", ".wmv", ".flv", ".ts"}
 
-SINGLETONS = ("descargas", "video", "letra", "vinilo", "visualizador", "karaoke", "escena")
+# Ajustes también: tiene cientos de controles y rehacerla en cada visita trababa ~0,4 s
+SINGLETONS = ("descargas", "video", "letra", "vinilo", "visualizador", "karaoke", "escena", "ajustes")
 VISTAS_GRANDES = ("visualizador", "karaoke", "escena")      # a pantalla completa, para donadores
 
 
@@ -99,6 +100,22 @@ class TeclasMultimedia(QAbstractNativeEventFilter):
         else:
             return False, 0
         return True, 0
+
+
+def _segundos_sin_tocar():
+    """Segundos desde el último movimiento de ratón o tecla en Windows (99 si no se puede saber)."""
+    try:
+        import ctypes
+
+        class _Ultimo(ctypes.Structure):
+            _fields_ = [("cbSize", ctypes.c_uint), ("dwTime", ctypes.c_uint)]
+        u = _Ultimo()
+        u.cbSize = ctypes.sizeof(u)
+        if not ctypes.windll.user32.GetLastInputInfo(ctypes.byref(u)):
+            return 99
+        return (ctypes.windll.kernel32.GetTickCount() - u.dwTime) / 1000
+    except Exception:  # noqa: BLE001
+        return 99
 
 
 class Ventana(QWidget):
@@ -215,6 +232,9 @@ class Ventana(QWidget):
         QTimer.singleShot(1500, self.fondo.sincronizar)
         QTimer.singleShot(6000, lambda: self.buscar_version(True))
         QTimer.singleShot(9000, self._buscar_avisos)
+        # precalentar: cargar con calma lo que usan las páginas pesadas, para que abrirlas la primera vez
+        # no se trabe (Ajustes cargaba ~190 módulos de golpe)
+        QTimer.singleShot(12000, self._precalentar)
         QApplication.instance().installEventFilter(_Teclas(self))
         from . import arrastre
         arrastre.instalar()        # arrastrar con el ratón para desplazar, como con el dedo
@@ -445,6 +465,29 @@ class Ventana(QWidget):
             cerrar()
         else:
             QApplication.quit()
+
+    _PRECALENTAR = ("descargador.ui.paginas.juntos",
+                    "descargador.ui.mas_donadores", "descargador.ui.paginas.perfil",
+                    "descargador.ui.paginas.resumen", "descargador.ui.escena.ventana")
+
+    def _precalentar(self, i=0):
+        """Un módulo cada 400 ms y solo si no suena nada que pudiera notar el tirón de importar."""
+        import importlib
+        if i > len(self._PRECALENTAR):
+            return
+        if _segundos_sin_tocar() < 4 or (self.isVisible() and self.isActiveWindow() and _segundos_sin_tocar() < 8):
+            # alguien está usando la PC: se espera a un momento quieto para no causar ni un tirón
+            QTimer.singleShot(3000, lambda: self._precalentar(i))
+            return
+        try:
+            if i < len(self._PRECALENTAR):
+                importlib.import_module(self._PRECALENTAR[i])
+            elif "ajustes" not in self.singletons:
+                # al final, Ajustes queda construida (oculta): abrirla luego es instantáneo
+                self._fabricar({"pagina": "ajustes"})
+        except Exception:  # noqa: BLE001
+            pass
+        QTimer.singleShot(400, lambda: self._precalentar(i + 1))
 
     # ------------------------------------------------------------ navegacion
 

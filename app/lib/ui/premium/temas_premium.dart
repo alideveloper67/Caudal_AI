@@ -38,6 +38,32 @@ class TemasPremium {
       Color(0xFF05050F), Color(0xFF0C0C1D), Color(0xFF11112A), Color(0xFF181837), Color(0xFF232348), Color(0xFF1D1D3F)]),
     TemaPremium('ambar', 'Ámbar', Color(0xFFFBBF24), [
       Color(0xFF100B04), Color(0xFF19120A), Color(0xFF20180D), Color(0xFF2A2012), Color(0xFF372B1A), Color(0xFF30251A)]),
+    TemaPremium('retro', 'Retro', Color(0xFFFFB347), [
+      Color(0xFF140C06), Color(0xFF201209), Color(0xFF28170B), Color(0xFF331D0E), Color(0xFF412411), Color(0xFF371F0F)]),
+    TemaPremium('cyberpunk', 'Cyberpunk', Color(0xFF00F0FF), [
+      Color(0xFF0A0414), Color(0xFF160618), Color(0xFF1F071C), Color(0xFF2A0920), Color(0xFF390B25), Color(0xFF2F0A21)]),
+    TemaPremium('samurai', 'Japón samurái', Color(0xFFEA5863), [
+      Color(0xFF120A08), Color(0xFF1B120A), Color(0xFF22170B), Color(0xFF2A1E0C), Color(0xFF35270E), Color(0xFF2D210D)]),
+    TemaPremium('boxeo', 'Boxeo', Color(0xFFEA606C), [
+      Color(0xFF0E0A0A), Color(0xFF1A130B), Color(0xFF221A0B), Color(0xFF2C220C), Color(0xFF3A2E0D), Color(0xFF31260C)]),
+    TemaPremium('gym', 'Gym', Color(0xFFA3E635), [
+      Color(0xFF0A0C08), Color(0xFF12170A), Color(0xFF171F0C), Color(0xFF1E280E), Color(0xFF273511), Color(0xFF212D0F)]),
+    TemaPremium('fan_kitty', 'Fan de Hello Kitty', Color(0xFFFF5C8A), [
+      Color(0xFF1A0A10), Color(0xFF251219), Color(0xFF2D1820), Color(0xFF382028), Color(0xFF462A33), Color(0xFF3C232B)]),
+    TemaPremium('gotico', 'Gótico', Color(0xFFCD5E74), [
+      Color(0xFF0A0608), Color(0xFF0F0710), Color(0xFF120816), Color(0xFF170A1D), Color(0xFF1C0B26), Color(0xFF190A20)]),
+    TemaPremium('lofi', 'Lo-fi', Color(0xFFC4A7E7), [
+      Color(0xFF120F18), Color(0xFF1D171C), Color(0xFF241D20), Color(0xFF2E2524), Color(0xFF3B2F29), Color(0xFF322826)]),
+    TemaPremium('est_kuromi', 'Estética Kuromi', Color(0xFFFF77B7), [
+      Color(0xFF0F0A16), Color(0xFF150E21), Color(0xFF1A1129), Color(0xFF1F1533), Color(0xFF271A41), Color(0xFF221638)]),
+    TemaPremium('est_cinnamoroll', 'Estética Cinnamoroll', Color(0xFF7CC6FF), [
+      Color(0xFF08101A), Color(0xFF111B25), Color(0xFF18222D), Color(0xFF202B38), Color(0xFF2B3846), Color(0xFF23303C)]),
+    TemaPremium('est_pompompurin', 'Estética Pompompurin', Color(0xFFFFD45C), [
+      Color(0xFF140F06), Color(0xFF1B1208), Color(0xFF201509), Color(0xFF26180B), Color(0xFF2F1C0D), Color(0xFF29190C)]),
+    TemaPremium('est_hellokitty', 'Estética Hello Kitty', Color(0xFFFF4D6D), [
+      Color(0xFF18090D), Color(0xFF241014), Color(0xFF2C141A), Color(0xFF361A20), Color(0xFF44222A), Color(0xFF3B1D24)]),
+    TemaPremium('est_mymelody', 'Estética My Melody', Color(0xFFFF9EC8), [
+      Color(0xFF160B12), Color(0xFF22141C), Color(0xFF2A1B23), Color(0xFF34232C), Color(0xFF422E38), Color(0xFF392630)]),
   ];
 
   static TemaPremium? de(String clave) {

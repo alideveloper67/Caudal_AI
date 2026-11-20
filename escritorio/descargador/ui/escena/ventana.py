@@ -26,12 +26,23 @@ from ..video import PantallaNativa
 from .barra import BarraMini
 from .bordes import BordeBrillo, geometrias_borde
 from .buscador import PanelBusqueda
+from . import editable
 from .estilo import BRILLO, DOMINANTE, SEGUNDO
 from .fondo import FondoAmbiente
+from . import escenarios
 from .letra import LetraCinetica
 from .lista_reciente import ListaSeguir
 from .reloj import RelojGigante
 from .tarjeta import TarjetaCancion
+
+# La línea entra con una transición de ~0,4 s y cada palabra en ~0,3 s: se adelanta la animación para que
+# llegue a su sitio justo cuando se canta (si no, se siente tarde aunque el tiempo sea exacto).
+ADELANTO_LETRA_MS = 220
+PASO_DESFASE_MS = 250       # Ctrl+← / Ctrl+→ en la escena: letra antes / después
+
+# piezas que la persona puede mover, agrandar y ocultar, con su tamaño mínimo (px)
+MINIMOS_PIEZA = {"reloj": (220, 90), "tarjeta": (180, 240), "letra": (260, 120), "lista": (220, 200),
+                 "barra": (560, 92)}
 
 NOMBRE_VIDEO = "escena"
 FUENTE_TEXTO = {
@@ -64,7 +75,7 @@ def disposicion(pantalla, solo_ver=False):
     letra_x = tar_x + tar_w + int(10 * s)
     g["letra"] = QRect(letra_x, y0 + int(H * 0.36), max(200, x0 + W - letra_x - int(W * 0.04)),
                        int(H * 0.42))
-    barra_w, barra_h = 660, 92
+    barra_w, barra_h = 698, 92
     g["barra"] = QRect(x0 + (W - barra_w) // 2, y0 + H - barra_h - int(12 * s), barra_w, barra_h)
     busc_w = 640
     g["buscador_abajo"] = QRect(x0 + (W - busc_w) // 2, g["barra"].top() - int(4 * s), busc_w, 0)
@@ -94,11 +105,27 @@ class _FondoVentana(QWidget):
         self.pila.setContentsMargins(0, 0, 0, 0)
         self.ambiente = FondoAmbiente()
         self.pantalla = PantallaNativa()
+        self.escenario = None             # el escenario animado elegido (se crea al elegirlo)
+        self.clave_escenario = None
         self.pila.addWidget(self.ambiente)
         self.pila.addWidget(self.pantalla)
 
     def ver_video(self, si):
         self.pila.setCurrentIndex(1 if si else 0)
+
+    def ver_escenario(self, clave):
+        """Pone el escenario `clave` (synthwave, cyberpunk…). False si no se pudo cargar."""
+        if self.clave_escenario != clave or self.escenario is None:
+            nuevo = escenarios.crear(clave)
+            if nuevo is None:
+                return False
+            if self.escenario is not None:
+                self.pila.removeWidget(self.escenario)
+                self.escenario.deleteLater()
+            self.escenario, self.clave_escenario = nuevo, clave
+            self.pila.addWidget(nuevo)
+        self.pila.setCurrentWidget(self.escenario)
+        return True
 
 
 class EscenaEscritorio(QObject):
@@ -123,6 +150,14 @@ class EscenaEscritorio(QObject):
         self._alternativas = []
         self._alt_indice = 0
         self._busqueda_gen = 0
+        self._editables = {}
+        self._dur_letra = 0.0
+        self._lineas_actuales = []
+        self._traducciones = None
+        self._traduciendo = False
+        self._recom_clave = None
+        self._modelo_audio = None
+        self._t_ondas = None
         self._reloj_letra = QTimer(self)
         self._reloj_letra.setInterval(33)
         self._reloj_letra.timeout.connect(self._tic_letra)
@@ -132,24 +167,30 @@ class EscenaEscritorio(QObject):
 
     # ------------------------------------------------------------ abrir / cerrar
 
-    def pantalla_destino(self):
+    def pantalla_destino(self, util=False):
+        """El monitor donde está Caudal. Con `util`, solo su área útil (sin la barra de tareas)."""
         v = getattr(self.ctx, "ventana", None)
         scr = v.screen() if v is not None else None
-        return (scr or QGuiApplication.primaryScreen()).geometry()
+        scr = scr or QGuiApplication.primaryScreen()
+        return scr.availableGeometry() if util else scr.geometry()
 
     def abrir(self, solo_ver=False):
         if self.abierta:
             self.cerrar()
         self.solo_ver = bool(solo_ver)
-        geo = self.pantalla_destino()
+        # como fondo de pantalla ocupa el monitor entero; abierta, el área útil: la barra de
+        # tareas queda a la vista y las notificaciones de Windows siguen saliendo
+        geo = self.pantalla_destino(util=not self.solo_ver)
         self._crear(geo)
         self.abierta = True
         self._conectar(True)
         self._colores_caratula()
         self._pista(self.r.actual)
         self._estado(self.r.estado)
-        self._preparar_video()
-        self._recientes()
+        # primero se ve la escena; el video (decodificar y presentar 720p) entra un instante después,
+        # para que abrir no sea un único tirón con las once ventanas y el video a la vez
+        QTimer.singleShot(280, self._preparar_video)
+        QTimer.singleShot(0, self._recientes)
         self._reloj_letra.start()
         if self.solo_ver:
             from . import escritorio_win
@@ -160,6 +201,9 @@ class EscenaEscritorio(QObject):
                 self.abrir(solo_ver=False)
                 return
         self._mostrar_piezas()
+        if not self.solo_ver:
+            self.ctx.avisar("Arrastra cualquier pieza para moverla y agrándala desde su esquina (o Ctrl+rueda). "
+                            "El botón de fondo de la barra elige videoclip, carátula o uno de los escenarios.")
         # solo en las ventanas de la escena (y el campo del buscador, que tiene el foco al escribir)
         for w in self._ventanas():
             w.installEventFilter(self)
@@ -183,7 +227,20 @@ class EscenaEscritorio(QObject):
         if tecla == Qt.Key_Escape:
             if en_buscador and (busc._campo.text() or busc.altura_deseada() > 80):
                 return False
+            if busc is not None and busc.isVisible():
+                QTimer.singleShot(0, self.cerrar_buscador)
+                return True
             QTimer.singleShot(0, self.cerrar)
+            return True
+        if (tecla in (Qt.Key_Left, Qt.Key_Right) and ev.modifiers() & Qt.ControlModifier
+                and not en_buscador):
+            self.mover_letra(PASO_DESFASE_MS if tecla == Qt.Key_Right else -PASO_DESFASE_MS)
+            return True
+        if tecla == Qt.Key_E and not en_buscador and not ev.modifiers():
+            self.alternar_edicion()
+            return True
+        if tecla == Qt.Key_R and not en_buscador and not ev.modifiers() and editable.edicion_activa():
+            self.restablecer_piezas()
             return True
         if tecla == Qt.Key_Space and not en_buscador:
             self.r.alternar()
@@ -192,11 +249,18 @@ class EscenaEscritorio(QObject):
 
     def _crear(self, geo):
         self._fondo = _FondoVentana()
-        self._fondo.setGeometry(geo)
         if self.solo_ver:
+            self._fondo.setGeometry(geo)
             self._fondo.show()
         else:
-            self._fondo.showFullScreen()
+            # NO showFullScreen: una ventana que tapa el monitor entero hace que Windows la tome
+            # por «app a pantalla completa» y silencie las notificaciones (WhatsApp, correo…).
+            # Ocupa el área útil; si la barra de tareas se oculta sola (área útil = monitor),
+            # un píxel menos basta para que los avisos sigan saliendo
+            # (SHQueryUserNotificationState pasa de 2 «ocupado» a 5 «acepta notificaciones»).
+            monitor = self.pantalla_destino()
+            self._fondo.setGeometry(geo.adjusted(0, 0, 0, -1) if geo == monitor else geo)
+            self._fondo.show()
         g = disposicion(geo, self.solo_ver)
         banderas = Qt.Tool | Qt.FramelessWindowHint
         origen = geo.topLeft()
@@ -214,6 +278,17 @@ class EscenaEscritorio(QObject):
         def pieza(nombre, w, rect):
             colocar(w, rect)
             self._piezas[nombre] = w
+            if not self.solo_ver and nombre in MINIMOS_PIEZA:
+                bloqueo = None
+                if nombre == "barra":
+                    # sobre la línea de progreso arrastrar es adelantar la canción, no mover la barra
+                    bloqueo = (lambda p, b=w: b.rect_progreso().adjusted(-6, -10, 6, 10).contains(p.toPointF()))
+                e = editable.PiezaEditable(w, nombre, minimo=MINIMOS_PIEZA[nombre], libre=True, bloqueo=bloqueo)
+                e.cambiado.connect(self._guardar_pieza)
+                self._editables[nombre] = e
+                guardado = self._estados_guardados().get(nombre)
+                if guardado:
+                    e.aplicar(guardado, geo)
             return w
 
         pieza("reloj", RelojGigante(), g["reloj"])
@@ -239,10 +314,13 @@ class EscenaEscritorio(QObject):
             barra.cambiar_fondo.connect(self._alternar_fondo)
             barra.abrir_caudal.connect(self._abrir_caudal)
             barra.salir.connect(self.cerrar)
+            barra.pidio_buscar.connect(self.alternar_buscador)
             self._colocar_buscador()
         t = self._piezas["tarjeta"]
         t.pidio_me_gusta.connect(self._me_gusta)
         t.pidio_otra_letra.connect(self._otra_letra)
+        if hasattr(t, "pidio_traducir"):
+            t.pidio_traducir.connect(self.alternar_traduccion)
         self._piezas["lista"].elegida.connect(self._elegir)
         for lado, rect in g["bordes"].items():
             b = BordeBrillo(lado)
@@ -252,11 +330,64 @@ class EscenaEscritorio(QObject):
     def _mostrar_piezas(self):
         for b in self._bordes.values():
             b.show()
-        for w in self._piezas.values():
+        guardados = self._estados_guardados()
+        for nombre, w in self._piezas.items():
+            if nombre == "buscador":
+                continue                      # lo abre la lupa de la barra
+            if guardados.get(nombre, {}).get("visible") is False:
+                continue                      # la persona la ocultó
             w.show()
             w.raise_()
-        if "buscador" in self._piezas:
-            self._piezas["buscador"].raise_()
+
+    # ------------------------------------------------------------ piezas a gusto
+
+    def _estados_guardados(self):
+        try:
+            return dict(self.ctx.ajustes["escena_piezas"] or {})
+        except Exception:  # noqa: BLE001
+            return {}
+
+    def _guardar_pieza(self, nombre):
+        e = self._editables.get(nombre)
+        if e is None:
+            return
+        estado = e.estado()
+        if not estado:
+            return
+        tabla = self._estados_guardados()
+        tabla[nombre] = estado
+        try:
+            self.ctx.ajustes["escena_piezas"] = tabla
+            self.ctx.ajustes.guardar()
+        except Exception:  # noqa: BLE001
+            pass
+
+    def alternar_edicion(self):
+        """Tecla E: entrar o salir del modo para mover, agrandar y ocultar piezas."""
+        si = not editable.edicion_activa()
+        editable.activar_edicion(si)
+        if si:
+            self.ctx.avisar("Modo edición: arrastra las piezas, agrándalas desde la esquina (o Ctrl+rueda) "
+                            "y ocúltalas con ✕. E para terminar, R para volver a empezar.")
+        else:
+            self.ctx.avisar("Listo: la escena queda así.")
+
+    def restablecer_piezas(self):
+        """Tecla R (en modo edición): todo vuelve a su sitio y se ve otra vez."""
+        try:
+            self.ctx.ajustes["escena_piezas"] = {}
+            self.ctx.ajustes.guardar()
+        except Exception:  # noqa: BLE001
+            pass
+        if not self.abierta:
+            return
+        g = disposicion(self.pantalla_destino(util=not self.solo_ver), self.solo_ver)
+        for nombre, w in self._piezas.items():
+            if nombre in g and nombre != "buscador":
+                w.setGeometry(g[nombre])
+                w.show()
+                w.raise_()
+        self.ctx.avisar("La escena volvió a como venía.")
 
     def cerrar(self):
         if not self.abierta:
@@ -277,6 +408,8 @@ class EscenaEscritorio(QObject):
         if self.solo_ver and self._fondo is not None:
             from . import escritorio_win
             escritorio_win.soltar_de_fondo(int(self._fondo.winId()))
+        editable.activar_edicion(False)
+        self._editables.clear()
         for w in list(self._piezas.values()) + list(self._bordes.values()):
             w.close()
             w.deleteLater()
@@ -325,6 +458,7 @@ class EscenaEscritorio(QObject):
             self._portada(clave, QImage())
         self._pedir_letra(p)
         self._recientes()
+        self._recomendar(p)
         self._preparar_video()
 
     def _portada(self, clave, img):
@@ -383,6 +517,11 @@ class EscenaEscritorio(QObject):
         self._colores = (d, s, b)
         for w in list(self._piezas.values()) + list(self._bordes.values()) + [self._fondo.ambiente]:
             w.poner_colores(d, s, b)
+        try:
+            if self._fondo.escenario is not None:
+                self._fondo.escenario.poner_acento(QColor(b))
+        except Exception:  # noqa: BLE001
+            pass
 
     # ------------------------------------------------------------ fondo de video
 
@@ -390,7 +529,13 @@ class EscenaEscritorio(QObject):
         """El videoclip de fondo si se puede; si no, la carátula viva."""
         if not self.abierta:
             return
-        if self.ctx.ajustes.get("escena_fondo", "video") != "video" or not self.r.disponible:
+        modo = self.ctx.ajustes.get("escena_fondo", "video")
+        if modo in escenarios.ESCENARIOS:
+            if self._fondo.ver_escenario(modo):
+                self.r.activar_espectro(True)
+                return
+            modo = "ambiente"                   # no se pudo cargar: la carátula viva
+        if modo != "video" or not self.r.disponible:
             self._fondo.ver_video(False)
             return
         p = self.r.actual
@@ -413,18 +558,44 @@ class EscenaEscritorio(QObject):
         self._fondo.ver_video(True)
 
     def _alternar_fondo(self):
+        """El botón de fondo de la barra: un menú con videoclip, carátula y los escenarios."""
+        from PySide6.QtGui import QCursor
+        from PySide6.QtWidgets import QMenu
         actual = self.ctx.ajustes.get("escena_fondo", "video")
-        nuevo = "ambiente" if actual == "video" else "video"
+        menu = QMenu()
+        menu.setStyleSheet(
+            "QMenu{background:#16141C;color:#F2F0F7;border:1px solid #2E2A38;border-radius:10px;padding:6px;}"
+            "QMenu::item{padding:7px 22px 7px 14px;border-radius:6px;}"
+            "QMenu::item:selected{background:#2E2A38;}"
+            "QMenu::separator{height:1px;background:#2E2A38;margin:5px 8px;}")
+        opciones = [("video", "Videoclip"), ("ambiente", "Carátula viva"), None]
+        opciones += [(k, v[0]) for k, v in escenarios.ESCENARIOS.items()]
+        for op in opciones:
+            if op is None:
+                menu.addSeparator()
+                continue
+            clave, nombre = op
+            acc = menu.addAction(("✓  " if clave == actual else "     ") + nombre)
+            acc.setData(clave)
+        # sin bloquear: la escena (letra, video, ondas) sigue viva con el menú abierto
+        menu.triggered.connect(lambda acc: acc.data() and self.poner_fondo(acc.data()))
+        self._menu_fondo = menu
+        menu.popup(QCursor.pos())
+
+    def poner_fondo(self, nuevo):
         self.ctx.ajustes["escena_fondo"] = nuevo
         self.ctx.ajustes.guardar()
-        if nuevo == "ambiente":
+        if nuevo != "video":
             self.r.tope_video = None
             if self.r.destino_video == NOMBRE_VIDEO:
                 self.r.mover_video("principal")
             if self._modo_previo is not None and self._modo_previo != self.r.modo:
                 self.r.cambiar_modo(self._modo_previo)
             self._modo_previo = None
-            self._fondo.ver_video(False)
+            if nuevo in escenarios.ESCENARIOS:
+                self._preparar_video()          # pone el escenario y el medidor del audio
+            else:
+                self._fondo.ver_video(False)
         else:
             self._preparar_video()
         if "barra" in self._piezas:
@@ -460,6 +631,12 @@ class EscenaEscritorio(QObject):
             return
         letra.poner_mensaje("")
         letra.poner_lineas(lineas, sinc)
+        self._dur_letra = float((datos or {}).get("duracion") or 0)
+        self._lineas_actuales = [str((l or {}).get("texto") or "") if isinstance(l, dict) else str(l)
+                                 for l in lineas]
+        self._traducciones = None
+        if self._traduciendo:
+            self._traducir_letra()
 
     def _sin_letra(self, clave, texto):
         if self.abierta and clave == self._lineas_clave:
@@ -494,6 +671,78 @@ class EscenaEscritorio(QObject):
                          error=lambda _e: self.abierta and self._piezas["letra"].poner_mensaje(""),
                          dueno=self)
 
+    # ------------------------------------------------------------ traducción de la letra
+
+    def alternar_traduccion(self):
+        """La píldora «Traducir» de la tarjeta: la letra lleva debajo su traducción al español (o se quita)."""
+        self._traduciendo = not self._traduciendo
+        t = self._piezas.get("tarjeta")
+        if t is not None and hasattr(t, "fijar_traduccion"):
+            t.fijar_traduccion(self._traduciendo)
+        if self._traduciendo:
+            self._traducir_letra()
+        else:
+            self._poner_traducciones(None)
+
+    def _traducir_letra(self):
+        lineas = list(self._lineas_actuales)
+        if not any(x.strip() for x in lineas):
+            return
+        from ... import traductor
+        from ...hilos import en_segundo_plano
+        clave = self._lineas_clave
+
+        def llego(trad, c=clave, n=len(lineas)):
+            if not self.abierta or c != self._lineas_clave or not self._traduciendo:
+                return
+            if isinstance(trad, str):             # traductor.MISMO_IDIOMA
+                self.ctx.avisar("Esta letra ya está en español.")
+                return
+            if not trad or len(trad) != n:
+                self.ctx.avisar("No se pudo traducir esta letra.")
+                return
+            self._poner_traducciones([str(x or "") for x in trad])
+
+        self.ctx.avisar("Traduciendo la letra…")
+        en_segundo_plano(traductor.traducir, clave or "", lineas, "es", ok=llego,
+                         error=lambda _e: self.abierta and self.ctx.avisar("No se pudo traducir (¿sin internet?)."),
+                         dueno=self)
+
+    def _poner_traducciones(self, lista):
+        self._traducciones = lista
+        letra = self._piezas.get("letra")
+        if letra is not None and hasattr(letra, "fijar_traducciones"):
+            letra.fijar_traducciones(lista)
+
+    # ------------------------------------------------------------ recomendadas según lo que suena
+
+    def _recomendar(self, p):
+        """«Seguir escuchando» suma canciones parecidas a la que suena (la radio de YouTube Music)."""
+        lista = self._piezas.get("lista")
+        vid = (p or {}).get("video_id")
+        if lista is None or not hasattr(lista, "poner_recomendadas") or not vid or vid == self._recom_clave:
+            return
+        self._recom_clave = vid
+        if hasattr(lista, "fijar_cargando_recomendadas"):
+            lista.fijar_cargando_recomendadas(True)
+        from ... import catalogo
+        from ...hilos import en_segundo_plano
+
+        def llego(datos, v=vid):
+            if not self.abierta or v != self._recom_clave:
+                return
+            ya = {clave_de(self.r.actual)}
+            pistas = [x for x in (datos or {}).get("pistas") or [] if clave_de(x) not in ya][:12]
+            lista.poner_recomendadas(pistas)
+            if hasattr(lista, "fijar_cargando_recomendadas"):
+                lista.fijar_cargando_recomendadas(False)
+
+        def fallo(_e, v=vid):
+            if self.abierta and v == self._recom_clave and hasattr(lista, "fijar_cargando_recomendadas"):
+                lista.fijar_cargando_recomendadas(False)
+
+        en_segundo_plano(catalogo.radio, vid, None, 20, ok=llego, error=fallo, dueno=self)
+
     def _poner_alternativa(self):
         datos = self._alternativas[self._alt_indice]
         self._llego_letra(self._lineas_clave, datos)
@@ -505,10 +754,76 @@ class EscenaEscritorio(QObject):
         ~250 ms), para que las palabras entren justo a tiempo."""
         if not self.abierta or "letra" not in self._piezas:
             return
+        self._tic_ondas()
         pos = self._pos
         if self.r.estado == "sonando":
-            pos += time.monotonic() - self._pos_t
-        self._piezas["letra"].fijar_ms(int(pos * 1000))
+            velocidad = float(getattr(self.r, "velocidad", 1.0) or 1.0)
+            pos += (time.monotonic() - self._pos_t) * velocidad
+        self._piezas["letra"].fijar_ms(int(pos * 1000) + ADELANTO_LETRA_MS + self._desfase_letra()
+                                       + self._desfase_video())
+
+    def _tic_ondas(self):
+        """Con un escenario a la vista, sus ondas se mueven con el audio que suena."""
+        sw = getattr(self._fondo, "escenario", None)
+        if sw is None or not sw.isVisible():
+            return
+        from ... import espectro
+        if self._modelo_audio is None:
+            self._modelo_audio = espectro.ModeloAudio(32)
+        ahora = time.monotonic()
+        dt = min(0.25, ahora - (self._t_ondas or ahora))
+        self._t_ondas = ahora
+        sonando = self.r.estado == "sonando"
+        nivel = None
+        if sonando:
+            try:
+                nivel = self.r.nivel_audio()
+            except Exception:  # noqa: BLE001
+                nivel = None
+        self._modelo_audio.avanzar(dt, nivel, sonando, self._pos)
+        sw.fijar_espectro(list(self._modelo_audio.bandas) if sonando else [])
+
+    def _desfase_video(self):
+        """Un videoclip suele durar más que la canción (intro, escena hablada): la letra sincronizada es
+        de la canción, así que se corre lo que el video tiene de más al principio. Solo con el videoclip
+        sonando y una diferencia creíble (de 2,5 s a 2 min); con audio solo, no se toca."""
+        if self.r.modo != "video" or not self._dur_letra or not self._dur:
+            return 0
+        extra = float(self._dur) - float(self._dur_letra)
+        return -int(extra * 1000) if 2.5 <= extra <= 120 else 0
+
+    def _desfase_letra(self):
+        """El ajuste fino que la persona le dio a la letra de esta canción (ms)."""
+        try:
+            return int((self.ctx.ajustes["letra_desfases"] or {}).get(clave_de(self.r.actual) or "", 0))
+        except Exception:  # noqa: BLE001
+            return 0
+
+    def mover_letra(self, ms):
+        """Adelanta (+) o atrasa (−) la letra de la canción que suena y lo recuerda."""
+        clave = clave_de(self.r.actual)
+        if not clave:
+            return
+        try:
+            tabla = dict(self.ctx.ajustes["letra_desfases"] or {})
+        except Exception:  # noqa: BLE001
+            tabla = {}
+        nuevo = max(-10000, min(10000, int(tabla.get(clave, 0)) + int(ms)))
+        if nuevo:
+            tabla[clave] = nuevo
+        else:
+            tabla.pop(clave, None)
+        if len(tabla) > 500:                        # que no crezca sin fin
+            for k in list(tabla)[:len(tabla) - 500]:
+                tabla.pop(k, None)
+        try:
+            self.ctx.ajustes["letra_desfases"] = tabla
+            self.ctx.ajustes.guardar()
+        except Exception:  # noqa: BLE001
+            pass
+        seg = nuevo / 1000
+        self.ctx.avisar("Letra a tiempo" if not nuevo else
+                        f"Letra {'adelantada' if nuevo > 0 else 'atrasada'} {abs(seg):.2f} s".replace(".", ","))
 
     # ------------------------------------------------------------ lista, búsqueda y acciones
 
@@ -560,6 +875,27 @@ class EscenaEscritorio(QObject):
     def _elegir(self, pista):
         if pista:
             self.ctx.reproducir_pista(pista)
+            self.cerrar_buscador()
+
+    def alternar_buscador(self):
+        """La lupa de la barra: abre el buscador (con el cursor listo para escribir) o lo cierra."""
+        b = self._piezas.get("buscador")
+        if b is None:
+            return
+        if b.isVisible():
+            self.cerrar_buscador()
+            return
+        self._colocar_buscador()
+        b.show()
+        b.raise_()
+        b.activateWindow()
+        b.enfocar()
+
+    def cerrar_buscador(self):
+        b = self._piezas.get("buscador")
+        if b is not None and b.isVisible():
+            b.limpiar()
+            b.hide()
 
     def _artista(self, artista):
         """Suena la radio del artista sin salir de la escena."""

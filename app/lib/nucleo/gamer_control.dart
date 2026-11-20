@@ -4,12 +4,24 @@
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 
 import 'ajustes.dart';
 import 'gamer.dart';
 import 'gamer_xp.dart';
+import 'nube.dart';
+
+/// Un uuid v4 (aleatorio) con el generador seguro de Dart.
+String generarUuidV4() {
+  final r = math.Random.secure();
+  final b = List<int>.generate(16, (_) => r.nextInt(256));
+  b[6] = (b[6] & 0x0f) | 0x40;
+  b[8] = (b[8] & 0x3f) | 0x80;
+  final h = [for (final x in b) x.toRadixString(16).padLeft(2, '0')].join();
+  return '${h.substring(0, 8)}-${h.substring(8, 12)}-${h.substring(12, 16)}-${h.substring(16, 20)}-${h.substring(20)}';
+}
 
 class ModoGamerControl extends ChangeNotifier {
   ModoGamerControl({
@@ -17,16 +29,68 @@ class ModoGamerControl extends ChangeNotifier {
     required this.aplicarSonido,
     required this.lanzar,
     this.alSubirNivel,
+    this.sesion,
     DateTime Function()? reloj,
     Future<List<Map<String, dynamic>>> Function(Situacion)? buscarPistas,
   })  : _reloj = reloj ?? DateTime.now,
         _buscarPistas = buscarPistas ?? pistasParaSituacion {
     _activo = ajustes.sino('gamer_activo');
     _progreso = ProgresoGamer.deTexto(ajustes.texto('gamer_progreso')).alDia(_reloj());
+    // «dispositivo_id» no tiene valor por defecto registrado: se mira si existe antes de leerlo
+    var id = ajustes.tiene('dispositivo_id') ? ajustes.texto('dispositivo_id') : '';
+    if (id.isEmpty) {
+      id = generarUuidV4();
+      unawaited(ajustes.poner('dispositivo_id', id, avisar: false));
+    }
+    _dispositivo = id;
     _publicarMascotas();
+    // sin cuenta no hay nada que sincronizar: no se arma ningún reloj
+    if (sesion != null) {
+      _inicioSync = Timer(const Duration(seconds: 5), () => sincronizar());
+      _periodoSync = Timer.periodic(const Duration(minutes: 5), (_) => sincronizar());
+    }
   }
 
   final Ajustes ajustes;
+
+  /// Sesión de la cuenta (null sin cuenta: el progreso queda solo en este equipo).
+  final Sesion? sesion;
+
+  /// Identificador de este equipo (uuid guardado en los ajustes).
+  late final String _dispositivo;
+  String get dispositivoId => _dispositivo;
+
+  /// Lo que aportan los OTROS equipos de la cuenta (se rellena al sincronizar).
+  int _nubeXp = 0;
+  int _nubeMinutos = 0;
+  final Set<String> _nubeDias = {};
+  int get nubeXp => _nubeXp;
+  int get nubeMinutos => _nubeMinutos;
+  Set<String> get nubeDias => Set.unmodifiable(_nubeDias);
+
+  /// XP de la cuenta: la de este equipo más la de los demás.
+  int get xpTotal => progreso.xp + _nubeXp;
+
+  /// Nivel de la cuenta (calculado sobre [xpTotal]).
+  int get nivelTotal => nivelDeXp(xpTotal);
+
+  /// Días seguidos hasta hoy (o hasta ayer) con actividad en cualquier equipo.
+  int get rachaTotal {
+    final dias = {...progreso.dias, ..._nubeDias};
+    if (dias.isEmpty) return 0;
+    var d = _reloj();
+    // si hoy aún no hay escucha, la racha sigue viva desde ayer
+    if (!dias.contains(claveDia(d))) d = DateTime(d.year, d.month, d.day - 1);
+    var n = 0;
+    while (dias.contains(claveDia(d))) {
+      n++;
+      d = DateTime(d.year, d.month, d.day - 1);
+    }
+    return n;
+  }
+
+  Timer? _inicioSync, _periodoSync, _prontoSync;
+  bool _sincronizando = false;
 
   /// Vuelve a montar el sonido con los ajustes actuales (reproductor.aplicarSonido).
   final Future<void> Function() aplicarSonido;
@@ -172,7 +236,8 @@ class ModoGamerControl extends ChangeNotifier {
     try {
       final pistas = await _buscarPistas(s);
       if (pistas.isEmpty) return 'No encontré canciones para «${s.nombre}». Prueba otra vez.';
-      await lanzar(pistas, {'tipo': 'radio', 'id': '${pistas.first['video_id'] ?? ''}', 'titulo': 'Modo gamer · ${s.nombre}'});
+      await lanzar(pistas, {'tipo': 'radio', 'id': '${pistas.first['video_id'] ?? ''}', 'titulo': 'Modo gamer · ${s.nombre}',
+        'miniatura': '${pistas.first['miniatura'] ?? ''}'});
       return null;
     } catch (e) {
       return 'No se pudo armar «${s.nombre}»: $e';
@@ -254,17 +319,72 @@ class ModoGamerControl extends ChangeNotifier {
     _segCancion += seg;
     final cuenta = !_cancionContada && _segCancion >= _segParaContarCancion;
     if (cuenta) _cancionContada = true;
+    final antesTotal = nivelDeXp(xpTotal);
     final r = _progreso.registrar(t,
         segundos: seg, cancion: cuenta ? _cancionId : null, artistas: cuenta ? _artistas : const []);
     _progreso = r.progreso;
-    // aviso de nivel: solo cuando sube; nunca rompe la escucha
-    if (r.subioNivel) {
+    // aviso de nivel (sobre el total de la cuenta): solo cuando sube; nunca rompe la escucha
+    final nivelTotal = nivelDeXp(xpTotal);
+    if (nivelTotal > antesTotal) {
       try {
-        alSubirNivel?.call(r.nivelAhora);
+        alSubirNivel?.call(nivelTotal);
       } catch (_) {}
     }
     unawaited(ajustes.poner('gamer_progreso', _progreso.aTexto(), avisar: false));
+    if (r.misiones.isNotEmpty || r.subioNivel) _sincronizarPronto();
     notifyListeners();
+  }
+
+  /// Sincroniza con la cuenta: escribe la fila de este equipo y lee la de los demás.
+  /// Sin sesión no hace nada; cualquier error es silencioso (lo local sigue).
+  Future<void> sincronizar() async {
+    final s = sesion;
+    if (s == null || _cerrado || _sincronizando) return;
+    _sincronizando = true;
+    try {
+      final yo = s.userId;
+      await s.pedir('POST', 'gamer_aportes?on_conflict=user_id,dispositivo',
+          cuerpo: {'user_id': yo, 'dispositivo': _dispositivo, ..._progreso.aporte()},
+          cabeceras: {'Prefer': 'resolution=merge-duplicates,return=minimal'});
+      final filas = await s.pedir('GET', 'gamer_aportes?select=dispositivo,xp,minutos,dias&user_id=eq.$yo');
+      if (filas is! List || _cerrado) return;
+      var xp = 0, minutos = 0;
+      final dias = <String>{};
+      for (final f in filas) {
+        if (f is! Map) continue;
+        final d = f['dispositivo'];
+        final x = f['xp'], m = f['minutos'];
+        // se ignora lo propio y las filas rotas
+        if (d is! String || d == _dispositivo || x is! num || m is! num) continue;
+        xp += x.toInt();
+        minutos += m.toInt();
+        final ds = f['dias'];
+        if (ds is List) {
+          for (final e in ds) {
+            if (e is String) dias.add(e);
+          }
+        }
+      }
+      _nubeXp = xp;
+      _nubeMinutos = minutos;
+      _nubeDias
+        ..clear()
+        ..addAll(dias);
+      notifyListeners();
+    } catch (_) {
+      // sin red o sin tabla: se sigue con lo local
+    } finally {
+      _sincronizando = false;
+    }
+  }
+
+  /// Antirrebote de 20 s: tras cobrar una misión o subir de nivel, se sincroniza una vez.
+  void _sincronizarPronto() {
+    if (sesion == null || _prontoSync != null) return;
+    _prontoSync = Timer(const Duration(seconds: 20), () {
+      _prontoSync = null;
+      sincronizar();
+    });
   }
 
   /// Fuerza el guardado de lo pendiente (al cerrar la sesión o la app).
@@ -279,6 +399,9 @@ class ModoGamerControl extends ChangeNotifier {
     _volcar();
     _cerrado = true;
     _pararEscucha();
+    _inicioSync?.cancel();
+    _periodoSync?.cancel();
+    _prontoSync?.cancel();
     mascotasOcultas.value = false;
     cargando.dispose();
     super.dispose();
