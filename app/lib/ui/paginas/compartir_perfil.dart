@@ -44,7 +44,6 @@ class _HojaCompartirPerfilState extends State<_HojaCompartirPerfil> {
   static const _estilos = ['Color del perfil', 'Oscuro', 'Claro'];
 
   Perfil get _p => widget.perfil;
-  String get _nombre => _p.nombre.trim().isNotEmpty ? _p.nombre.trim() : _p.usuario;
 
   Future<void> _compartirImagen() async {
     if (_ocupado) return;

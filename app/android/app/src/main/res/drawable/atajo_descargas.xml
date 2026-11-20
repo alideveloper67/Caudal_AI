@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Acceso directo del icono: Descargas -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp" android:height="48dp" android:viewportWidth="48" android:viewportHeight="48">
+    <path android:fillColor="#FF0E7490" android:pathData="M24,0A24,24 0 1,1 24,48A24,24 0 1,1 24,0Z"/>
+    <group android:translateX="11" android:translateY="11" android:scaleX="1.0833" android:scaleY="1.0833">
+        <path android:fillColor="#FFFFFFFF" android:pathData="M19,9h-4V3H9v6H5l7,7 7,-7zM5,18v2h14v-2H5z"/>
+    </group>
+</vector>

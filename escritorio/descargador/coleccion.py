@@ -10,6 +10,7 @@ import json
 import os
 import re
 import sqlite3
+import threading
 import time
 from pathlib import Path
 
@@ -48,10 +49,70 @@ def pista_de_descarga(fila):
     }
 
 
+class _Resultado:
+    """Lo que devuelve una consulta, ya leído entero dentro del cerrojo: se puede recorrer,
+    pedir una o todas las filas, y trae lastrowid y rowcount como un cursor."""
+
+    __slots__ = ("_filas", "_i", "lastrowid", "rowcount")
+
+    def __init__(self, filas, lastrowid, rowcount):
+        self._filas = filas
+        self._i = 0
+        self.lastrowid = lastrowid
+        self.rowcount = rowcount
+
+    def fetchone(self):
+        if self._i >= len(self._filas):
+            return None
+        self._i += 1
+        return self._filas[self._i - 1]
+
+    def fetchall(self):
+        resto = self._filas[self._i:]
+        self._i = len(self._filas)
+        return resto
+
+    def __iter__(self):
+        return iter(self.fetchall())
+
+
+class _ConexionSegura:
+    """La conexión SQLite compartida, con un cerrojo: la interfaz y algún hilo pueden consultar
+    a la vez sin que SQLite se queje («bad parameter or other API misuse»)."""
+
+    def __init__(self, con):
+        self._con = con
+        self._cerrojo = threading.RLock()
+
+    def execute(self, sql, args=()):
+        with self._cerrojo:
+            cur = self._con.execute(sql, args)
+            return _Resultado(cur.fetchall(), cur.lastrowid, cur.rowcount)
+
+    def commit(self):
+        with self._cerrojo:
+            self._con.commit()
+
+    def close(self):
+        with self._cerrojo:
+            self._con.close()
+
+    @property
+    def row_factory(self):
+        return self._con.row_factory
+
+    @row_factory.setter
+    def row_factory(self, valor):
+        self._con.row_factory = valor
+
+    def __getattr__(self, nombre):
+        return getattr(self._con, nombre)
+
+
 class Coleccion:
     def __init__(self, archivo=None):
         self.archivo = Path(archivo) if archivo else carpeta_perfil() / "historial.db"
-        self.con = sqlite3.connect(str(self.archivo), check_same_thread=False)
+        self.con = _ConexionSegura(sqlite3.connect(str(self.archivo), check_same_thread=False))
         self.con.row_factory = sqlite3.Row
         self._indice_local = None
         self._existe_cache = {}
@@ -257,7 +318,7 @@ class Coleccion:
         sirve como `with col.copia_de_lectura() as c: ...`."""
         otra = Coleccion.__new__(Coleccion)
         otra.archivo = self.archivo
-        otra.con = sqlite3.connect(str(self.archivo), timeout=15, check_same_thread=False)
+        otra.con = _ConexionSegura(sqlite3.connect(str(self.archivo), timeout=15, check_same_thread=False))
         otra.con.row_factory = sqlite3.Row
         otra._indice_local = None
         otra._existe_cache = {}
@@ -349,6 +410,33 @@ class Coleccion:
         if clave.startswith("yt:"):
             self._anotar("me_gusta_poner", {"clave": clave, "datos": para_nube(pista)})
         return True
+
+    def agregar_me_gusta_varios(self, pistas):
+        """Pone «me gusta» a muchas canciones de una vez (las traidas de otra app).
+        No repite: fuera las que ya estan (misma clave o misma cancion con otro video).
+        Quedan en el orden dado, la primera arriba. Devuelve (anadidas, repetidas)."""
+        from .importacion import huella_pista, separar_nuevas
+        actuales = [f["clave"] for f in self.con.execute("SELECT clave FROM me_gusta")]
+        huellas = [huella_pista(p) for p in self.pistas(actuales)]
+        nuevas, repetidas = separar_nuevas(pistas, actuales, huellas)
+        if not nuevas:
+            return 0, repetidas
+        ahora = time.time()
+        subir = []
+        for i, p in enumerate(nuevas):
+            self.recordar(p, confirmar=False)
+            fecha = ahora - i       # un segundo entre una y otra: la nube guarda segundos
+            self.con.execute("INSERT OR REPLACE INTO me_gusta (clave, fecha) VALUES (?,?)",
+                             (p["clave"], fecha))
+            if p["clave"].startswith("yt:"):
+                subir.append({"clave": p["clave"], "datos": para_nube(p), "fecha": fecha})
+        self.con.commit()
+        if self._gustan is not None:
+            self._gustan.update(p["clave"] for p in nuevas)
+        # a la nube de 400 en 400: si algo se corta, lo ya subido no se repite
+        for i in range(0, len(subir), 400):
+            self._anotar("me_gusta_varios", {"items": subir[i:i + 400]})
+        return len(nuevas), repetidas
 
     def lista_me_gusta(self, filtro="", limite=None):
         """Tus me gusta, del más nuevo al más viejo. Con `limite` (y sin filtro) solo se leen esos
@@ -462,7 +550,11 @@ class Coleccion:
         self.con.execute("UPDATE listas SET tocada = ? WHERE id = ?", (time.time(), lista_id))
         self.con.commit()
         if para_subir:
-            self._anotar("items_poner", {"uuid": self._uuid_lista(lista_id), "items": para_subir})
+            # de 400 en 400: una lista de 5 000 no queda como una sola orden enorme que,
+            # si la nube rechaza un trozo, se perderia entera
+            uuid = self._uuid_lista(lista_id)
+            for i in range(0, len(para_subir), 400):
+                self._anotar("items_poner", {"uuid": uuid, "items": para_subir[i:i + 400]})
         return nuevas
 
     def quitar_de_lista(self, lista_id, clave):

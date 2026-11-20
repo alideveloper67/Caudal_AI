@@ -87,6 +87,7 @@ def ventana(app, ctx, monkeypatch):
         v.gamer.cerrar()
     finally:
         v.hide()
+        v.deleteLater()      # que sus temporizadores no salten en la prueba siguiente
         from descargador.ui.neon_gamer import reloj_neon
         reloj_neon().pausar(False)
         reloj_neon().activar(True)
@@ -223,7 +224,7 @@ def test_el_boton_de_la_barra_ofrece_los_estilos_y_el_karaoke_con_candado(app, v
     hacer_donador(ventana)
     ventana.barra._menu_visual()
     assert menus[1] == ["Visualizador · Ondas", "Visualizador · Partículas", "Visualizador · Barras",
-                        "Karaoke a pantalla completa"]
+                        "Karaoke a pantalla completa", "Letra con efectos a pantalla completa"]
 
 
 def test_los_estilos_del_menu_llegan_a_la_ventana(app, ventana, monkeypatch):

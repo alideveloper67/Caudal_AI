@@ -102,12 +102,13 @@ def selector_formato(calidad, contenedor="mp4", tipo="completo", codec="maxima",
                       (YouTube no da H.264 por encima de 1080p)
     """
     if tipo == "audio" or calidad == "audio":
-        # sin recomprimir cuando se puede: M4A sale del AAC original y OPUS del Opus
+        # sin recomprimir cuando se puede: M4A sale del AAC original y OPUS del Opus. Y nunca la
+        # pista «DRC» de YouTube (la de volumen estable, ya comprimida) si está la original
         if formato_audio == "m4a":
-            return "ba[ext=m4a]/ba/b"
+            return f"ba[ext=m4a]{SIN_DRC}/ba[ext=m4a]/ba{SIN_DRC}/ba/b"
         if formato_audio in ("opus", "original"):
-            return "ba[acodec=opus]/ba/b"
-        return "ba/b"
+            return f"ba[acodec=opus]{SIN_DRC}/ba[acodec=opus]/ba{SIN_DRC}/ba/b"
+        return f"ba{SIN_DRC}/ba/b"
 
     limite = ""
     if calidad not in ("mejor", "", None):
@@ -131,9 +132,29 @@ def selector_formato(calidad, contenedor="mp4", tipo="completo", codec="maxima",
     return f"{preferido}/{generico}"
 
 
-# Modo musica: nivela a -9 LUFS y limita los picos, que es lo que de verdad
-# hace que suene fuerte sin que se rompa el sonido.
-FILTRO_SONORIDAD = "loudnorm=I=-9:TP=-1.0:LRA=9"
+# Modo musica: cada archivo se mide (sonoridad.medir) y se le da una ganancia fija con un limitador
+# de picos verdaderos (sonoridad.filtro_descarga). Esto es solo el respaldo si no se pudo medir.
+FILTRO_SONORIDAD = "loudnorm=I=-10:TP=-1.0:LRA=11"
+SIN_DRC = "[format_id!*=drc]"
+
+
+def _pp_sonoridad(formato_audio):
+    """Postprocesador de yt-dlp que mide lo descargado ANTES de extraer el audio y deja el filtro
+    de ganancia fija + limitador para la extracción (un solo paso de codificación)."""
+    from yt_dlp.postprocessor.common import PostProcessor
+
+    from . import sonoridad
+
+    class _Sonoridad(PostProcessor):
+        def run(self, info):
+            ruta = info.get("filepath") or info.get("_filename")
+            exe = os.path.join(ruta_ffmpeg(), "ffmpeg.exe") if ruta_ffmpeg() else None
+            medida = sonoridad.medir({"archivo": ruta}, exe) if ruta and exe else None
+            args = self._downloader.params.setdefault("postprocessor_args", {})
+            args["extractaudio"] = sonoridad.args_descarga(formato_audio, info.get("acodec"), medida)
+            return [], info
+
+    return _Sonoridad()
 
 
 class _Silencio:
@@ -407,8 +428,10 @@ class TrabajoDescarga(QRunnable):
                 "preferredquality": calidad_mp3,
             })
             if a["modo_musica"]:
+                # respaldo; el postprocesador de sonoridad lo cambia por lo medido (ver _pp_sonoridad)
                 opciones["postprocessor_args"] = {
                     "extractaudio": ["-af", FILTRO_SONORIDAD]}
+                self._formato_musica = formato_audio
         else:
             if contenedor in ("mp4", "mkv", "webm"):
                 opciones["merge_output_format"] = contenedor
@@ -515,6 +538,16 @@ class TrabajoDescarga(QRunnable):
         t = self.tarea
         opciones, carpeta = self._opciones(carpeta)
         with yt_dlp.YoutubeDL(opciones) as ydl:
+            formato_musica = getattr(self, "_formato_musica", None)
+            if formato_musica:
+                try:
+                    pp = _pp_sonoridad(formato_musica)
+                    ydl.add_post_processor(pp, when="post_process")
+                    # que mida antes de la extracción de audio (que ya está en la lista)
+                    lista = ydl._pps["post_process"]
+                    lista.insert(0, lista.pop(lista.index(pp)))
+                except Exception:  # noqa: BLE001 - sin medir queda el filtro de respaldo
+                    pass
             info = ydl.extract_info(t.url, download=True)
 
         if info and info.get("_type") == "playlist":

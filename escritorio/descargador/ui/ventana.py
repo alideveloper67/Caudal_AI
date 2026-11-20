@@ -24,8 +24,8 @@ from .panel_lateral import PanelLateral
 EXT_AUDIO = {".mp3", ".m4a", ".opus", ".ogg", ".flac", ".wav", ".aac", ".wma", ".webm"}
 EXT_VIDEO = {".mp4", ".mkv", ".mov", ".avi", ".webm", ".m4v", ".wmv", ".flv", ".ts"}
 
-SINGLETONS = ("descargas", "video", "letra", "vinilo", "visualizador", "karaoke")
-VISTAS_GRANDES = ("visualizador", "karaoke")      # a pantalla completa, para donadores
+SINGLETONS = ("descargas", "video", "letra", "vinilo", "visualizador", "karaoke", "escena")
+VISTAS_GRANDES = ("visualizador", "karaoke", "escena")      # a pantalla completa, para donadores
 
 
 class _Teclas(QObject):
@@ -128,6 +128,13 @@ class Ventana(QWidget):
         self.premium = GestorPremium(ctx)
         ctx.premium = self.premium
         self.premium.aspecto_cambiado.connect(self.reabrir_con_aspecto)
+        # el ecualizador avanzado (donadores) suena solo con beneficios; si cambian, se rehace el sonido
+        ctx.reproductor.consultar_premium = lambda: self.premium.premium
+        self.premium.cambiado.connect(ctx.reproductor.aplicar_sonido)
+        # y el ajuste de cada salida (audífonos, parlante, bluetooth) entra solo al cambiar de salida
+        from .vigia_salida import VigiaSalida
+        ctx.vigia_salida = VigiaSalida(ctx, padre=self)
+        ctx.vigia_salida.iniciar()
         self.premium.refrescar()
         estilos.FONDO["activo"] = self.fondo.activo or estilos.patron_actual() is not None
         self.setStyleSheet(hoja(iconos.flechas_qss()))
@@ -145,6 +152,16 @@ class Ventana(QWidget):
         self._conectar()
         self._atajos()
         self._bandeja()
+        # Despertador: después de la bandeja, que él mete «Despertador…» y Ctrl+Alt+D solo
+        from .despertador_ui import GestorDespertador
+        self.despertador = GestorDespertador(ctx, self)
+        ctx.despertador = self.despertador
+        # Discord («Escuchando en Caudal»): el enganche al reproductor, que Ajustes lee de ctx.discord
+        from ..discord_presencia import enganchar
+        ctx.discord = enganchar(self.r)
+        # Fiesta por QR: una sola, la vive la app (sigue abierta aunque se cierre la ventana)
+        from .. import fiesta as F
+        ctx.fiesta = F.control(ctx)
 
         geo = self.ajustes["geometria"]
         if geo:
@@ -174,7 +191,8 @@ class Ventana(QWidget):
         self.r.restaurar_sesion()
         self._seguir_tras_reabrir()
         if not self.r.disponible:
-            QTimer.singleShot(800, lambda: QMessageBox.warning(
+            # atado a la ventana y solo si sigue a la vista (cerrada antes, no se avisa a nadie)
+            QTimer.singleShot(800, self, lambda: self.isVisible() and QMessageBox.warning(
                 self, APP_NOMBRE, "No se encontró el motor de reproducción (libmpv), así que no "
                                   "se puede reproducir. Las descargas sí funcionan.\n\n"
                                   + (self.r.motivo_no_disponible or "")))
@@ -334,6 +352,20 @@ class Ventana(QWidget):
         self.campo.returnPressed.connect(self._buscar_ahora)
         return barra
 
+    def abrir_despertador(self):
+        """Abre el editor de alarmas (también desde Ajustes)."""
+        self.despertador.abrir_dialogo()
+
+    def abrir_fiesta(self):
+        """Abre la ventana de la Fiesta por QR."""
+        from .paginas.fiesta import abrir_ventana
+        abrir_ventana(self.ctx, self)
+
+    def abrir_que_suena(self):
+        """Abre «¿Qué suena?»: reconoce la canción que se oye en la PC."""
+        from .dialogo_que_suena import abrir_que_suena
+        abrir_que_suena(self.ctx, self)
+
     def _menu_cuenta(self):
         cuenta = getattr(self.ctx, "cuenta", None) or {}
         menu = QMenu(self)
@@ -350,6 +382,8 @@ class Ventana(QWidget):
         menu.addSeparator()
         menu.addAction(iconos.icono("engranaje", 16, C["texto2"]), "Ajustes",
                        lambda: self.navegar({"pagina": "ajustes"}))
+        menu.addAction(iconos.icono("estrella", 16, C["texto2"]), "Fiesta por QR…", self.abrir_fiesta)
+        menu.addAction(iconos.icono("musica", 16, C["texto2"]), "¿Qué suena?…", self.abrir_que_suena)
         menu.addAction(iconos.icono("candado", 16, C["texto2"]), "Privacidad y tus datos",
                        self._privacidad)
         if not (getattr(self.ctx, "cuenta", None) or {}).get("google"):
@@ -474,6 +508,10 @@ class Ventana(QWidget):
         elif pag == "karaoke":
             from .karaoke import PaginaKaraoke
             w = PaginaKaraoke(self.ctx)
+            w.volver.connect(self.cerrar_vista_grande)
+        elif pag == "escena":
+            from .letra_escena import PaginaLetraEscena
+            w = PaginaLetraEscena(self.ctx)
             w.volver.connect(self.cerrar_vista_grande)
         elif pag == "estudio":
             from .paginas.estudio import PaginaEstudio
@@ -687,8 +725,10 @@ class Ventana(QWidget):
         self.barra.pidio_vinilo.connect(self.alternar_vinilo)
         self.barra.pidio_visualizador.connect(self.abrir_visualizador)
         self.barra.pidio_karaoke.connect(self.abrir_karaoke)
+        self.barra.pidio_escena.connect(self.abrir_escena)
         self.r.estado_cambio.connect(self._vinilo_auto)
         self.barra.pidio_mini.connect(self.alternar_mini)
+        self.barra.pidio_escritorio.connect(self.abrir_escena_escritorio)
         self.barra.pidio_ecualizador.connect(self.abrir_ecualizador)
         self.panel_der.cerrado.connect(lambda: self.alternar_panel(None))
         self.panel_der.cambio.connect(lambda n: self.barra.marcar_panel(n))
@@ -735,8 +775,11 @@ class Ventana(QWidget):
         atajo("Ctrl+Shift+L", self.alternar_letra)
         atajo("Ctrl+Shift+V", lambda: self.abrir_visualizador())
         atajo("Ctrl+Shift+K", self.abrir_karaoke)
+        atajo("Ctrl+Shift+Y", self.abrir_escena)
         atajo("Ctrl+Shift+Q", lambda: self.alternar_panel("cola"))
         atajo("Ctrl+M", self.alternar_mini)
+        atajo("Ctrl+Shift+D", self.abrir_escena_escritorio)
+        atajo("Ctrl+Shift+S", self.abrir_que_suena)
         atajo("F11", self.alternar_completa)
         atajo("Escape", lambda: self.en_completa and self.alternar_completa()
               or self._escape_estudio()
@@ -894,6 +937,16 @@ class Ventana(QWidget):
         if not self._en_vista_grande() or self.historia[self.indice][0].get("pagina") != "karaoke":
             self.navegar({"pagina": "karaoke"})
 
+    def abrir_escena(self):
+        """La letra a pantalla completa con efectos (solo el verso que suena, en grande)."""
+        if not self._pedir_donador():
+            return
+        if self.r.actual is None:
+            self.aviso.mostrar("Pon algo a sonar para ver su letra con efectos")
+            return
+        if not self._en_vista_grande() or self.historia[self.indice][0].get("pagina") != "escena":
+            self.navegar({"pagina": "escena"})
+
     def cerrar_vista_grande(self):
         if self.en_completa:
             self.alternar_completa()
@@ -930,6 +983,15 @@ class Ventana(QWidget):
             self.panel_der.mostrar(nombre)
             self.ajustes["panel_derecho"] = nombre
         self.ajustes.guardar()
+
+    def abrir_escena_escritorio(self, solo_ver=False):
+        """Caudal a pantalla completa como una «skin» del escritorio (ver ui/escena)."""
+        from .escena.ventana import escena_de
+        if self.en_completa:
+            self.alternar_completa()
+        if self.mini is not None and self.mini.isVisible():
+            self.mini.close()
+        escena_de(self.ctx).abrir(solo_ver=solo_ver)
 
     def alternar_mini(self):
         if self.mini.isVisible():
@@ -1007,10 +1069,23 @@ class Ventana(QWidget):
                                      QSystemTrayIcon.Information, 3500)
 
     def _traer_lista(self):
+        if self._seguir_importacion_pendiente():
+            return
         from .dialogo_listas import DialogoListas
         dialogo = DialogoListas(self.ajustes, self)
         dialogo.descargar.connect(self._lista_traida)
         dialogo.guardar.connect(self._guardar_lista_traida)
+        dialogo.a_me_gusta.connect(self._lista_a_me_gusta)
+        dialogo.pasar_me_gusta.connect(self._pasar_me_gusta)
+        dialogo.exec()
+
+    def _pasar_me_gusta(self):
+        """«Pasar tus me gusta»: Spotify, YouTube Music y SoundCloud -> Me gusta de Caudal."""
+        if self._seguir_importacion_pendiente():
+            return
+        from .dialogo_me_gusta import DialogoMeGusta
+        dialogo = DialogoMeGusta(self.ctx, self)
+        dialogo.listo.connect(self._lista_a_me_gusta)
         dialogo.exec()
 
     def _lista_traida(self, canciones):
@@ -1025,50 +1100,71 @@ class Ventana(QWidget):
             self.ctx.gestor.agregar(enlace, tipo="audio", titulo=nombre)
         self.aviso.mostrar(f"{len(canciones)} canciones en la cola de descargas")
 
-    def _guardar_lista_traida(self, canciones, titulo):
-        """«Guardar como lista»: se busca cada canción y queda como lista tuya
-        (sincronizada: también aparece en el teléfono y en la web)."""
+    def _guardar_lista_traida(self, canciones, titulo, plataforma=""):
+        """«Guardar como lista»: se busca cada canción (de lote en lote, con el avance a la
+        vista) y queda como lista tuya, sincronizada con el teléfono y la web."""
         if not canciones:
             return
+        from . import dialogo_importacion as DI
+        trabajo = DI.nueva(self.ctx.coleccion, canciones,
+                           {"tipo": "lista", "nombre": titulo, "plataforma": plataforma})
+        self.ctx.listas_cambio.emit()
+        self._mostrar_importacion(trabajo)
 
-        def una(c):
-            vid = catalogo.video_id_de(c.get("url") or "")
-            if vid:
-                return catalogo.nueva_pista(vid, c.get("titulo") or "",
-                                            [{"nombre": c.get("artista") or "", "id": ""}])
-            consulta = c.get("busqueda") or f"{c.get('artista', '')} {c.get('titulo', '')}"
-            for _ in range(2):
-                try:
-                    hallado = catalogo.buscar(consulta.strip(), "canciones", 1)
-                    return hallado[0] if hallado else None
-                except Exception:  # noqa: BLE001
-                    continue
-            return None
+    def _lista_a_me_gusta(self, canciones, titulo, servicio, enlace):
+        """Las canciones traídas van a tus Me gusta (sin repetir las que ya están)."""
+        if not canciones:
+            return
+        from . import dialogo_importacion as DI
+        trabajo = DI.nueva(self.ctx.coleccion, canciones,
+                           {"tipo": "me_gusta", "servicio": servicio, "enlace": enlace,
+                            "titulo": titulo})
+        self._mostrar_importacion(trabajo)
 
-        def resolver():
-            # de cuatro en cuatro: una lista de 50 tarda segundos, no un minuto
-            from concurrent.futures import ThreadPoolExecutor
-            with ThreadPoolExecutor(max_workers=4) as grupo:
-                return [p for p in grupo.map(una, canciones) if p]
+    def _seguir_importacion_pendiente(self):
+        """Si una importación quedó a medias, ofrece seguirla. True si se retomó o ya va."""
+        from . import dialogo_importacion as DI
+        from .. import importacion
+        actual = getattr(self, "_importacion", None)
+        if actual is not None and actual.hilo is not None and actual.hilo.isRunning():
+            actual.show()
+            actual.raise_()
+            return True
+        p = DI.pendiente(self.ctx.coleccion)
+        if not p:
+            return False
+        d = p["destino"]
+        que = "tus Me gusta" if d.get("tipo") == "me_gusta" else f"la lista «{d.get('nombre', '')}»"
+        caja = QMessageBox(self)
+        caja.setWindowTitle("Caudal")
+        caja.setText(f"Quedó a medias el paso de canciones a {que}: van "
+                     f"{importacion.texto_avance(p.get('hechas', 0), len(p['canciones']))}.")
+        seguir = caja.addButton("Seguir", QMessageBox.AcceptRole)
+        caja.addButton("Empezar otra", QMessageBox.RejectRole)
+        caja.exec()
+        if caja.clickedButton() is not seguir:
+            self.ctx.coleccion.guardar_estado(importacion.CLAVE_PENDIENTE, None)
+            return False
+        self._mostrar_importacion(p)
+        return True
 
-        def listo(pistas):
-            if not pistas:
-                self.aviso.mostrar("No se encontró ninguna de esas canciones")
+    def _mostrar_importacion(self, trabajo):
+        from .dialogo_importacion import DialogoImportacion
+        dialogo = DialogoImportacion(self.ctx, trabajo, self)
+        self._importacion = dialogo
+
+        def al_terminar(t):
+            if not t.get("acabo"):
                 return
-            col = self.ctx.coleccion
-            nombre = (titulo or "Lista traída").strip()[:80]
-            if any(l["nombre"] == nombre for l in col.listas()):
-                nombre = col.nombre_libre(nombre)
-            lista_id = col.crear_lista(nombre)
-            col.agregar_a_lista(lista_id, pistas)
-            self.ctx.listas_cambio.emit()
-            self.navegar({"pagina": "mi_lista", "id": lista_id})
-            faltan = len(canciones) - len(pistas)
-            self.aviso.mostrar(f"Lista «{nombre}» guardada con {len(pistas)} canciones"
-                               + (f" ({faltan} no se encontraron)" if faltan else ""))
+            d = t["destino"]
+            if d.get("tipo") == "lista":
+                self.navegar({"pagina": "mi_lista", "id": d["lista_id"]})
+            self.aviso.mostrar(dialogo.resumen(), 8000)
 
-        self.aviso.mostrar(f"Buscando {len(canciones)} canciones en YouTube Music…", 8000)
-        en_segundo_plano(resolver, ok=listo, error=lambda e: self.aviso.mostrar(str(e)), dueno=self)
+        dialogo.terminado.connect(al_terminar)
+        dialogo.setModal(False)
+        dialogo.show()
+        dialogo.empezar()
 
     # ------------------------------------------------------------ bandeja
 
@@ -1658,6 +1754,12 @@ class Ventana(QWidget):
             self._guardia_estudio(self.salir)
             return
         self._saliendo_ya = True
+        escena = getattr(self.ctx, "escena_escritorio", None)
+        if escena is not None:
+            try:
+                escena.cerrar()       # suelta el fondo de escritorio y devuelve el video
+            except Exception:
+                pass
         est = getattr(self.ctx, "estudio", None)
         if est is not None:
             try:
@@ -1700,6 +1802,14 @@ class Ventana(QWidget):
             pass
         try:
             self.r.cerrar()
+        except Exception:
+            pass
+        try:
+            self.ctx.discord.p.detener(1.5)     # se borra del perfil de Discord
+        except Exception:
+            pass
+        try:
+            self.ctx.fiesta.olvidar()           # la fiesta sigue abierta para los invitados
         except Exception:
             pass
         for w in (self.mini, self):

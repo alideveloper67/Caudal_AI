@@ -12,7 +12,7 @@ import '../../nucleo/social.dart';
 import '../comunes.dart';
 import '../emojis.dart';
 import '../premium/dedicatoria_ui.dart';
-import '../premium/marcos.dart';
+import '../premium/nombre_color.dart';
 import '../servicios.dart';
 import '../tema.dart';
 import 'amigos_pagina.dart';
@@ -165,7 +165,7 @@ class _MensajesPaginaState extends State<MensajesPagina> {
                         return ListTile(
                           contentPadding: const EdgeInsets.symmetric(horizontal: Esp.lado, vertical: 4),
                           leading: AvatarPerfil(nombre: c.visible, fotoUrl: c.fotoUrl, marco: c.marco, userId: c.otro, radio: 24),
-                          title: NombreEfecto(c.visible, efecto: c.efectoNombre,
+                          title: NombreConColor(c.visible, usuario: c.usuario, efecto: c.efectoNombre,
                               estilo: TextStyle(fontWeight: c.sinLeer > 0 ? FontWeight.w900 : FontWeight.w700)),
                           subtitle: Text(c.vistaPrevia, maxLines: 1, overflow: TextOverflow.ellipsis,
                               style: TextStyle(color: c.sinLeer > 0 ? C.texto : C.texto2)),
@@ -665,7 +665,7 @@ class _ConversacionPaginaState extends State<ConversacionPagina> {
           const SizedBox(width: 10),
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              NombreEfecto(widget.chat.visible, efecto: widget.chat.efectoNombre,
+              NombreConColor(widget.chat.visible, usuario: widget.chat.usuario, efecto: widget.chat.efectoNombre,
                   estilo: const TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
               Text('@${widget.chat.usuario}', style: estiloDetalle),
             ]),

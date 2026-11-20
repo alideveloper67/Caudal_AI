@@ -29,6 +29,8 @@ def _pluma(p, color, grosor=1.9):
 
 def pixmap(nombre, tam=20, color=None):
     color = color or C["texto2"]
+    if not isinstance(color, str):        # un QColor (o similar) también vale: la caché pide texto
+        color = QColor(color).name(QColor.HexArgb)
     clave = (nombre, tam, color)
     if clave in _CACHE:
         return _CACHE[clave]
@@ -332,6 +334,16 @@ def _dibujar_extra(p, nombre, e, color):
         p.drawRoundedRect(QRectF(2.5 * e, 4.5 * e, 19 * e, 15 * e), 2.2 * e, 2.2 * e)
         lleno()
         p.drawRoundedRect(QRectF(12 * e, 11.5 * e, 7.5 * e, 6 * e), 1.2 * e, 1.2 * e)
+    elif nombre == "escritorio":
+        # monitor con una nota: la escena de escritorio
+        p.drawRoundedRect(QRectF(2.5 * e, 3.5 * e, 19 * e, 13 * e), 2.2 * e, 2.2 * e)
+        p.drawLine(QPointF(9 * e, 20.5 * e), QPointF(15 * e, 20.5 * e))
+        p.drawLine(QPointF(12 * e, 16.5 * e), QPointF(12 * e, 20.5 * e))
+        p.drawPolyline([QPointF(11 * e, 12.6 * e), QPointF(11 * e, 7 * e), QPointF(15 * e, 6.2 * e),
+                        QPointF(15 * e, 11.6 * e)])
+        lleno()
+        p.drawEllipse(QPointF(9.9 * e, 12.6 * e), 1.4 * e, 1.1 * e)
+        p.drawEllipse(QPointF(13.9 * e, 11.6 * e), 1.4 * e, 1.1 * e)
     elif nombre == "pantalla_completa":
         for (x, y, dx, dy) in ((3, 3, 1, 1), (21, 3, -1, 1), (3, 21, 1, -1), (21, 21, -1, -1)):
             p.drawPolyline([QPointF(x * e, (y + 5 * dy) * e), QPointF(x * e, y * e),

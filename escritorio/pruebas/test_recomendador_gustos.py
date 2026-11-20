@@ -438,7 +438,8 @@ def test_busqueda_con_retraso_de_350_ms(app, pantalla_falsa):
     assert llamadas == []                             # escribiendo seguido: nada todavía
     esperar(app, lambda: len(llamadas) == 1, "una sola búsqueda")
     assert llamadas[0][1] == "karol" and llamadas[0][2] == "artistas"
-    assert llamadas[0][0] - t0 >= 0.35 + 0.2          # 350 ms después de la última tecla
+    # 350 ms después de la última tecla (los QTimer de Qt pueden adelantarse hasta un 5 %)
+    assert llamadas[0][0] - t0 >= 0.35 * 0.95 + 0.2
     esperar(app, lambda: any(c.dato["nombre"].startswith("Karol") for c in d.tarjetas.values()), "resultados")
     _capturar(app, d, "03_busqueda.png")
     d.campo.setText("")

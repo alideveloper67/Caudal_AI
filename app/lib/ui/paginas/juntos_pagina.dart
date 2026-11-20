@@ -10,8 +10,10 @@ import '../../nucleo/juntos.dart';
 import '../../reproduccion/reproductor.dart';
 import '../comunes.dart';
 import '../emojis.dart';
+import '../premium/nombre_color.dart';
 import '../servicios.dart';
 import '../tema.dart';
+import 'fiesta_pagina.dart';
 
 /// "Escuchar juntos": crear una sala, unirse con código o enlace, ver quién
 /// está y mandar reacciones. La sala sigue abierta aunque se cierre esta
@@ -127,6 +129,17 @@ class _JuntosPaginaState extends State<JuntosPagina> {
                 label: const Text('Unirme'),
               ),
             ]),
+          ),
+          const SizedBox(height: 14),
+          _Bloque(
+            icono: Icons.qr_code_2_rounded,
+            titulo: 'Fiesta por QR',
+            texto: 'Tus amigos piden y votan canciones desde su teléfono.',
+            child: FilledButton.tonalIcon(
+              onPressed: () => FiestaPagina.abrir(context),
+              icon: const Icon(Icons.qr_code_rounded),
+              label: const Text('Abrir fiesta'),
+            ),
           ),
           if (_ocupado) const Padding(padding: EdgeInsets.only(top: 20), child: Center(child: CircularProgressIndicator())),
           if (_error != null)
@@ -404,7 +417,7 @@ class _VistaSalaState extends State<_VistaSala> {
         foregroundColor: esAnf ? C.acentoTexto : C.texto,
         child: Text(inicial, style: const TextStyle(fontWeight: FontWeight.w800)),
       ),
-      title: Text(soyYo ? '${m.nombre} (tú)' : m.nombre),
+      title: NombreConColor(soyYo ? '${m.nombre} (tú)' : m.nombre, usuario: m.usuario, esMio: soyYo ? true : null),
       subtitle: m.usuario.isEmpty ? null : Text('@${m.usuario}', style: estiloSecundario),
       trailing: esAnf
           ? Tooltip(message: 'Pone la música', child: Icon(Icons.workspace_premium_rounded, color: C.acento))
@@ -553,6 +566,21 @@ class _ChatSalaState extends State<_ChatSala> {
     return '${d.hour.toString().padLeft(2, '0')}:${d.minute.toString().padLeft(2, '0')}';
   }
 
+  /// El nombre de quien escribió, con su color propio si es donador (el usuario sale de la lista de
+  /// la sala: el mensaje solo trae su id).
+  Widget _nombreEnChat(SalaJuntos sala, MensajeSala m) {
+    final estilo = TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: C.acento);
+    String usuario = '';
+    for (final x in sala.miembros) {
+      if (x.id == m.de) {
+        usuario = x.usuario;
+        break;
+      }
+    }
+    if (usuario.isEmpty) return Text(m.nombre, style: estilo);
+    return NombreConColor(m.nombre, usuario: usuario, estilo: estilo);
+  }
+
   @override
   Widget build(BuildContext context) {
     final sala = widget.sala;
@@ -589,7 +617,7 @@ class _ChatSalaState extends State<_ChatSala> {
                       ),
                       child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
                         if (!mio)
-                          Text(m.nombre, style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: C.acento)),
+                          _nombreEnChat(sala, m),
                         Text(m.texto, style: TextStyle(fontSize: 15.5, height: 1.3, color: mio ? C.acentoTexto : C.texto)),
                         Align(
                           alignment: Alignment.centerRight,

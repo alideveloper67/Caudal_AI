@@ -20,12 +20,14 @@ void main() {
     MascotaApp.i.reiniciar();
   });
 
-  test('el catálogo trae las 42 mascotas y sus hojas existen', () {
+  test('el catálogo trae las 66 mascotas y sus hojas existen', () {
     final c = leerCatalogoMascotas(texto);
-    expect(c.length, 42);
-    expect(c.map((m) => m.clave).toSet().length, 42);
+    expect(c.length, 66);
+    expect(c.map((m) => m.clave).toSet().length, 66);
     expect(c.where((m) => m.arcoiris).map((m) => m.clave), ['nyan']);
     expect(c.map((m) => m.clave), containsAll(['nyan', 'nailong', 'pikachu', 'charmander', 'bulbasaur', 'squirtle', 'kirby', 'gato_negro', 'capibara', 'pochacco', 'caniche', 'zorro_aviador', 'robot', 'dragon', 'ajolote']));
+    // personajes de noviembre
+    expect(c.map((m) => m.clave), containsAll(['messi', 'wos', 'nightwing', 'goku_ultra', 'goku_blue', 'wanda', 'loki', 'jake', 'finn', 'marceline', 'pan_canela', 'rigby', 'steven', 'perla', 'lapislazuli', 'jaspe', 'garnet', 'peridot', 'amatista', 'leon', 'richard', 'gumball', 'darwin']));
     for (final quitada in ['stitch', 'minion', 'pooh', 'mickey', 'bob', 'patrick', 'pusheen', 'rilakkuma', 'toothless']) {
       expect(c.map((m) => m.clave), isNot(contains(quitada)));
     }

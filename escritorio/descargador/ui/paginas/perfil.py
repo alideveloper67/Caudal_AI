@@ -121,8 +121,9 @@ class PaginaPerfil(Pagina):
             fila.addStretch(1)
             cv.addLayout(fila)
         marco, efecto = self._premium_de(p)
+        # con su color de donador, si tiene (el mío sale al instante del gestor premium)
         nombre = nombre_efecto(S.nombre_visible(p), f"color:{C['texto']};font-size:32px;font-weight:900;",
-                               efecto, True, siempre=True)
+                               efecto, True, siempre=True, ctx=self.ctx, usuario=p.get("usuario"))
         cv.addWidget(nombre)
         datos = [f"@{p['usuario']}"]
         if p["creado"] and S.mes_anio(p["creado"]):

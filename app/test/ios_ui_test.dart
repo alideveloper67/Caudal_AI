@@ -37,6 +37,10 @@ class _ReproductorFalso extends ChangeNotifier implements Reproductor {
   @override
   Future<void> dispose() async => super.dispose();
   @override
+  Future<void> aplicarSonido() async {}
+  @override
+  Future<void> fijarVelocidad(double v, {bool guardar = true}) async {}
+  @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);
 }
 
@@ -101,6 +105,8 @@ void main() {
   group('Ajustes', () {
     testWidgets('en iPhone no ofrece guardar en la música del teléfono', (t) async {
       await _montar(t, const AjustesPagina());
+      // la lista es perezosa y las filas nuevas (avisos, copia, despertador) la alargan: hay que bajar hasta ella
+      await t.scrollUntilVisible(find.text('Descargar solo con wifi'), 300, scrollable: find.byType(Scrollable).first);
       expect(find.text('Guardar en la música del teléfono'), findsNothing);
       expect(find.text('Descargar solo con wifi'), findsOneWidget);
       expect(t.takeException(), isNull);
@@ -151,16 +157,28 @@ void main() {
       await t.pumpAndSettle();
     }
 
-    testWidgets('en iPhone no ofrece igualar el volumen y avisa de la distorsión', (t) async {
+    testWidgets('en iPhone avisa de que sin limitador sube menos', (t) async {
       await abrirSonido(t);
-      expect(find.text('Igualar el volumen entre canciones'), findsNothing);
-      expect(find.textContaining('pueden distorsionar'), findsOneWidget);
+      expect(find.text('Volumen máximo'), findsOneWidget);
+      expect(find.textContaining('para no distorsionar'), findsOneWidget);
     }, variant: _ios);
 
-    testWidgets('en Android sigue igual', (t) async {
+    testWidgets('en Android: Volumen máximo encendido en Alto y el avanzado con candado', (t) async {
       await abrirSonido(t);
+      expect(find.text('Volumen máximo'), findsOneWidget);
+      expect(find.text('Alto'), findsOneWidget);
+      expect(find.textContaining('para no distorsionar'), findsNothing);
+      // con Volumen máximo encendido no hace falta el otro interruptor
+      expect(find.text('Igualar el volumen entre canciones'), findsNothing);
+      expect(find.text('Ecualizador avanzado'), findsOneWidget);
+      expect(find.textContaining('Para donadores y fundadores'), findsOneWidget);
+    }, variant: _android);
+
+    testWidgets('al apagar Volumen máximo vuelve el de igualar', (t) async {
+      await abrirSonido(t);
+      await t.tap(find.byType(Switch).first);
+      await t.pumpAndSettle();
       expect(find.text('Igualar el volumen entre canciones'), findsOneWidget);
-      expect(find.textContaining('pueden distorsionar'), findsNothing);
     }, variant: _android);
   });
 

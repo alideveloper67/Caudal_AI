@@ -8,10 +8,13 @@ import 'package:media_kit_video/media_kit_video.dart';
 import '../nucleo/ajustes.dart';
 import '../nucleo/catalogo.dart';
 import '../nucleo/coleccion.dart';
+import '../nucleo/eq_avanzado.dart';
 import '../nucleo/mezcla_dj.dart';
+import '../nucleo/premium_letras.dart';
 import '../nucleo/recomendador.dart';
 import '../nucleo/ritmo.dart';
 import '../nucleo/red.dart';
+import '../nucleo/sonoridad.dart';
 import '../nucleo/streams.dart';
 import '../nucleo/transiciones.dart';
 import '../nucleo/vida_app.dart';
@@ -20,6 +23,8 @@ import 'frenos.dart';
 import 'jugador.dart';
 import 'pausa_suave.dart';
 import 'retomar.dart';
+import 'cast.dart';
+import 'salida_audio.dart';
 
 const frecuenciasEq = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
 const presetsEq = <String, List<int>>{
@@ -38,15 +43,10 @@ const presetsEq = <String, List<int>>{
   'Noche (suave)': [-3, -2, -1, 0, 1, 1, 0, -1, -2, -3],
   'Altavoz pequeño': [-6, -4, 0, 3, 4, 3, 2, 1, 0, -2],
 };
-const nivelesSuperVolumen = {1: -11, 2: -9, 3: -7, 4: -5};
-const nombresSuperVolumen = {0: 'Apagado', 1: 'Fuerte', 2: 'Muy fuerte', 3: 'Fiesta', 4: 'Máximo'};
 const _nombresSalto = {
   'music_offtopic': 'parte sin música', 'sponsor': 'patrocinio', 'selfpromo': 'autopromoción',
   'interaction': 'recordatorio de suscripción',
 };
-
-/// Subidas en dB del super volumen en iPhone, donde no hay limitador (ver [Reproductor.sonidoLimitado]).
-const _superVolumenIos = {1: 2.0, 2: 4.0, 3: 6.0, 4: 8.0};
 
 /// El libmpv de iPhone (media_kit_libs_ios_video 1.1.4 = libmpv-darwin-build
 /// v0.6.0, mpv 0.36) trae un ffmpeg minimo: de los filtros de sonido solo
@@ -96,7 +96,7 @@ class _Motor {
       'cache-pause-wait': '1',
       'ytdl': 'no',
       'audio-buffer': '0.3',
-      // en iPhone el ecualizador y el super volumen van por el volumen de mpv
+      // donde no hay limitador (iPhone) la subida de Volumen maximo va por el volumen de mpv
       if (_filtrosMinimos) 'volume-max': '200',
     };
     for (final e in opciones.entries) {
@@ -104,7 +104,29 @@ class _Motor {
         await player.setProperty(e.key, e.value);
       } catch (_) {}
     }
+    // Android: este motor suena en su propia sesion de audio, que lleva el limitador del
+    // sistema (Sonido.kt). Hace falta la salida audiotrack de mpv (media_kit pone opensles).
+    final s = await SalidaAudio.nuevaSesion();
+    if (s != null) {
+      try {
+        await player.setProperty('audiotrack-session-id', '$s');
+        await player.setProperty('ao', 'audiotrack,opensles');
+        sesion = s;
+      } catch (_) {}
+    }
   }
+
+  /// Sesion de audio de Android con limitador (null: no hay, p. ej. en iPhone).
+  int? sesion;
+
+  /// dB que lleva la cancion de este motor (Volumen maximo + preamplificador + margen del EQ).
+  double gananciaDb = 0;
+
+  /// Lo que se multiplica al volumen de mpv cuando la ganancia no la pone el sistema.
+  double factorMpv = 1;
+
+  /// El volumen de la app por la ganancia de la cancion que suena en este motor.
+  Future<void> fijarVolumen(double v) => player.setVolume(v * factorMpv);
 
   Fuente? fuente;
 
@@ -124,7 +146,7 @@ class _Motor {
       double volumen = 100, double velocidad = 1, bool video = true}) async {
     fuente = f;
     await _ajustarLectura(video || f.alto > 0 || f.audioUrl != null);
-    await player.setVolume(volumen);
+    await player.setVolume(volumen * factorMpv);
     await player.setRate(velocidad);
     await player.open(f, inicio: inicio > const Duration(seconds: 1) ? inicio : null, play: !pausado);
   }
@@ -160,6 +182,15 @@ class Reproductor extends ChangeNotifier {
     velocidad = ajustes.decimal('velocidad');
     aleatorio = ajustes.sino('aleatorio');
     repetir = ajustes.texto('repetir');
+    cast; // arranca Google Cast ya (y retoma una sesión con la tele que quedó abierta)
+    // lo fuerte que suena cada video ya visto, para cuando vuelva (tambien desde el disco)
+    RegistroSonoridad.i = RegistroSonoridad(
+      leer: () => coleccion.estado('sonoridad'),
+      escribir: (m) => coleccion.guardarEstado('sonoridad', m),
+    );
+    unawaited(RegistroSonoridad.i.cargar().catchError((_) {}));
+    // el ajuste del ecualizador avanzado de cada salida entra solo al cambiar de salida
+    unawaited(SalidaAudio.escuchar(_alCambiarSalida).catchError((_) {}));
     aplicarSonido();
   }
 
@@ -280,23 +311,83 @@ class Reproductor extends ChangeNotifier {
 
   // ------------------------------------------------------------ sonido
 
-  /// En iPhone no hay limitador ni normalizador: el super volumen sube sin
-  /// limitar y "normalizar" no hace nada.
-  bool get sonidoLimitado => _filtrosMinimos;
+  /// ¿Falta un limitador de verdad? (iPhone, o un Android sin efectos del sistema): ahí
+  /// «Volumen máximo» sube poco para no recortar. En la PC y en Android 7+ lo hay.
+  bool get sonidoLimitado => _filtrosMinimos && _a.sesion == null && _b.sesion == null;
 
-  /// Multiplicador del volumen que piden el ecualizador (margen) y el super
-  /// volumen en iPhone. En Android eso lo hacen los filtros y vale 1.
-  double get _factorSalida {
-    if (!_filtrosMinimos) return 1;
-    var db = 0.0;
-    if (ajustes.sino('ecualizador')) {
-      final maximo = ajustes.bandasEq.take(10).fold<int>(0, max);
-      if (maximo > 0) db -= maximo * 0.6;
+  /// ¿Suena el ecualizador avanzado? (solo con beneficios de donador)
+  bool get eqAvanzadoActivo => ajustes.sino('eq_avanzado') && esPremiumLetras();
+
+  /// (dB antes del ecualizador, filtros del ecualizador) del ecualizador que suena.
+  (double, List<String>) _ecualizador() {
+    if (eqAvanzadoActivo) {
+      final e = ajustes.eqAvanzado;
+      return (gananciaPrevia(e.bandas, e.preamp), partesFiltroAvanzado(e.bandas));
     }
-    db += _superVolumenIos[ajustes.entero('super_volumen')] ?? 0;
-    // el volumen de mpv es cubico: (v/100)^3 es la ganancia
-    return pow(10, db / 60).toDouble();
+    if (!ajustes.sino('ecualizador')) return (0.0, const <String>[]);
+    final bandas = ajustes.bandasEq;
+    final partes = <String>[
+      for (var i = 0; i < min(10, bandas.length); i++)
+        if (bandas[i] != 0) 'equalizer=f=${frecuenciasEq[i]}:t=o:w=1:g=${bandas[i]}',
+    ];
+    final maximo = bandas.take(10).fold<int>(0, max);
+    // margen para que al subir bandas no sature
+    return (maximo > 0 ? -maximo * 0.6 : 0.0, partes);
   }
+
+  /// dB que lleva una cancion: el margen o preamplificador del ecualizador y la ganancia de
+  /// «Volumen maximo» segun su sonoridad. [conLimitador]: si detras hay un limitador.
+  double gananciaPara(Fuente f, {bool conLimitador = true}) {
+    final previa = _ecualizador().$1;
+    final nivel = ajustes.nivelVolumen;
+    final lufs = f.lufs ?? RegistroSonoridad.i.lufs(f.videoId);
+    final g = gananciaDb(nivel, lufs: lufs, extra: previa, conLimitador: conLimitador);
+    return ((previa + g) * 100).roundToDouble() / 100;
+  }
+
+  /// Le pone a un motor la ganancia de la cancion que va a sonar en el (antes de abrirla).
+  Future<void> _prepararGanancia(_Motor m, Fuente f) async {
+    if (kIsWeb) return; // en la web suena el reproductor de YouTube, con su propio volumen
+    if (!_filtrosMinimos) {
+      // PC: ganancia y limitador van en la cadena de filtros de ese motor
+      m.gananciaDb = gananciaPara(f);
+      m.factorMpv = 1;
+      await _ponerAf(m, '');
+      return;
+    }
+    final s = m.sesion;
+    if (s != null) {
+      final total = gananciaPara(f);
+      final quien = await SalidaAudio.ganancia(s, total);
+      if (quien == 'dp') {
+        m.gananciaDb = total;
+        m.factorMpv = 1;
+        return;
+      }
+      if (quien == 'realce') {
+        m.gananciaDb = total;
+        m.factorMpv = factorVolumenMpv(min(0.0, total));
+        return;
+      }
+    }
+    // sin limitador (iPhone): por el volumen de mpv y subiendo poco
+    final total = gananciaPara(f, conLimitador: false);
+    m.gananciaDb = total;
+    m.factorMpv = factorVolumenMpv(total);
+  }
+
+  /// Al cambiar la salida (audifonos, parlante, bluetooth): su ajuste del ecualizador avanzado.
+  Future<void> _alCambiarSalida(String? antes, String ahora) async {
+    final e = ajustes.eqAvanzado;
+    final puesto = e.alCambiarSalida(premium: esPremiumLetras(), antes: antes, ahora: ahora);
+    if (puesto == null) return;
+    await ajustes.ponerEqAvanzado(e);
+    await aplicarSonido();
+    _aviso('Suena por ${(nombresSalida[ahora] ?? ahora).toLowerCase()}: ecualizador «$puesto»');
+  }
+
+  /// Multiplicador del volumen que ya no hace falta: la ganancia va por motor ([_Motor.factorMpv]).
+  double get _factorSalida => 1;
 
   /// Volumen que se le da al motor (el de la app por el factor de iPhone).
   double get _salida => volumen * _factorSalida * _factorDormir * _factorEstudio * _suave.factor;
@@ -306,12 +397,22 @@ class Reproductor extends ChangeNotifier {
   late final PausaSuave _suave = PausaSuave(
     aplicar: () async {
       if (_fundido == null && _traspaso == null && _activo.fuente != null) {
-        await _activo.player.setVolume(_salida);
+        await _activo.fijarVolumen(_salida);
       }
     },
     pausarMotor: () => _activo.player.pause(),
     reanudarMotor: () => _activo.player.play(),
   );
+
+  /// Enviar a Chromecast / altavoces con Google Cast (ver cast.dart).
+  late final ControlCast cast = ControlCast(AnfitrionCast(
+    pista: () => actual, fuente: () => fuente, posicion: posicion, duracion: duracion,
+    sonandoLocal: () => estado == EstadoRepro.sonando || estado == EstadoRepro.cargando,
+    fijarEstado: (e) => _fijarEstado(EstadoRepro.values.byName(e)),
+    callarLocal: () async { _suave.cancelar(); _traspaso = null; _cortarFundido(); await _a.detener(); await _b.detener(); },
+    volverLocal: (p, sonar) async { _fijarEstado(EstadoRepro.parado); posicion.value = p; if (sonar && actual != null) await _cargar(actual!, inicio: p, mismo: true); },
+    siguiente: () async { if (_apagarAlFinal) { _apagarAlFinal = false; return detener(); } await siguiente(automatico: true); },
+    aviso: _aviso));
 
   /// Donde ibas en las canciones largas (sets, mixes).
   late final MemoriaRetomar _retomar = MemoriaRetomar(
@@ -348,34 +449,28 @@ class Reproductor extends ChangeNotifier {
     return _ios && (c == 'auto' || c == 'sin_av1') ? 'compatible' : c;
   }
 
-  String cadenaFiltros() {
+  /// Los filtros de un motor. En el telefono el libmpv solo trae `equalizer`: el ecualizador
+  /// (normal o avanzado) y nada mas; la ganancia va por el sistema o por el volumen. En la PC:
+  /// ganancia fija de la cancion ([ganancia]) + ecualizador + limitador de picos verdaderos.
+  String cadenaFiltros({double ganancia = 0}) {
     if (_sinFiltros) return '';
-    final partes = <String>[];
+    final (previa, eq) = _ecualizador();
     if (_filtrosMinimos) {
-      if (!ajustes.sino('ecualizador')) return '';
-      final bandas = ajustes.bandasEq;
-      for (var i = 0; i < min(10, bandas.length); i++) {
-        if (bandas[i] != 0) partes.add('equalizer=f=${frecuenciasEq[i]}:t=o:w=1:g=${bandas[i]}');
-      }
-      return partes.isEmpty ? '' : 'lavfi=[${partes.join(',')}]';
+      return eq.isEmpty ? '' : 'lavfi=[${eq.join(',')}]';
     }
-    if (ajustes.sino('ecualizador')) {
-      final bandas = ajustes.bandasEq;
-      for (var i = 0; i < min(10, bandas.length); i++) {
-        if (bandas[i] != 0) {
-          partes.add('equalizer=f=${frecuenciasEq[i]}:t=o:w=1:g=${bandas[i]}');
-        }
-      }
-      final maximo = bandas.fold<int>(0, max);
-      if (maximo > 0) partes.insert(0, 'volume=-${(maximo * 0.6).toStringAsFixed(1)}dB');
-    }
+    final partes = <String>[...eq];
     if (bajarVoz) partes.add('stereotools=mlev=0.1');
-    final nivel = ajustes.entero('super_volumen');
-    if (nivel > 0) {
-      partes.add('loudnorm=I=${nivelesSuperVolumen[nivel] ?? -9}:TP=-1.0:LRA=7');
-      partes.add('alimiter=limit=0.96:attack=3:release=60:level=disabled');
-    } else if (ajustes.sino('normalizar')) {
-      partes.add('loudnorm=I=-14:TP=-1.5:LRA=11');
+    // sin motor (pruebas, o antes de la primera cancion) va solo el margen del ecualizador
+    final total = ganancia != 0 ? ganancia : previa;
+    if (ajustes.nivelVolumen != null || total > 0) {
+      partes.addAll(partesGananciaYLimitador(total));
+      if (total.abs() >= 0.05) {
+        // la ganancia va delante del ecualizador (como un preamplificador)
+        final g = partes.removeAt(eq.length + (bajarVoz ? 1 : 0));
+        partes.insert(0, g);
+      }
+    } else if (total.abs() >= 0.05) {
+      partes.insert(0, 'volume=${total.toStringAsFixed(2)}dB');
     }
     final base = partes.isEmpty ? '' : 'lavfi=[${partes.join(',')}]';
     if (!medirNivel || !_dj || !_filtroNivel) return base;
@@ -389,15 +484,19 @@ class Reproductor extends ChangeNotifier {
   bool get medirNivel => !_filtrosMinimos;
 
   Future<void> aplicarSonido() async {
-    var af = cadenaFiltros();
     for (final m in [_a, _b]) {
+      // la ganancia de lo que ya suena en cada motor, con los ajustes nuevos
+      final f = m.fuente;
+      if (f != null && _filtrosMinimos) await _prepararGanancia(m, f);
+      if (f != null && !_filtrosMinimos && !kIsWeb) m.gananciaDb = gananciaPara(f);
+      var af = sumarFiltro(cadenaFiltros(ganancia: m.gananciaDb), _eq3[m] ?? '');
       try {
         await m.player.setProperty('af', af);
       } catch (_) {
         if (af.contains('@caudal:')) {
           // sin el medidor de nivel: se queda el resto y el DJ tira de SponsorBlock
           _filtroNivel = false;
-          af = cadenaFiltros();
+          af = sumarFiltro(cadenaFiltros(ganancia: m.gananciaDb), _eq3[m] ?? '');
           try {
             await m.player.setProperty('af', af);
           } catch (_) {}
@@ -406,14 +505,14 @@ class Reproductor extends ChangeNotifier {
       }
       await m.player.setRate(velocidad);
     }
-    if (_filtrosMinimos && _fundido == null && _traspaso == null && _activo.fuente != null) {
-      await _activo.player.setVolume(_salida);
+    if (_fundido == null && _traspaso == null && _activo.fuente != null) {
+      await _activo.fijarVolumen(_salida);
     }
   }
 
   Future<void> fijarVolumen(double v) async {
     volumen = v.clamp(0, 100);
-    if (_fundido == null && _traspaso == null) await _activo.player.setVolume(_salida);
+    if (_fundido == null && _traspaso == null) await _activo.fijarVolumen(_salida);
     notifyListeners();
   }
 
@@ -504,7 +603,7 @@ class Reproductor extends ChangeNotifier {
     _factorEstudio = f.clamp(0.0, 1.0);
     if (_fundido == null && _traspaso == null && _activo.fuente != null) {
       try {
-        await _activo.player.setVolume(_salida);
+        await _activo.fijarVolumen(_salida);
       } catch (_) {}
     }
     notifyListeners();
@@ -778,6 +877,7 @@ class Reproductor extends ChangeNotifier {
       await _cargar(actual!, inicio: posicion.value);
       return;
     }
+    if (cast.activo) return estado == EstadoRepro.pausa ? reanudar() : pausar();
     if (_activo.player.state.playing) {
       await pausar();
     } else {
@@ -789,11 +889,12 @@ class Reproductor extends ChangeNotifier {
   bool get _puedeSuavizar => _fundido == null && _traspaso == null && _activo.fuente != null;
 
   Future<void> pausar() async {
+    if (cast.activo) return cast.pausar();
     if (!_puedeSuavizar || !_activo.player.state.playing) {
       _suave.cancelar();
       await _activo.player.pause();
       if (_fundido == null && _traspaso == null && _activo.fuente != null) {
-        await _activo.player.setVolume(_salida);
+        await _activo.fijarVolumen(_salida);
       }
       return;
     }
@@ -804,6 +905,8 @@ class Reproductor extends ChangeNotifier {
     if (actual == null) return;
     if (estado == EstadoRepro.parado) {
       await _cargar(actual!, inicio: posicion.value);
+    } else if (cast.activo) {
+      await cast.reanudar();
     } else if (!_puedeSuavizar) {
       _suave.cancelar();
       await _activo.player.play();
@@ -813,6 +916,7 @@ class Reproductor extends ChangeNotifier {
   }
 
   Future<void> detener() async {
+    if (cast.activo) unawaited(cast.parar());
     _suave.cancelar();
     _traspaso = null;
     _cortarFundido();
@@ -823,6 +927,10 @@ class Reproductor extends ChangeNotifier {
   }
 
   Future<void> buscar(Duration p) async {
+    if (cast.activo) {
+      posicion.value = p;
+      return cast.irA(p);
+    }
     if (_traspaso != null) await _terminarTraspaso(true);
     await _activo.player.seek(p);
     posicion.value = p;
@@ -1047,7 +1155,7 @@ class Reproductor extends ChangeNotifier {
     }
     Fuente f;
     if (local != null) {
-      f = Fuente.archivo(local);
+      f = Fuente.archivo(local, videoId: '${pista['video_id'] ?? ''}');
     } else {
       final original = '${pista['video_id'] ?? ''}';
       // si YouTube dijo que ese video no se puede reproducir, suena otra subida de la misma canción
@@ -1088,6 +1196,13 @@ class Reproductor extends ChangeNotifier {
       }
     }
     if (gen != _gen) return;
+    // conectado a una tele: la canción suena allí y no en el teléfono
+    if (cast.activo) {
+      _traspaso = null;
+      fuente = f;
+      notifyListeners();
+      return cast.enviar(pista, f, inicio: inicio, pausado: pausado);
+    }
     await _arrancar(gen, f, inicio, pausado);
   }
 
@@ -1122,6 +1237,7 @@ class Reproductor extends ChangeNotifier {
       t['objetivo'] = objetivo;
       t['listo'] = false;
       t['desde'] = DateTime.now();
+      await _prepararGanancia(entrante, f);
       await entrante.abrir(f, inicio: objetivo, pausado: true, volumen: 0, velocidad: velocidad,
           video: modo == 'video');
     } else {
@@ -1133,6 +1249,7 @@ class Reproductor extends ChangeNotifier {
         _eq3[_activo] = eq;
         await _ponerAf(_activo, '');
       }
+      await _prepararGanancia(_activo, f);
       await _activo.abrir(f, inicio: inicio, pausado: pausado, volumen: _salida, velocidad: velocidad,
           video: modo == 'video');
     }
@@ -1146,7 +1263,7 @@ class Reproductor extends ChangeNotifier {
     _traspaso = null;
     final saliente = t['saliente'] as _Motor;
     if (completar) {
-      await _activo.player.setVolume(_salida);
+      await _activo.fijarVolumen(_salida);
       await _activo.player.play();
       await _apagar(saliente);
       final listoEn = t['listoEn'] as DateTime?;
@@ -1492,7 +1609,8 @@ class Reproductor extends ChangeNotifier {
   /// Pone en un motor el sonido de siempre mas, si se pide, un recorte de graves.
   Future<void> _ponerAf(_Motor m, String graves) async {
     try {
-      await m.player.setProperty('af', sumarFiltro(sumarFiltro(cadenaFiltros(), _eq3[m] ?? ''), graves));
+      await m.player.setProperty(
+          'af', sumarFiltro(sumarFiltro(cadenaFiltros(ganancia: m.gananciaDb), _eq3[m] ?? ''), graves));
     } catch (_) {}
   }
 
@@ -1505,7 +1623,7 @@ class Reproductor extends ChangeNotifier {
         ? (sig['archivo'] as String? ?? coleccion.copiaLocal(sig['video_id'] as String?)?['archivo'] as String?)
         : null;
     if (local != null) {
-      f = Fuente.archivo(local);
+      f = Fuente.archivo(local, videoId: '${sig['video_id'] ?? ''}');
     } else if ('${sig['video_id'] ?? ''}'.isNotEmpty) {
       f = streams.enCache('${sig['video_id']}', video: false, calidad: ajustes.texto('calidad_audio'),
           codec: _codecVideo);
@@ -1552,6 +1670,8 @@ class Reproductor extends ChangeNotifier {
       'nivS': 0, 'nivE': dbGravesCortados};
     _silencioEntrada.reiniciar();
     _silencioFinal.reiniciar();
+    // su ganancia (Volumen maximo) antes que sus filtros de entrada, que la usan
+    await _prepararGanancia(entrante, f);
     // la que entra empieza ya recortada (sin graves o sin agudos) y con su ecualizador
     _eq3[entrante] = eqEntra;
     if (usaAf) {
@@ -1600,8 +1720,8 @@ class Reproductor extends ChangeNotifier {
     }
     final saliente = f['saliente'] as _Motor;
     final curva = f['curva'] as CurvaFader;
-    entrante.player.setVolume(_salida * ganancia(curva, avance, entrante: true));
-    saliente.player.setVolume(_salida * ganancia(curva, avance, entrante: false));
+    entrante.fijarVolumen(_salida * ganancia(curva, avance, entrante: true));
+    saliente.fijarVolumen(_salida * ganancia(curva, avance, entrante: false));
     if (f['usaAf'] == true && !_sinFiltros) {
       // graves o barrido de filtro: cada motor, en saltos de 6 dB (no a cada fotograma)
       final graves = f['tipo'] == TipoTransicion.graves;
@@ -1621,7 +1741,7 @@ class Reproductor extends ChangeNotifier {
       _apagar(saliente).whenComplete(() => _ponerAf(saliente, ''));
       _fundido = null;
       _pasosFundido?.cancel();
-      _activo.player.setVolume(_salida);
+      _activo.fijarVolumen(_salida);
       final razon = f['razon'] as double;
       if (razon != 1) {
         // el tempo vuelve poco a poco al suyo (en 5 pasos), sin salto
@@ -1652,7 +1772,7 @@ class Reproductor extends ChangeNotifier {
     _pasosFundido?.cancel();
     if (f['usaAf'] == true) _ponerAf(f['entrante'] as _Motor, '');
     if ((f['razon'] as double) != 1) _activo.player.setRate(velocidad);
-    _activo.player.setVolume(_salida);
+    _activo.fijarVolumen(_salida);
   }
 
   // ------------------------------------------------------------ temporizador
@@ -1699,7 +1819,7 @@ class Reproductor extends ChangeNotifier {
     if (factor == _factorDormir) return;
     _factorDormir = factor;
     if (_fundido == null && _traspaso == null && _activo.fuente != null) {
-      _activo.player.setVolume(_salida);
+      _activo.fijarVolumen(_salida);
     }
   }
 

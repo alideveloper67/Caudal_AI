@@ -1002,6 +1002,51 @@ def letras(pista):
     return {"sincronizada": False, "lineas": [], "texto": "", "fuente": ""}
 
 
+def letras_alternativas(pista, limite=8):
+    """Otras letras de LRCLIB para la misma canción (para el botón «Otra letra»).
+
+    Mismo formato que `letras`, más "etiqueta" para decir de cuál se trata. Primero las
+    sincronizadas y las de duración más parecida; sin repetir textos iguales."""
+    titulo = re.sub(r"\s*[\(\[](official|video|audio|lyric|visualizer|letra)[^\)\]]*[\)\]]",
+                    "", pista.get("titulo") or "", flags=re.I).strip()
+    artista = (pista.get("artistas") or [{}])[0].get("nombre") if pista.get("artistas") else ""
+    artista = artista or pista.get("artista") or ""
+    if not titulo:
+        return []
+    dur = int(pista.get("duracion") or 0)
+    cab = {"User-Agent": "Caudal (reproductor de escritorio)"}
+    try:
+        r = requests.get("https://lrclib.net/api/search", params={"q": f"{artista} {titulo}".strip()},
+                         headers=cab, timeout=10)
+        candidatos = r.json() if r.status_code == 200 else []
+    except (requests.RequestException, ValueError):
+        return []
+    if not isinstance(candidatos, list):
+        return []
+    candidatos.sort(key=lambda c: (not c.get("syncedLyrics"),
+                                   abs((c.get("duration") or 0) - dur) if dur else 0))
+    salida, vistos = [], set()
+    for c in candidatos:
+        texto = (c.get("syncedLyrics") or c.get("plainLyrics") or "").strip()
+        if not texto or texto in vistos:
+            continue
+        vistos.add(texto)
+        seg = int(c.get("duration") or 0)
+        etiqueta = f"{c.get('artistName') or ''} — {c.get('trackName') or ''}".strip(" —")
+        if seg:
+            etiqueta += f" ({seg // 60}:{seg % 60:02d})"
+        if c.get("syncedLyrics"):
+            salida.append({"sincronizada": True, "lineas": _lrc_a_lineas(c["syncedLyrics"]),
+                           "texto": c.get("plainLyrics") or "", "fuente": "LRCLIB",
+                           "etiqueta": etiqueta})
+        else:
+            salida.append({"sincronizada": False, "lineas": [], "texto": c["plainLyrics"],
+                           "fuente": "LRCLIB", "etiqueta": etiqueta + " · sin sincronizar"})
+        if len(salida) >= limite:
+            break
+    return salida
+
+
 # ---------------------------------------------------------------- SponsorBlock
 
 def segmentos_a_saltar(video_id, categorias):
@@ -1047,11 +1092,13 @@ def _opciones_ytdlp(ajustes=None):
 
 
 def selector_audio(calidad):
+    # la pista «DRC» de YouTube (volumen estable, ya comprimida) suena peor: solo si no hay otra
+    sin_drc = "[format_id!*=drc]"
     if calidad == "ahorro":
-        return "bestaudio[abr<=70]/worstaudio/bestaudio/best"
+        return f"bestaudio[abr<=70]{sin_drc}/bestaudio[abr<=70]/worstaudio/bestaudio/best"
     if calidad == "normal":
-        return "bestaudio[abr<=135]/bestaudio/best"
-    return "bestaudio/best"
+        return f"bestaudio[abr<=135]{sin_drc}/bestaudio[abr<=135]/bestaudio/best"
+    return f"bestaudio{sin_drc}/bestaudio/best"
 
 
 def selector_video(alto, codec="auto"):

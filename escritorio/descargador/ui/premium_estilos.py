@@ -18,7 +18,7 @@ from PySide6.QtGui import (QBrush, QColor, QConicalGradient, QFontMetricsF, QGra
                            QPainter, QPainterPath, QPen)
 from PySide6.QtWidgets import QApplication, QLabel
 
-from ..premium_datos import NINGUNO, efecto_valido, marco_valido
+from ..premium_datos import NINGUNO, color_valido, efecto_valido, marco_valido
 from .estilos import C
 
 # marco -> (colores del degradado cónico, vueltas por segundo, ¿lleva un destello fino por dentro?)
@@ -148,8 +148,9 @@ COLOR_NEON = "#7DF9FF"
 COLOR_NEON_HALO = "#22D3EE"
 
 
-def _gradiente_texto(efecto, x0, ancho, t, animar):
-    """El degradado con el que se pinta el nombre. `t` mueve el destello o el arcoíris."""
+def _gradiente_texto(efecto, x0, ancho, t, animar, color=None):
+    """El degradado con el que se pinta el nombre. `t` mueve el destello o el arcoíris. Con `color` (el color
+    del nombre de un donador) el brillo pasa sobre ese color en vez del de siempre."""
     ancho = max(1.0, ancho)
     if efecto == "degradado":
         g = QLinearGradient(x0, 0, x0 + ancho, 0)
@@ -166,7 +167,7 @@ def _gradiente_texto(efecto, x0, ancho, t, animar):
             g.setColorAt(i / (len(COLORES_ARCOIRIS) - 1), QColor(c))
         return g
     # brillo: el color normal con una franja clara que lo recorre
-    base = QColor(C["texto"])
+    base = QColor(color or C["texto"])
     g = QLinearGradient(x0, 0, x0 + ancho, 0)
     g.setSpread(QGradient.RepeatSpread)
     desfase = ((t * 0.35) % 1.6) - 0.3 if animar else 0.35
@@ -182,14 +183,44 @@ def _gradiente_texto(efecto, x0, ancho, t, animar):
 
 
 class NombreEfecto(QLabel):
-    """Un nombre con efecto (brillo, degradado, arcoíris o neón). Con «ninguno» es un QLabel normal."""
+    """Un nombre con efecto (brillo, degradado, arcoíris o neón). Con «ninguno» es un QLabel normal.
 
-    def __init__(self, texto="", efecto=NINGUNO, estilo="", ajustar=False, siempre=False, padre=None):
+    `color` es el color del nombre de un donador ('#RRGGBB'): sin efecto pinta el texto de ese color y con
+    «brillo» el destello pasa sobre él (los demás efectos ya tienen sus colores). Con `ctx` y `usuario` la
+    etiqueta pregunta ella sola el color de esa persona y se repinta cuando llega (colores_nombre.py)."""
+
+    def __init__(self, texto="", efecto=NINGUNO, estilo="", ajustar=False, siempre=False, padre=None,
+                 color=None, ctx=None, usuario=None):
         super().__init__(texto, padre)
         self.efecto = efecto_valido(efecto)
         self.siempre = siempre
+        self._estilo = estilo
+        self.color = color_valido(color)
+        self.usuario = str(usuario or "").strip().lstrip("@").lower() or None
+        self._colores = None
         self.setWordWrap(ajustar)
-        self.setStyleSheet("background:transparent;" + estilo)
+        self._poner_estilo()
+        if ctx is not None and self.usuario:
+            from .. import colores_nombre
+            self._colores = colores_nombre.gestor(ctx)
+            self._colores.cambiado.connect(self._al_cambiar_colores)
+            self._al_cambiar_colores()
+
+    def _poner_estilo(self):
+        extra = f"color:{self.color};" if self.color else ""
+        self.setStyleSheet("background:transparent;" + self._estilo + extra)
+
+    def set_color(self, color):
+        color = color_valido(color)
+        if color == self.color:
+            return
+        self.color = color
+        self._poner_estilo()
+        self.update()
+
+    def _al_cambiar_colores(self):
+        if self._colores is not None and self.usuario:
+            self.set_color(self._colores.color_de(self.usuario))
 
     def set_efecto(self, efecto):
         efecto = efecto_valido(efecto)
@@ -232,7 +263,7 @@ class NombreEfecto(QLabel):
         t = reloj().t
         if self.wordWrap():
             ancho = r.width()
-            p.setPen(QPen(QBrush(_gradiente_texto(self.efecto, r.left(), ancho, t, animar)), 1))
+            p.setPen(QPen(QBrush(_gradiente_texto(self.efecto, r.left(), ancho, t, animar, self.color)), 1))
             p.drawText(r, int(self.alignment()) | Qt.TextWordWrap, texto)
             return
         corto = fm.elidedText(texto, Qt.ElideRight, r.width())
@@ -253,13 +284,17 @@ class NombreEfecto(QLabel):
                 p.strokePath(ruta, QPen(halo, grosor, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
             p.fillPath(ruta, QColor(COLOR_NEON))
             return
-        p.setPen(QPen(QBrush(_gradiente_texto(self.efecto, x, ancho_texto, t, animar)), 1))
+        p.setPen(QPen(QBrush(_gradiente_texto(self.efecto, x, ancho_texto, t, animar, self.color)), 1))
         p.drawText(QPointF(x, y), corto)
 
 
-def nombre_efecto(texto, estilo="", efecto=NINGUNO, ajustar=True, siempre=False):
-    """Una etiqueta de nombre: la de siempre sin efecto, o la animada con él. Mismo estilo CSS en ambas."""
+def nombre_efecto(texto, estilo="", efecto=NINGUNO, ajustar=True, siempre=False, ctx=None, usuario=None,
+                  color=None):
+    """Una etiqueta de nombre: la de siempre sin efecto, o la animada con él. Mismo estilo CSS en ambas.
+    Con `ctx` y `usuario` (o un `color`) lleva además el color del nombre de esa persona si es donadora."""
     efecto = efecto_valido(efecto)
+    if (ctx is not None and usuario) or color_valido(color):
+        return NombreEfecto(texto, efecto, estilo, ajustar, siempre, color=color, ctx=ctx, usuario=usuario)
     if efecto == NINGUNO:
         et = QLabel(texto)
         et.setWordWrap(ajustar)

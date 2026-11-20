@@ -5,6 +5,8 @@ import 'package:http/http.dart' as http;
 import 'package:http_parser/http_parser.dart';
 import 'package:youtube_explode_dart/youtube_explode_dart.dart';
 
+import 'sonoridad.dart';
+
 /// Pide a YouTube las pistas de un video haciéndose pasar por la app de
 /// YouTube de las gafas de Apple (cliente "VISIONOS").
 ///
@@ -90,7 +92,10 @@ class Innertube {
     for (var vuelta = 0; vuelta < 2; vuelta++) {
       try {
         final datos = await _player(videoId, await _visitorData(nuevo: vuelta > 0));
-        return armarManifiesto(VideoId(videoId), datos);
+        final m = armarManifiesto(VideoId(videoId), datos);
+        // lo fuerte que suena (para «Volumen máximo»): YouTube lo da gratis en la respuesta
+        RegistroSonoridad.i.recordar(videoId, lufsDe(datos));
+        return m;
       } catch (e) {
         fallo = e;
       }
@@ -138,10 +143,37 @@ class Innertube {
     return j;
   }
 
+  /// Sonoridad integrada (LUFS) de la canción según YouTube (`loudnessDb`), o null.
+  static double? lufsDe(Map<String, dynamic> datos) {
+    final general = ((datos['playerConfig'] as Map?)?['audioConfig'] as Map?)?['loudnessDb'];
+    if (general is num) return lufsDeYoutube(general);
+    // si no viene en general, el de la pista de audio original (no la «DRC»)
+    final formatos = (datos['streamingData'] as Map?)?['adaptiveFormats'];
+    if (formatos is List) {
+      for (final f in formatos.whereType<Map>()) {
+        if (f['isDrc'] == true) continue;
+        final l = f['loudnessDb'];
+        if (l is num && '${f['mimeType'] ?? ''}'.startsWith('audio/')) return lufsDeYoutube(l);
+      }
+    }
+    return null;
+  }
+
+  /// ¿Es la pista «DRC» (volumen estable) de YouTube? Viene ya comprimida: suena peor.
+  static bool esDrc(Map f) {
+    if (f['isDrc'] == true) return true;
+    final x = f['xtags'];
+    return x is String && x.contains('drc');
+  }
+
   /// Convierte la respuesta de YouTube en un [StreamManifest] (separado para probarlo).
   static StreamManifest armarManifiesto(VideoId id, Map<String, dynamic> datos) {
     final sd = (datos['streamingData'] as Map?) ?? const {};
     final pistas = <StreamInfo>[];
+    // la pista DRC solo si no hay otra de sonido
+    final adaptativos = sd['adaptiveFormats'];
+    final hayNormal = adaptativos is List &&
+        adaptativos.whereType<Map>().any((f) => '${f['mimeType'] ?? ''}'.startsWith('audio/') && !esDrc(f));
     void leer(Object? lista, {required bool adaptativo}) {
       if (lista is! List) return;
       for (final f in lista.whereType<Map>()) {
@@ -170,6 +202,7 @@ class Innertube {
         if (tipo.type == 'audio') {
           // en videos doblados solo la pista original
           if (pista is Map && pista['audioIsDefault'] == false) continue;
+          if (hayNormal && esDrc(f)) continue;
           pistas.add(AudioOnlyStreamInfo(id, itag, uri, contenedor, FileSize(tamano), tasa,
               codecs.first, '${f['audioQuality'] ?? f['quality'] ?? ''}', const [], tipo, null));
           continue;

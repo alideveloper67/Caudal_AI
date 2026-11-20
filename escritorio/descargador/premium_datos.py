@@ -118,3 +118,91 @@ def limpiar_codigo(texto):
 
 def codigo_completo(texto):
     return len(limpiar_codigo(texto).replace("-", "")) == 8
+
+
+# ================================================================ más para donadores
+# Color del nombre, pared de agradecimiento, mascota propia y la letra con efectos. Las claves son las
+# mismas que usa la app del teléfono y la base (supabase/donadores_extra.sql).
+
+# la paleta del color del nombre (en este orden en las dos apps); además se puede elegir uno propio
+PALETA_NOMBRE = (("Rosa", "#FF5C8A"), ("Coral", "#FF7A45"), ("Oro", "#FFC857"), ("Menta", "#7CFFB2"),
+                 ("Cian", "#22D3EE"), ("Azul", "#4DA8FF"), ("Lila", "#A78BFA"), ("Fucsia", "#FF4DD2"),
+                 ("Nieve", "#F5F5F5"))
+
+
+def color_valido(v):
+    """Un color «#RRGGBB» en mayúsculas, o None si no hay o está mal escrito («#abc» se estira a «#AABBCC»)."""
+    t = str(v or "").strip().upper()
+    if not t:
+        return None
+    if not t.startswith("#"):
+        t = "#" + t
+    if len(t) == 4 and all(c in "0123456789ABCDEF" for c in t[1:]):
+        t = "#" + "".join(c * 2 for c in t[1:])
+    if len(t) == 7 and all(c in "0123456789ABCDEF" for c in t[1:]):
+        return t
+    return None
+
+
+def nombre_de_color(color):
+    """«Rosa», «Oro»... para un color de la paleta; «Personalizado» para otro; «Sin color» si no hay."""
+    c = color_valido(color)
+    if c is None:
+        return "Sin color"
+    for nombre, hexa in PALETA_NOMBRE:
+        if hexa == c:
+            return nombre
+    return "Personalizado"
+
+
+def es_donador_de_verdad(estado):
+    """Donador o fundador vigente (la prueba no cuenta): la pared y la mascota propia son solo para ellos."""
+    return bool(estado is not None and estado.vigente() and estado.tipo in ("donador", "fundador"))
+
+
+NUMERO_WHATSAPP = "51902464984"
+TEXTO_MASCOTA = ("Te escribimos por WhatsApp para diseñarla juntos: el diseño se aprueba por WhatsApp antes de "
+                 "añadirlo a tu cuenta.")
+
+
+def mensaje_mascota(usuario):
+    """El mensaje ya escrito que se manda por WhatsApp para pedir la mascota personalizada."""
+    u = str(usuario or "").strip().lstrip("@")
+    quien = f"Hola, soy @{u} en Caudal." if u else "Hola, soy donador de Caudal."
+    return f"{quien} Quiero mi mascota personalizada."
+
+
+def url_mascota(usuario):
+    from urllib.parse import quote
+    return f"https://wa.me/{NUMERO_WHATSAPP}?text={quote(mensaje_mascota(usuario), safe='')}"
+
+
+def leer_pared(datos):
+    """Lo que devuelve `pared_agradecimiento()` → [{usuario, nombre, tipo, color, desde}] limpio (fundadores
+    primero, como lo manda el servidor). Lo que venga roto se descarta."""
+    salida = []
+    for d in datos if isinstance(datos, list) else []:
+        if not isinstance(d, dict):
+            continue
+        usuario = str(d.get("usuario") or "").strip()
+        tipo = str(d.get("tipo") or "").strip().lower()
+        if not usuario or tipo not in ("donador", "fundador"):
+            continue
+        nombre = str(d.get("nombre") or "").strip() or usuario
+        salida.append({"usuario": usuario, "nombre": nombre[:40], "tipo": tipo,
+                       "color": color_valido(d.get("color")), "desde": d.get("desde")})
+    return salida
+
+
+# la letra a pantalla completa con efectos: estilos (las mismas claves que en el teléfono)
+ESTILOS_ESCENA = ("resplandor", "ola", "neon", "cine")
+NOMBRES_ESCENA = {"resplandor": "Resplandor", "ola": "Ola", "neon": "Neón", "cine": "Cine"}
+DETALLE_ESCENA = {"resplandor": "Cada verso sube con un brillo de los colores de la carátula",
+                  "ola": "Las palabras entran una a una, como una ola",
+                  "neon": "El verso se enciende como un letrero de neón",
+                  "cine": "Letra a letra, como los créditos de una película"}
+
+
+def estilo_escena_valido(v):
+    v = str(v or "").strip().lower()
+    return v if v in ESTILOS_ESCENA else ESTILOS_ESCENA[0]

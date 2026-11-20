@@ -201,6 +201,8 @@ def test_barra_real_lleva_el_boton(app, monkeypatch):
         def __init__(self):
             super().__init__()
             self.volumen, self.aleatorio, self.repetir, self.modo = 70, False, "no", "audio"
+            from descargador.cast import ControlCast
+            self.cast = ControlCast(None, padre=self)      # la barra lleva el botón de Chromecast
 
         def anterior(self):
             pass

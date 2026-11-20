@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (QHBoxLayout, QLabel, QMenu, QPushButton, QVBoxLay
 from . import iconos
 from .componentes import BotonIcono, BotonPlay, Deslizador, Portada, formato_tiempo
 from .estilos import C
+from .cast_boton import BotonCast
 
 
 def _t(seg):
@@ -39,9 +40,11 @@ class BarraReproduccion(QFrame):
     pidio_video = Signal()
     pidio_vinilo = Signal()           # el modo vinilo a pantalla completa
     pidio_mini = Signal()
+    pidio_escritorio = Signal()       # la escena de escritorio a pantalla completa
     pidio_ecualizador = Signal()
     pidio_visualizador = Signal(str)  # ondas | particulas | barras (a pantalla completa, donadores)
     pidio_karaoke = Signal()          # karaoke y letras a pantalla completa (donadores)
+    pidio_escena = Signal()           # la letra a pantalla completa con efectos (donadores)
 
     def __init__(self, ctx, padre=None):
         super().__init__(padre)
@@ -169,7 +172,7 @@ class BarraReproduccion(QFrame):
         self.bt_temporizador = BotonIcono("temporizador", 17, "Temporizador para dormir", 32)
         self.bt_temporizador.clicked.connect(self._menu_temporizador)
         der.addWidget(self.bt_temporizador)
-        self.bt_super = BotonIcono("altavoz_fuerte", 18, "Súper volumen", 32)
+        self.bt_super = BotonIcono("altavoz_fuerte", 18, "Volumen máximo", 32)
         self.bt_super.clicked.connect(self._menu_super)
         der.addWidget(self.bt_super)
         self.bt_eq = BotonIcono("ecualizador", 17, "Ecualizador y sonido", 32)
@@ -178,6 +181,11 @@ class BarraReproduccion(QFrame):
         self.bt_mini = BotonIcono("mini", 18, "Mini reproductor (siempre encima)", 32)
         self.bt_mini.clicked.connect(self.pidio_mini.emit)
         der.addWidget(self.bt_mini)
+        self.bt_escritorio = BotonIcono("escritorio", 18, "Escena de escritorio (Ctrl+Shift+D)", 32)
+        self.bt_escritorio.clicked.connect(self.pidio_escritorio.emit)
+        der.addWidget(self.bt_escritorio)
+        self.bt_cast = BotonCast(self.r.cast)      # Chromecast (oculto si no hay)
+        der.addWidget(self.bt_cast)
         self.bt_volumen = BotonIcono("altavoz_fuerte", 18, "Silenciar", 32)
         self.bt_volumen.clicked.connect(self._silenciar)
         der.addWidget(self.bt_volumen)
@@ -423,13 +431,13 @@ class BarraReproduccion(QFrame):
         menu.exec(self.bt_temporizador.mapToGlobal(QPoint(0, -menu.sizeHint().height() - 6)))
 
     def _menu_super(self):
-        from ..reproduccion import NOMBRES_SUPER_VOLUMEN
+        from ..reproduccion import NOMBRES_VOLUMEN_MAXIMO
         menu = QMenu(self)
-        titulo = menu.addAction("Súper volumen: más fuerte sin saturar")
+        titulo = menu.addAction("Volumen máximo: lo más alto sin que se rompa")
         titulo.setEnabled(False)
         menu.addSeparator()
-        actual = int(self.ctx.ajustes["super_volumen"] or 0)
-        for nivel, nombre in NOMBRES_SUPER_VOLUMEN.items():
+        actual = self.ctx.ajustes.get("volumen_maximo")
+        for nivel, nombre in NOMBRES_VOLUMEN_MAXIMO.items():
             a = menu.addAction(nombre, lambda n=nivel: self._poner_super(n))
             a.setCheckable(True)
             a.setChecked(nivel == actual)
@@ -438,19 +446,22 @@ class BarraReproduccion(QFrame):
         menu.exec(self.bt_super.mapToGlobal(QPoint(0, -menu.sizeHint().height() - 6)))
 
     def _poner_super(self, nivel):
-        from ..reproduccion import NOMBRES_SUPER_VOLUMEN
-        self.ctx.ajustes["super_volumen"] = nivel
+        from .. import sonoridad
+        from ..reproduccion import NOMBRES_VOLUMEN_MAXIMO
+        sonoridad.poner_nivel(self.ctx.ajustes, nivel)
         self.ctx.ajustes.guardar()
         self.r.aplicar_sonido()
         self._pintar_super()
-        self.ctx.aviso.emit("Súper volumen apagado" if not nivel
-                            else f"Súper volumen: {NOMBRES_SUPER_VOLUMEN[nivel].lower()}")
+        self.ctx.aviso.emit("Volumen máximo apagado" if nivel not in sonoridad.NIVELES
+                            else f"Volumen máximo: {NOMBRES_VOLUMEN_MAXIMO[nivel].lower()}")
 
     def _pintar_super(self):
-        from ..reproduccion import NOMBRES_SUPER_VOLUMEN
-        nivel = int(self.ctx.ajustes["super_volumen"] or 0)
-        self.bt_super.set_activo(bool(nivel))
-        self.bt_super.setToolTip("Súper volumen: " + NOMBRES_SUPER_VOLUMEN.get(nivel, "").lower())
+        from .. import sonoridad
+        from ..reproduccion import NOMBRES_VOLUMEN_MAXIMO
+        nivel = self.ctx.ajustes.get("volumen_maximo")
+        self.bt_super.set_activo(nivel in sonoridad.NIVELES)
+        self.bt_super.setToolTip("Volumen máximo: "
+                                 + NOMBRES_VOLUMEN_MAXIMO.get(nivel, "Apagado").lower())
 
     def _abrir_juntos(self):
         from .paginas import juntos
@@ -474,6 +485,7 @@ class BarraReproduccion(QFrame):
             menu.addAction(f"{candado}Visualizador · {nombre}", lambda k=clave: self.pidio_visualizador.emit(k))
         menu.addSeparator()
         menu.addAction(f"{candado}Karaoke a pantalla completa", self.pidio_karaoke.emit)
+        menu.addAction(f"{candado}Letra con efectos a pantalla completa", self.pidio_escena.emit)
         if candado:
             menu.addSeparator()
             aviso = menu.addAction("Exclusivo para donadores")

@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -10,6 +11,9 @@ import '../../nucleo/catalogo.dart';
 import '../../nucleo/calidad_sonido.dart';
 import '../../nucleo/coleccion.dart';
 import '../../nucleo/estilo_reproductor.dart';
+import '../../nucleo/fondo_app.dart';
+import '../../nucleo/mascota_app.dart';
+import '../../nucleo/premium.dart';
 import '../../nucleo/premium_letras.dart';
 import '../../nucleo/ritmo.dart';
 import '../../nucleo/ritmo_fondo.dart';
@@ -23,6 +27,7 @@ import '../comunes.dart';
 import '../plataforma.dart';
 import '../reproductor/animaciones.dart';
 import '../reproductor/barra_progreso.dart';
+import '../reproductor/compartir_cancion.dart';
 import '../reproductor/estilos_portada.dart';
 import '../reproductor/fondo_ambiente.dart';
 import '../reproductor/insignia_calidad.dart';
@@ -30,9 +35,11 @@ import '../reproductor/paleta_portada.dart';
 import '../reproductor/personalizar_hoja.dart';
 import '../reproductor/linea_karaoke.dart';
 import '../reproductor/portada_deslizable.dart';
+import '../reproductor/tarjetas_compartir.dart';
 import '../reproductor/vinilo.dart';
 import '../premium/tarjetas_del_dia.dart' show MenuMasEscucha;
 import '../servicios.dart';
+import '../cast_boton.dart';
 import '../tema.dart';
 import 'cola_hoja.dart';
 import 'compartir_letra.dart';
@@ -345,6 +352,14 @@ class _ReproductorPaginaState extends State<ReproductorPagina> with SingleTicker
                           Text('${ctx?['titulo'] ?? ''}', maxLines: 1, overflow: TextOverflow.ellipsis,
                               style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5)),
                         ])),
+                        // enviar a una tele o altavoz (no aparece si no hay Cast)
+                        CastBoton(control: r.cast),
+                        // una imagen bonita de lo que suena para estados, historias y chats
+                        IconButton(
+                          tooltip: 'Compartir',
+                          icon: const Icon(Icons.ios_share_rounded),
+                          onPressed: () => _compartirCancion(context, r, p),
+                        ),
                         if (!Jugador.esWeb)
                           IconButton(
                             tooltip: 'Personalizar el reproductor',
@@ -560,6 +575,89 @@ class _ReproductorPaginaState extends State<ReproductorPagina> with SingleTicker
       ),
       ),
     );
+  }
+
+  /// Abre «Compartir» con lo que suena ahora: el momento, la calidad, el verso que se canta,
+  /// los colores de la carátula (aunque el reproductor no los use) y la mascota elegida.
+  void _compartirCancion(BuildContext context, Reproductor r, Json p) {
+    final url = '${p['miniatura'] ?? ''}';
+    final ctx = r.contexto;
+    final calidad = calidadDe(r.fuente, enVideo: r.modo == 'video')?.etiqueta;
+    final posicion = r.posicion.value;
+    var duracion = r.duracion.value;
+    if (duracion <= Duration.zero) duracion = Duration(seconds: (p['duracion'] as num?)?.toInt() ?? 0);
+    final mascota = MascotaApp.i.activa ? MascotaApp.i.actual : null;
+    // el sello de los diseños exclusivos (solo se lee el estado de siempre)
+    final sello = Premium.i.estado.tipo == 'fundador' || FondoApp.i.titulo.contains('Fundador') ? 'Fundador' : 'Donador';
+
+    Future<DatosCompartir> preparar() async {
+      final (paleta, (verso, siguiente), caratula) = await (
+        (paletaEnCache(url) != null ? Future.value(paletaEnCache(url)!) : paletaDe(url))
+            .timeout(const Duration(seconds: 4), onTimeout: () => _vista.value),
+        _versoQueSuena(p, posicion),
+        _caratulaGrande(context, url),
+      ).wait;
+      return DatosCompartir(
+        titulo: '${p['titulo'] ?? ''}',
+        artista: '${p['artista'] ?? ''}'.trim(),
+        caratula: caratula,
+        paleta: paleta,
+        posicion: posicion,
+        duracion: duracion,
+        calidad: calidad,
+        verso: verso,
+        versoSiguiente: siguiente,
+        contexto: ctx == null ? null : '${ctx['titulo'] ?? ''}',
+        mascota: mascota,
+        sello: sello,
+      );
+    }
+
+    mostrarCompartirCancion(context, datos: preparar());
+  }
+
+  /// La línea de la letra que se canta en [posicion] y la siguiente. Sin tiempos, las dos
+  /// primeras con texto. Sin letra (o si no llega), nada.
+  Future<(String?, String?)> _versoQueSuena(Json p, Duration posicion) async {
+    try {
+      final l = await _letraDe(p).timeout(const Duration(seconds: 4));
+      bool util(String x) => x.trim().isNotEmpty && x.trim() != '♪';
+      final con = _lineas(l);
+      final textos = con.isNotEmpty ? [for (final x in con) x.$2] : '${l['texto'] ?? ''}'.split('\n');
+      var i = 0;
+      if (con.isNotEmpty) {
+        final ms = posicion.inMilliseconds + 250 + _desfaseDe('${p['clave']}');
+        for (var k = 0; k < con.length; k++) {
+          if (con[k].$1 <= ms) i = k;
+        }
+      }
+      while (i < textos.length && !util(textos[i])) {
+        i++;
+      }
+      if (i >= textos.length) return (null, null);
+      var j = i + 1;
+      while (j < textos.length && !util(textos[j])) {
+        j++;
+      }
+      return (textos[i].trim(), j < textos.length ? textos[j].trim() : null);
+    } catch (_) {
+      return (null, null);
+    }
+  }
+
+  /// La carátula en grande (las de YouTube Music se pueden pedir a más resolución). Si la
+  /// grande no llega pronto, se usa la de siempre.
+  Future<String> _caratulaGrande(BuildContext context, String url) async {
+    final grande = Catalogo.agrandarMiniatura(url, 1200);
+    if (grande == url || !grande.startsWith('http')) return url;
+    var bien = true;
+    try {
+      await precacheImage(CachedNetworkImageProvider(grande), context, onError: (_, _) => bien = false)
+          .timeout(const Duration(seconds: 4));
+    } catch (_) {
+      bien = false;
+    }
+    return bien ? grande : url;
   }
 
   Future<void> _temporizador(BuildContext context, Reproductor r) async {

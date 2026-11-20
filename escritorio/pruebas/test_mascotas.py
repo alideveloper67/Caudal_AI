@@ -57,13 +57,17 @@ class Ctx:
         self.fondo = FondoFalso(puede)
 
 
-def test_catalogo_tiene_42_con_dibujo():
+def test_catalogo_tiene_66_con_dibujo():
     cat = M.catalogo()
-    assert len(cat) == 42
+    assert len(cat) == 66
     claves = {m["clave"] for m in cat}
-    assert len(claves) == 42
+    assert len(claves) == 66
     # las que se quedaron y algunas de las nuevas originales
     assert {"nyan", "nailong", "pikachu", "charmander", "bulbasaur", "squirtle", "kirby", "gato_negro", "capibara", "pochacco", "caniche", "hellokitty", "olaf", "totoro", "zorro_aviador", "robot", "dragon", "ajolote"} <= claves
+    # personajes de noviembre
+    assert {"messi", "wos", "nightwing", "goku_ultra", "goku_blue", "wanda", "loki", "jake", "finn", "marceline",
+            "pan_canela", "rigby", "steven", "perla", "lapislazuli", "jaspe", "garnet", "peridot", "amatista",
+            "leon", "richard", "gumball", "darwin", "mordecai"} <= claves
     # las que se pidió quitar ya no están
     assert not ({"stitch", "minion", "pooh", "mickey", "bob", "patrick", "pusheen", "rilakkuma", "toothless"} & claves)
     for m in cat:

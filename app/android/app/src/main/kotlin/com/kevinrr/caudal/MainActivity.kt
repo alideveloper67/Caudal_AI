@@ -60,6 +60,9 @@ class MainActivity : AudioServiceActivity() {
         // CPU y wifi despiertos mientras suena (Energia.kt): musica con la pantalla apagada
         Energia.registrar(flutterEngine, applicationContext)
 
+        // volumen maximo sin distorsion y aviso de cambio de salida (Sonido.kt)
+        Sonido.registrar(flutterEngine, applicationContext)
+
         // pantalla encendida mientras se ve el modo vinilo (FLAG_KEEP_SCREEN_ON)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "caudal/pantalla")
             .setMethodCallHandler { llamada, resultado ->

@@ -31,7 +31,8 @@ def ruta_libre(carpeta, nombre, extension):
 def extraer_audio(origen, formato="mp3", reforzar=False, carpeta_destino=None):
     """Saca la pista de sonido de un video. Devuelve la ruta del archivo nuevo.
 
-    Con [reforzar] se nivela el volumen igual que en el modo musica.
+    Con [reforzar] se nivela el volumen igual que en el modo musica: se mide el archivo y se le da
+    una ganancia fija con limitador de picos verdaderos (sin el «bombeo» de loudnorm).
     """
     if not origen or not os.path.exists(origen):
         raise ErrorConversion("Ese archivo ya no esta en el disco.")
@@ -41,14 +42,17 @@ def extraer_audio(origen, formato="mp3", reforzar=False, carpeta_destino=None):
     nombre = os.path.splitext(os.path.basename(origen))[0]
     destino = ruta_libre(carpeta, nombre, formato)
 
-    orden = [_ffmpeg(), "-y", "-i", origen, "-vn"]
+    exe = _ffmpeg()
+    orden = [exe, "-y", "-i", origen, "-vn"]
     if reforzar:
-        orden += ["-af", "loudnorm=I=-9:TP=-1.0:LRA=9"]
+        from . import sonoridad
+        orden += ["-af", sonoridad.filtro_descarga(sonoridad.medir({"archivo": origen}, exe))]
     if formato == "mp3":
-        orden += ["-c:a", "libmp3lame", "-b:a", "192k"]
+        # VBR de la mejor calidad de LAME (~245 kb/s): suena como 320 y pesa menos
+        orden += ["-c:a", "libmp3lame", "-q:a", "0"]
     elif formato == "m4a":
         # si ya viene en AAC se copia tal cual: es instantaneo y sin perdida
-        orden += ["-c:a", "copy"] if not reforzar else ["-c:a", "aac", "-b:a", "192k"]
+        orden += ["-c:a", "copy"] if not reforzar else ["-c:a", "aac", "-b:a", "256k"]
     elif formato == "flac":
         orden += ["-c:a", "flac"]
     elif formato == "wav":

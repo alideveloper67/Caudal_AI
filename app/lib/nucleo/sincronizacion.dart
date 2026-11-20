@@ -300,6 +300,12 @@ class Sincronizador {
     switch (op) {
       case 'me_gusta_poner':
         await _upsert('me_gusta', [{'clave': d['clave'], 'datos': d['datos'] ?? {}}], 'user_id,clave');
+      case 'me_gusta_varios':
+        // los me gusta traídos de otra app, de una tanda (ya llegan de 400 en 400)
+        await _upsert('me_gusta', [
+          for (final i in (d['items'] as List))
+            {'clave': i['clave'], 'datos': i['datos'] ?? {}, 'fecha': _iso(i['fecha'])}
+        ], 'user_id,clave');
       case 'me_gusta_quitar':
         await sesion.pedir('DELETE', 'me_gusta?clave=eq.${_q(d['clave'])}');
       case 'lista_poner':

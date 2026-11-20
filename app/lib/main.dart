@@ -12,6 +12,7 @@ import 'package:permission_handler/permission_handler.dart';
 import 'package:share_plus/share_plus.dart';
 
 import 'nucleo/ajustes.dart';
+import 'nucleo/aviso_errores.dart';
 import 'nucleo/cumpleanos.dart';
 import 'nucleo/avisos.dart';
 import 'nucleo/capturador_oculto.dart';
@@ -22,6 +23,8 @@ import 'nucleo/diagnostico.dart';
 import 'nucleo/cuentas.dart';
 import 'nucleo/descargas.dart';
 import 'nucleo/gustos.dart';
+import 'nucleo/logros.dart';
+import 'nucleo/logros_vigia.dart';
 import 'nucleo/motor_local.dart';
 import 'nucleo/red.dart';
 import 'nucleo/sincronizacion.dart';
@@ -35,12 +38,15 @@ import 'reproduccion/servicio_audio.dart';
 import 'ui/armazon.dart';
 import 'ui/comunes.dart';
 import 'nucleo/fondo_app.dart';
+import 'nucleo/colores_nombre.dart';
 import 'nucleo/premium.dart';
 import 'nucleo/ritmo_fondo.dart';
 import 'nucleo/mascota_app.dart';
 import 'nucleo/gamer_control.dart';
 import 'nucleo/social.dart';
+import 'ui/despertador_enganche.dart';
 import 'ui/fondo_capa.dart';
+import 'ui/logros_aviso.dart';
 import 'ui/paginas/acceso.dart';
 import 'ui/paginas/ajustes_pagina.dart';
 import 'ui/paginas/aviso_dialogo.dart';
@@ -48,7 +54,8 @@ import 'ui/paginas/gustos_pagina.dart';
 import 'ui/servicios.dart';
 import 'ui/tema.dart';
 
-Future<void> main() async {
+// Todo el arranque corre dentro del aviso de errores: lo que nadie atrapa se manda a la nube
+Future<void> main() => AvisoErrores.enZona(() async {
   WidgetsFlutterBinding.ensureInitialized();
   // cualquier error queda escrito (registro del sistema + detalle de la traba)
   FlutterError.onError = (d) {
@@ -59,6 +66,8 @@ Future<void> main() async {
     Diagnostico.anotarError(e, pila);
     return true;
   };
+  // el aviso de errores encadena los ganchos de arriba (no los quita)
+  AvisoErrores.instalar();
   MediaKit.ensureInitialized();
   // primer plano / segundo plano: los sondeos y la posicion se frenan al salir
   VidaApp.iniciar();
@@ -78,7 +87,7 @@ Future<void> main() async {
   unawaited(Red.iniciar());
   portadaGeneroAsync = (el) => Catalogo.portadaGenero('${el['id']}', el['params'] as String?);
   runApp(const CaudalApp());
-}
+});
 
 class CaudalApp extends StatefulWidget {
   const CaudalApp({super.key});
@@ -96,6 +105,8 @@ class _CaudalAppState extends State<CaudalApp> {
   final _mensajero = GlobalKey<ScaffoldMessengerState>();
   CapturadorOculto? _capturador;
   DescargaInteligente? _inteligente;
+  // vigía de logros de la cuenta abierta (uno por cuenta)
+  VigiaLogros? _vigia;
 
   void _alCambiarFondo() {
     if (mounted) setState(() {}); // el tema cambia (pantallas transparentes) cuando hay fondo
@@ -353,6 +364,28 @@ class _CaudalAppState extends State<CaudalApp> {
     unawaited(_buscarVersion());
     unawaited(_buscarAvisos());
     unawaited(_pedirNotificaciones());
+    // logros: el vigía cuenta lo que suena y avisa al conseguir uno (uno por cuenta)
+    _vigia?.detener();
+    _vigia = null;
+    // los logros nunca deben frenar la entrada: si algo falla, la cuenta abre igual
+    try {
+      final logros = await Logros.abrir(c.id);
+      if (identical(_s, s)) {   // la cuenta sigue abierta (no se cerró mientras cargaba)
+        _vigia = VigiaLogros(
+          logros: logros,
+          reproductor: reproductor,
+          suena: () => reproductor.estado == EstadoRepro.sonando,
+          actual: () => reproductor.actual,
+          coleccion: coleccion,
+          sesion: c.sesion,
+          alConseguir: (nuevos) => AvisosLogros.mostrar(_navegador.currentState?.overlay, nuevos),
+        )..iniciar();
+      }
+    } catch (e) {
+      debugPrint('logros: $e');
+    }
+    // pantalla bloqueada: despertador y letra (una vez por cuenta; en el navegador no existen)
+    if (!kIsWeb) engancharDespertador(s, _navegador);
   }
 
   /// Android 13+: sin este permiso no se ven los controles de la musica en la
@@ -403,9 +436,14 @@ class _CaudalAppState extends State<CaudalApp> {
     s.sincronizador?.detener();
     _inteligente?.detener();
     _inteligente = null;
+    _vigia?.detener();
+    _vigia = null;
+    // las alarmas de Android siguen programadas; aquí solo se suelta la cuenta
+    if (!kIsWeb) soltarDespertador();
     await Cuentas.olvidar(s.cuenta);
     FondoApp.i.reiniciar();
     Premium.i.reiniciar();
+    ColoresNombre.i.reiniciar();
     MascotaApp.i.reiniciar();
     Cumpleanos.i.reiniciar();
     s.gamer?.guardarYa();
@@ -477,6 +515,8 @@ class _CaudalAppState extends State<CaudalApp> {
       supportedLocales: const [Locale('es'), Locale('en')],
       localizationsDelegates: GlobalMaterialLocalizations.delegates,
       navigatorKey: _navegador,
+      // el aviso de errores anota qué pantalla está abierta
+      navigatorObservers: [AvisoErrores.observador],
       scaffoldMessengerKey: _mensajero,
       home: AnimatedSwitcher(
         duration: const Duration(milliseconds: 380),

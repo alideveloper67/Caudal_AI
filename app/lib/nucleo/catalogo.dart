@@ -1723,6 +1723,7 @@ class Catalogo {
     var autor = '';
     var descripcion = '';
     var portada = '';
+    var incompleta = false;
     if (r != null) {
       final cab = _mapa(_nav(r, ['header', 'playlistHeaderRenderer']));
       titulo = _texto(cab['title']);
@@ -1757,11 +1758,19 @@ class Catalogo {
       var vueltas = 0;
       while (token != null && pistas.length < limite && vueltas < 5000) {
         vueltas++;
-        Map<String, dynamic> mas;
-        try {
-          mas = await _post('browse', {'continuation': token},
-              cliente: 'web', visitante: _visitanteDe(r));
-        } catch (_) {
+        // un tropiezo de la red a mitad de una lista enorme ya no la corta en silencio:
+        // cada página se reintenta y, si aun así no llega, se avisa de que quedó incompleta
+        Map<String, dynamic>? mas;
+        for (var intento = 0; intento < 3 && mas == null; intento++) {
+          try {
+            mas = await _post('browse', {'continuation': token},
+                cliente: 'web', visitante: _visitanteDe(r));
+          } catch (_) {
+            if (intento < 2) await Future<void>.delayed(Duration(milliseconds: 700 * (intento + 1)));
+          }
+        }
+        if (mas == null) {
+          incompleta = true;
           break;
         }
         var nuevos = <dynamic>[];
@@ -1798,6 +1807,7 @@ class Catalogo {
       'miniatura': portada,
       'pistas': pistas,
       'duracion': pistas.fold<int>(0, (s, p) => s + (p['duracion'] as int)),
+      if (incompleta) 'incompleta': true,
     };
   }
 

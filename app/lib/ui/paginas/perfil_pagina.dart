@@ -15,7 +15,10 @@ import 'perfil_editar_pagina.dart';
 import 'perfil_listas.dart';
 import '../../nucleo/premium.dart';
 import '../premium/marcos.dart';
+import '../premium/nombre_color.dart';
 import '../premium/portada_perfil_ui.dart';
+import '../../nucleo/logros_vigia.dart';
+import '../logros_vitrina.dart';
 
 /// El perfil de una persona. Sin [usuario] abre el perfil propio (con el
 /// botón para editarlo); con un usuario, el de esa persona (con amistad,
@@ -277,6 +280,14 @@ class _PerfilPaginaState extends State<PerfilPagina> {
             usuario: p.usuario, propia: propio, esAmiga: p.relacion == Relacion.amigo, color: color, social: _social),
       if (p.privado) _Privado(perfil: p, color: color),
       if (!p.privado) ...[
+        // vitrina de logros: los que la persona eligió lucir (en el propio, con sus logros del dispositivo)
+        VitrinaLogros(
+          usuario: p.usuario,
+          propio: propio,
+          sesion: s.cuenta.sesion,
+          logros: propio ? VigiaLogros.vigente?.logros : null,
+          alCambiarVitrina: propio ? VigiaLogros.vigente?.pronto : null,
+        ),
         if (!propio && p.afinidad != null) _Afinidad(valor: p.afinidad!, nombre: p.visible, color: color),
         if (propio && !p.publico)
           _AvisoPropio(
@@ -439,8 +450,10 @@ class _Cabecera extends StatelessWidget {
               child: Column(children: [
                 ListenableBuilder(
                   listenable: Premium.i,
-                  builder: (context, _) => NombreEfecto(
+                  builder: (context, _) => NombreConColor(
                     p.visible,
+                    usuario: p.usuario,
+                    esMio: p.esMio,
                     efecto: p.esMio ? Premium.i.efectoNombreEfectivo : p.efectoNombre,
                     estilo: estiloTituloPagina.copyWith(fontSize: 26),
                     textAlign: TextAlign.center,

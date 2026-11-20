@@ -5,7 +5,6 @@ import 'package:caudal/nucleo/capsula_tiempo.dart';
 import 'package:caudal/nucleo/coleccion.dart';
 import 'package:caudal/nucleo/cuentas.dart';
 import 'package:caudal/nucleo/descargas.dart';
-import 'package:caudal/nucleo/nube.dart';
 import 'package:caudal/nucleo/premium.dart';
 import 'package:caudal/nucleo/social.dart';
 import 'package:caudal/nucleo/streams.dart';

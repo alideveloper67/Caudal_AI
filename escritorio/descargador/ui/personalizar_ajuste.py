@@ -8,11 +8,11 @@ pase de prueba): para el resto se puede probar cómo queda, pero «Aplicar» est
 
 from PySide6.QtCore import QRectF, QSize, Qt
 from PySide6.QtGui import QColor, QGuiApplication, QIcon, QPainter, QPen, QPixmap
-from PySide6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QSizePolicy,
-                               QToolButton, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QColorDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton,
+                               QSizePolicy, QToolButton, QVBoxLayout, QWidget)
 
-from ..premium_datos import (EFECTOS, MARCOS, NINGUNO, NOMBRES_EFECTO, NOMBRES_MARCO, NOMBRES_TEMA, TEMAS,
-                             texto_vencimiento)
+from ..premium_datos import (EFECTOS, MARCOS, NINGUNO, NOMBRES_EFECTO, NOMBRES_MARCO, NOMBRES_TEMA, PALETA_NOMBRE,
+                             TEMAS, color_valido, nombre_de_color, texto_vencimiento)
 from .. import social as S
 from .aspecto import Muestra
 from .canje_pase import boton_codigo
@@ -59,6 +59,26 @@ def icono_marco(marco, lado=44):
         p.setPen(Qt.NoPen)
         p.setBrush(QColor(C["superficie3"]))
         p.drawEllipse(QRectF(9, 9, lado - 18, lado - 18))
+    p.end()
+    return pm
+
+
+def icono_color(color, lado=26):
+    """Un círculo del color del nombre (o con una raya si es «Sin color»)."""
+    pm = QPixmap(lado, lado)
+    pm.fill(Qt.transparent)
+    p = QPainter(pm)
+    p.setRenderHint(QPainter.Antialiasing, True)
+    r = QRectF(2, 2, lado - 4, lado - 4)
+    if color:
+        p.setPen(QPen(QColor(255, 255, 255, 60), 1))
+        p.setBrush(QColor(color))
+        p.drawEllipse(r)
+    else:
+        p.setPen(QPen(QColor(C["texto3"]), 2))
+        p.setBrush(Qt.NoBrush)
+        p.drawEllipse(r)
+        p.drawLine(int(r.left() + 4), int(r.bottom() - 4), int(r.right() - 4), int(r.top() + 4))
     p.end()
     return pm
 
@@ -280,6 +300,7 @@ class SeccionPersonalizar(QFrame):
         g = self.gestor
         self.sel = {"marco": g.marco if g else NINGUNO, "efecto": g.efecto if g else NINGUNO,
                     "tema": g.tema if g else NINGUNO}
+        self.sel_color = g.color_nombre if g else None      # el color del nombre (aparte: no es una clave del marco)
         v = QVBoxLayout(self)
         v.setContentsMargins(22, 18, 22, 18)
         v.setSpacing(12)
@@ -293,8 +314,8 @@ class SeccionPersonalizar(QFrame):
         self.estado.setObjectName("secundario")
         cab.addWidget(self.estado)
         v.addLayout(cab)
-        ayuda = QLabel("Un marco animado para tu foto, un efecto para tu nombre y un tema de colores propio. "
-                       "Lo ven también tus amigos.")
+        ayuda = QLabel("Un marco animado para tu foto, un efecto y un color para tu nombre y un tema de colores "
+                       "propio. Lo ven también tus amigos.")
         ayuda.setObjectName("secundario")
         ayuda.setWordWrap(True)
         v.addWidget(ayuda)
@@ -346,6 +367,7 @@ class SeccionPersonalizar(QFrame):
         self._rejilla(v, "Marco de la foto", "marco", MARCOS, NOMBRES_MARCO, lambda k: QIcon(icono_marco(k)),
                       QSize(44, 44))
         self._rejilla(v, "Efecto del nombre", "efecto", EFECTOS, NOMBRES_EFECTO, None, QSize(1, 1))
+        self._fila_colores(v)
         self._rejilla(v, "Tema de colores", "tema", TEMAS, NOMBRES_TEMA, lambda k: QIcon(icono_tema(k)),
                       QSize(64, 40))
 
@@ -404,6 +426,63 @@ class SeccionPersonalizar(QFrame):
             rej.setColumnStretch(c, 1)
         v.addLayout(rej)
 
+    def _fila_colores(self, v):
+        """«Color del nombre»: la paleta, «Sin color» y «Personalizado…» (un color cualquiera)."""
+        et = QLabel("Color del nombre")
+        et.setStyleSheet("font-size:13px;font-weight:800;")
+        v.addWidget(et)
+        sub = QLabel("Se ve en tu perfil, en los chats y en «Juntos». Con «Brillo» el destello pasa sobre tu color.")
+        sub.setObjectName("secundario")
+        sub.setWordWrap(True)
+        v.addWidget(sub)
+        fila = QGridLayout()
+        fila.setSpacing(6)
+        por_fila = 5                     # en dos filas: cabe en ventanas chicas
+        self.botones_color = {}
+        estilo = (f"QToolButton{{background:rgba(255,255,255,0.05);border:2px solid transparent;border-radius:12px;"
+                  f"color:{C['texto']};font-size:11px;padding:4px 6px;}}"
+                  f"QToolButton:hover{{background:rgba(255,255,255,0.10);}}"
+                  f"QToolButton:checked{{border:2px solid {C['acento']};background:rgba(255,255,255,0.12);}}")
+        opciones = [("Sin color", None)] + list(PALETA_NOMBRE)
+        for nombre, hexa in opciones:
+            b = QToolButton()
+            b.setCheckable(True)
+            b.setCursor(Qt.PointingHandCursor)
+            b.setIcon(QIcon(icono_color(hexa)))
+            b.setIconSize(QSize(26, 26))
+            b.setToolTip(nombre)
+            b.setAccessibleName(f"Color del nombre: {nombre}")
+            b.setStyleSheet(estilo)
+            b.clicked.connect(lambda _=False, c=hexa: self._elegir_color(c))
+            self.botones_color[hexa] = b
+            i = len(self.botones_color) - 1
+            fila.addWidget(b, i // por_fila, i % por_fila)
+        self.bt_color_propio = QToolButton()
+        self.bt_color_propio.setCheckable(True)
+        self.bt_color_propio.setCursor(Qt.PointingHandCursor)
+        self.bt_color_propio.setText("Personalizado…")
+        self.bt_color_propio.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+        self.bt_color_propio.setIconSize(QSize(20, 20))
+        self.bt_color_propio.setAccessibleName("Color del nombre: elegir uno personalizado")
+        self.bt_color_propio.setStyleSheet(estilo)
+        self.bt_color_propio.clicked.connect(self._color_propio)
+        fila.addWidget(self.bt_color_propio, 2, 0, 1, por_fila, Qt.AlignLeft)
+        fila.setColumnStretch(por_fila, 1)
+        v.addLayout(fila)
+
+    def _color_propio(self):
+        actual = QColor(self.sel_color or C["acento"])
+        c = QColorDialog.getColor(actual, self, "Color de tu nombre")
+        if c.isValid():
+            self._elegir_color(c.name().upper())
+        else:
+            self._marcar()
+
+    def _elegir_color(self, color):
+        self.sel_color = color_valido(color)
+        self.msg.setText("")
+        self._marcar()
+
     def _elegir(self, clave, valor):
         self.sel[clave] = valor
         self.msg.setText("")
@@ -416,6 +495,15 @@ class SeccionPersonalizar(QFrame):
                 b.setChecked(valor == self.sel[clave])
         self.avatar.set_marco(self.sel["marco"])
         self.nombre.set_efecto(self.sel["efecto"])
+        color = color_valido(self.sel_color)
+        for hexa, b in self.botones_color.items():
+            b.setChecked(hexa == color)
+        propio = color is not None and color not in self.botones_color
+        self.bt_color_propio.setChecked(propio)
+        self.bt_color_propio.setIcon(QIcon(icono_color(color, 20)) if propio else QIcon())
+        self.bt_color_propio.setToolTip(f"Personalizado: {color}" if propio else "Elegir cualquier color")
+        self.nombre.set_color(color)
+        self.nombre.setAccessibleDescription(f"Color: {nombre_de_color(color)}")
         t = self.sel["tema"]
         if t == NINGUNO:
             self.muestra.poner(ACTUAL.get("acento", "cian") if not str(ACTUAL.get("acento", "")).startswith("premium_")
@@ -445,6 +533,9 @@ class SeccionPersonalizar(QFrame):
             return
         cambia_tema = g.guardar_personalizacion(self.sel["marco"], self.sel["efecto"], self.sel["tema"],
                                                 alerta=self._alerta)
+        color = color_valido(self.sel_color)
+        if color != g.color_nombre:
+            g.guardar_color_nombre(color, alerta=self._alerta)
         self.msg.setText("Guardado. Así te ve la gente.")
         if cambia_tema:
             ventana = self.ctx.ventana if getattr(self.ctx, "ventana", None) is not None else None
@@ -456,5 +547,6 @@ class SeccionPersonalizar(QFrame):
 
     def _quitar_todo(self):
         self.sel = {"marco": NINGUNO, "efecto": NINGUNO, "tema": NINGUNO}
+        self.sel_color = None
         self._marcar()
         self._aplicar()

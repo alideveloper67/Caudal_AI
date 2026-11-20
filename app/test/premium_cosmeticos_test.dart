@@ -441,8 +441,10 @@ void main() {
       expect(find.text('Exclusivo para donadores'), findsOneWidget);
       expect(find.text('Donar aquí'), findsOneWidget);
       expect(find.text('Tengo un código'), findsOneWidget);
-      // 7 marcos + 4 efectos + 6 temas con candado (las opciones «Ninguno» y «Normal» no lo llevan)
-      expect(find.byIcon(Icons.lock_rounded), findsNWidgets(17));
+      // 7 marcos + 4 efectos + 6 temas con candado (las opciones «Ninguno» y «Normal» no lo llevan),
+      // y la paleta «Color del nombre» (9 colores + «Personalizado»). «Más para quienes donan» queda
+      // fuera de lo que la lista construye a esta altura.
+      expect(find.byIcon(Icons.lock_rounded), findsNWidgets(27));
       await t.tap(find.text('Aurora'));
       await t.pump(const Duration(milliseconds: 300));
       expect(ses.patches, isEmpty);
@@ -492,6 +494,9 @@ void main() {
       await Premium.i.iniciar('yo', Social(ses));
       await _montar(t, await _servicios(ses), const PersonalizarPagina());
       expect(find.textContaining('Tienes 6 días de prueba'), findsOneWidget);
+      // el botón está al final de la lista (tras las secciones nuevas): hay que bajar hasta él
+      await t.scrollUntilVisible(find.text('Tengo un código de prueba'), 300,
+          scrollable: find.byType(Scrollable).first);
       expect(find.text('Tengo un código de prueba'), findsOneWidget);
     });
 

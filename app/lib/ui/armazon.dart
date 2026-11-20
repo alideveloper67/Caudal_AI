@@ -7,6 +7,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../nucleo/importar.dart';
+import '../nucleo/plataforma.dart';
+import '../nucleo/servicios_externos.dart';
 import '../nucleo/legal.dart';
 import '../nucleo/pases_regalo.dart';
 import '../nucleo/capsula_tiempo.dart';
@@ -44,6 +46,9 @@ import 'plataforma.dart';
 import 'reproductor/animaciones.dart';
 import 'servicios.dart';
 import 'tema.dart';
+import '../coche/atajos_caudal.dart';
+import '../coche/ejecutar_atajo.dart';
+import '../coche/vigia_coche.dart';
 
 /// Las cuatro pestanas (cada una con su propia navegacion, que se conserva al
 /// cambiar), el mini reproductor y la barra de abajo.
@@ -70,6 +75,7 @@ class _ArmazonState extends State<Armazon> {
 
   final _navegadores = List.generate(4, (_) => GlobalKey<NavigatorState>());
   StreamSubscription<String>? _avisos;
+  EjecutorAtajos? _atajos;
   static const _canal = MethodChannel('caudal/compartido');
 
   @override
@@ -81,7 +87,13 @@ class _ArmazonState extends State<Armazon> {
         _navegadores[_pestana].currentState?.push(MaterialPageRoute(builder: (_) => pagina));
     // las listas compartidas donde soy colaborador salen en «Añadir a una lista»
     s.destinosExtraLista ??= () => destinosListasCompartidas(s);
+    _atajos ??= EjecutorAtajos.app(context, s);
     s.abrirEnlace = (texto) {
+      // accesos directos del icono (caudal://...): los hace el ejecutor de atajos
+      if (leerAtajo(texto) != null) {
+        unawaited(_atajos!.atenderEnlace(texto));
+        return;
+      }
       // caudal://lista?codigo=XXXX-XXXX o https://caudal-musica.netlify.app/l/XXXX-XXXX: vista previa y «Unirme»
       if (esEnlaceDeLista(texto)) {
         final ctx = _navegadores[_pestana].currentContext;
@@ -99,10 +111,16 @@ class _ArmazonState extends State<Armazon> {
         _navegadores[_pestana].currentState?.push(MaterialPageRoute(builder: (_) => const EstudioPagina()));
         return;
       }
-      // una lista de Spotify o Apple Music compartida: se trae a la biblioteca
+      // vuelta de «Conectar con Spotify» (caudal://spotify?code=...)
+      if (CuentaSpotify.esVuelta(texto)) {
+        CuentaSpotify.volvio(texto).then((_) => s.avisar('Cuenta de Spotify conectada.'),
+            onError: (Object e) => s.avisar(e is ErrorServicio ? e.mensaje : 'Spotify no dejó conectar tu cuenta.'));
+        return;
+      }
+      // una lista de Spotify, Apple Music o SoundCloud compartida: se trae a la biblioteca
       final enlace = Importar.enlaceDe(texto);
       final p = Importar.plataforma(enlace);
-      if (p == 'spotify' || p == 'apple' ||
+      if (p == 'spotify' || p == 'apple' || p == 'soundcloud' ||
           (p == 'youtube' && enlace.contains('list=') && !enlace.contains('watch?'))) {
         _navegadores[_pestana].currentState
             ?.push(MaterialPageRoute(builder: (_) => ImportarPagina(enlace: enlace)));
@@ -332,7 +350,7 @@ class _ArmazonState extends State<Armazon> {
   Widget build(BuildContext context) {
     final paginas = widget.paginas ??
         [const InicioPagina(), const BuscarPagina(), const BibliotecaPagina(), const DescargasPagina()];
-    return PopScope(
+    final raiz = PopScope(
       canPop: false,
       onPopInvokedWithResult: (hecho, _) async {
         if (hecho) return;
@@ -409,6 +427,8 @@ class _ArmazonState extends State<Armazon> {
       );
       }),
     );
+    // el modo coche se abre al conectar el Bluetooth del coche: solo en Android, debajo del Armazon
+    return Plataforma.esAndroid ? VigiaCoche(child: raiz) : raiz;
   }
 
   void _abrirEnPestana(Widget pagina) =>
@@ -438,8 +458,9 @@ class _BarraLateral extends StatelessWidget {
                 child: Row(children: [
                   Icon(elegido ? activo : icono, size: 22, color: elegido ? C.texto : C.texto2),
                   const SizedBox(width: 14),
-                  Text(texto, style: TextStyle(fontSize: 14.5, fontWeight: elegido ? FontWeight.w800 : FontWeight.w600,
-                      color: elegido ? C.texto : C.texto2)),
+                  Expanded(child: Text(texto, maxLines: 1, overflow: TextOverflow.ellipsis,
+                      style: TextStyle(fontSize: 14.5, fontWeight: elegido ? FontWeight.w800 : FontWeight.w600,
+                      color: elegido ? C.texto : C.texto2))),
                 ]),
               ),
             ),

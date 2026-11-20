@@ -5,14 +5,18 @@ import 'package:caudal/ui/tema.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-/// Fondos con personaje: los mismos 19 que el escritorio, con su mosaico y su acento.
+/// Fondos con personaje: los mismos 43 que el escritorio, con su mosaico y su acento.
 void main() {
   const personajes = {
     'hellokitty', 'kuromi', 'pikachu', 'charmander', 'squirtle', 'bulbasaur', 'snoopy', 'totoro',
     'mymelody', 'purin', 'cinnamoroll', 'kirby', 'doraemon', 'olaf', 'nyan', 'gato_negro', 'capibara', 'pochacco', 'nailong',
+    // personajes de noviembre
+    'messi', 'wos', 'nightwing', 'goku_ultra', 'goku_blue', 'wanda', 'loki', 'jake', 'finn', 'marceline',
+    'pan_canela', 'rigby', 'steven', 'perla', 'lapislazuli', 'jaspe', 'garnet', 'peridot', 'amatista', 'leon',
+    'richard', 'gumball', 'darwin', 'mordecai',
   };
 
-  test('están los 19 con 6 capas oscuras y su mosaico', () {
+  test('están los 43 con 6 capas oscuras y su mosaico', () {
     expect(Aspecto.temas.keys.toSet(), personajes);
     for (final e in Aspecto.temas.entries) {
       expect(e.value.$3.length, 6, reason: e.key);

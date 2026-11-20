@@ -16,8 +16,8 @@ from . import nube
 from . import social as S
 from .config import carpeta_perfil
 from .hilos import en_segundo_plano
-from .premium_datos import (NINGUNO, EstadoPremium, efecto_valido, marco_valido, tema_valido,
-                            texto_vencimiento)
+from .premium_datos import (NINGUNO, EstadoPremium, color_valido, efecto_valido, es_donador_de_verdad,
+                            marco_valido, tema_valido, texto_vencimiento)
 
 PREFIJO_TEMA = "premium_"
 ASPECTO_NORMAL = ("cian", "oscuro")
@@ -78,6 +78,8 @@ class GestorPremium(QObject):
         self.marco = NINGUNO
         self.efecto = NINGUNO
         self.tema = NINGUNO
+        self.color_nombre = None      # '#RRGGBB' o None (supabase/donadores_extra.sql)
+        self.en_pared = False         # aparecer en la pared de agradecimiento
         self.aspecto_previo = list(ASPECTO_NORMAL)
         self._aviso_dia = ""
         self._pidiendo = False
@@ -103,6 +105,8 @@ class GestorPremium(QObject):
         self.marco = marco_valido(d.get("marco"))
         self.efecto = efecto_valido(d.get("efecto"))
         self.tema = tema_valido(d.get("tema"))
+        self.color_nombre = color_valido(d.get("color_nombre"))
+        self.en_pared = d.get("en_pared") is True
         previo = d.get("aspecto_previo")
         if isinstance(previo, list) and len(previo) == 2:
             self.aspecto_previo = [str(previo[0]), str(previo[1])]
@@ -112,6 +116,7 @@ class GestorPremium(QObject):
         try:
             d = self.estado.a_dict()
             d.update(marco=self.marco, efecto=self.efecto, tema=self.tema,
+                     color_nombre=self.color_nombre, en_pared=self.en_pared,
                      aspecto_previo=self.aspecto_previo, aviso_dia=self._aviso_dia)
             _archivo().write_text(json.dumps(d, ensure_ascii=False), encoding="utf-8")
         except OSError:
@@ -139,6 +144,15 @@ class GestorPremium(QObject):
     def tema_efectivo(self):
         return self.tema if self.premium else NINGUNO
 
+    def color_efectivo(self):
+        """El color del nombre que se pinta (None sin beneficios, aunque quede uno guardado)."""
+        return self.color_nombre if self.premium else None
+
+    @property
+    def donador_de_verdad(self):
+        """Donador o fundador vigente: la pared de agradecimiento y la mascota propia (la prueba no cuenta)."""
+        return es_donador_de_verdad(self.estado)
+
     def _social(self):
         cuenta = getattr(self.ctx, "cuenta", None) or {}
         sesion = cuenta.get("sesion")
@@ -158,6 +172,12 @@ class GestorPremium(QObject):
                 pers = social.leer_personalizacion()
             except nube.ErrorNube:
                 pers = None
+            if pers is not None:
+                # aparte: si la base aún no tiene el color ni la pared, lo de siempre sigue igual
+                try:
+                    pers = dict(pers, **social.leer_extra_donador())
+                except Exception:  # noqa: BLE001
+                    pass
             return estado, pers
 
         def listo(res):
@@ -183,6 +203,10 @@ class GestorPremium(QObject):
             self.marco = marco_valido(pers.get("marco"))
             self.efecto = efecto_valido(pers.get("efecto_nombre"))
             self.tema = tema_valido(pers.get("tema_premium"))
+            if "color_nombre" in pers:
+                self.color_nombre = color_valido(pers.get("color_nombre"))
+            if "en_pared" in pers:
+                self.en_pared = pers.get("en_pared") is True
         self._guardar_local()
         self.cambiado.emit()
         if estado != antes:
@@ -332,6 +356,40 @@ class GestorPremium(QObject):
         self.cambiado.emit()
         self._subir(alerta)
         return cambia_tema
+
+    # ------------------------------------------------------------ más para donadores
+    def guardar_color_nombre(self, color, alerta=None):
+        """Pone (o quita, con None) el color del nombre: al instante aquí y en la nube en segundo plano.
+        Sin beneficios no hace nada (devuelve False)."""
+        if not self.premium:
+            return False
+        self.color_nombre = color_valido(color)
+        self._guardar_local()
+        self.cambiado.emit()
+        self._subir_extra({"color_nombre": self.color_nombre}, alerta)
+        return True
+
+    def guardar_en_pared(self, si, alerta=None):
+        """Aparecer (o no) en la pared de agradecimiento. Solo donadores y fundadores (la prueba no cuenta);
+        quitarse se puede siempre."""
+        si = bool(si)
+        if si and not self.donador_de_verdad:
+            return False
+        self.en_pared = si
+        self._guardar_local()
+        self.cambiado.emit()
+        self._subir_extra({"en_pared": si}, alerta)
+        return True
+
+    def _subir_extra(self, campos, alerta=None):
+        social = self._social()
+        if social is None:
+            return
+
+        def fallo(e):
+            if alerta is not None:
+                alerta("Se ve aquí, pero no se pudo guardar en tu cuenta. " + S.explicar(e, "guardarlo"))
+        en_segundo_plano(social.guardar_extra_donador, campos, error=fallo)
 
     def _poner_aspecto(self):
         a = getattr(self.ctx, "ajustes", None)

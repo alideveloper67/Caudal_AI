@@ -530,14 +530,14 @@ class MotorLocal {
     }
 
     final filtro = reforzarAudio
-        ? const ['-af', 'loudnorm=I=-9:TP=-1.0:LRA=9']
+        ? const ['-af', MotorLocal.filtroReforzar]
         : const <String>[];
 
     final vias = <(String, List<String>)>[
       (formatoAudio, [...filtro, ..._codecDe(formatoAudio, reforzar: reforzarAudio)]),
       // AAC lo admite casi cualquier contenedor y va en el propio ffmpeg
-      if (formatoAudio != 'm4a') ('m4a', [...filtro, '-c:a', 'aac', '-b:a', '192k']),
-      if (formatoAudio == 'm4a') ('m4a', [...filtro, '-c:a', 'aac', '-b:a', '192k']),
+      if (formatoAudio != 'm4a') ('m4a', [...filtro, '-c:a', 'aac', '-b:a', '256k']),
+      if (formatoAudio == 'm4a') ('m4a', [...filtro, '-c:a', 'aac', '-b:a', '256k']),
       // último recurso: la pista tal como viene, sin tocar nada
       if (!reforzarAudio) ('m4a', const ['-c:a', 'copy']),
     ];
@@ -587,7 +587,7 @@ class MotorLocal {
           '-i', urlMedia,
           if (soloAudio) ...[
             '-vn',
-            if (reforzarAudio) ...['-af', 'loudnorm=I=-9:TP=-1.0:LRA=9'],
+            if (reforzarAudio) ...['-af', MotorLocal.filtroReforzar],
             ..._codecDe(formatoAudio, reforzar: reforzarAudio),
           ] else ...[
             '-c', 'copy', '-bsf:a', 'aac_adtstoasc',
@@ -743,6 +743,10 @@ class MotorLocal {
   /// Calidad de los MP3 (kbps, o 'V0' para VBR maxima). La fija la app.
   static String bitrateMp3 = '320';
 
+  /// «Descarga fuerte»: nivela hacia -10 LUFS con techo de -1 dBTP. Con LRA ancho para que
+  /// corrija poco dentro de la canción (el de antes, LRA 9 a -9 LUFS, se oía «respirar»).
+  static const filtroReforzar = 'loudnorm=I=-10:TP=-1.0:LRA=11';
+
   static List<String> _codecDe(String formato, {bool reforzar = false}) {
     switch (formato) {
       case 'opus':
@@ -750,7 +754,7 @@ class MotorLocal {
         return reforzar ? ['-c:a', 'libopus', '-b:a', '192k'] : ['-c:a', 'copy'];
       case 'm4a':
         // copiar la pista es instantáneo, pero nivelar el volumen exige rehacerla
-        return reforzar ? ['-c:a', 'aac', '-b:a', '192k'] : ['-c:a', 'copy'];
+        return reforzar ? ['-c:a', 'aac', '-b:a', '256k'] : ['-c:a', 'copy'];
       case 'flac':
         return ['-c:a', 'flac'];
       case 'wav':

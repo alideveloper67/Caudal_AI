@@ -1,9 +1,13 @@
 // Páginas públicas de listas para «Traer una lista» en la versión web.
-// Solo deja leer las páginas de listas de Spotify (embed) y Apple Music.
+// Solo deja leer las páginas de listas de Spotify (embed), Apple Music y las listas de SoundCloud.
 //
 //   GET /api/pagina?url=https://open.spotify.com/embed/playlist/...
 
-const PERMITIDOS = [/^https:\/\/open\.spotify\.com\/embed\/(playlist|album|track)\/[A-Za-z0-9]+/, /^https:\/\/music\.apple\.com\//];
+const PERMITIDOS = [
+  /^https:\/\/open\.spotify\.com\/embed\/(playlist|album|track)\/[A-Za-z0-9]+/,
+  /^https:\/\/music\.apple\.com\//,
+  /^https:\/\/soundcloud\.com\/[\w-]+\/sets\/[\w-]+$/,
+];
 const AGENTE = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0.0.0 Safari/537.36';
 
 export default async (req) => {

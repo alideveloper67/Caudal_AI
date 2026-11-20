@@ -129,6 +129,13 @@ class Nube {
     return null;
   }
 
+  /// Una función pública de la base, sin sesión (la pared de agradecimiento, por ejemplo).
+  static Future<dynamic> rpcPublico(String nombre, [Map<String, dynamic> parametros = const {}]) async {
+    final r = await _peticion('POST', '/rest/v1/rpc/$nombre', cuerpo: parametros);
+    if (r.statusCode >= 300) throw _traducir(r);
+    return r.body.trim().isEmpty ? null : jsonDecode(r.body);
+  }
+
   static Future<bool> usuarioLibre(String usuario) async {
     final r = await _peticion('POST', '/rest/v1/rpc/usuario_libre', cuerpo: {'p_usuario': usuario});
     if (r.statusCode != 200) throw _traducir(r);

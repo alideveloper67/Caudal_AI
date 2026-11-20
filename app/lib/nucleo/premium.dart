@@ -118,6 +118,12 @@ class Premium extends ChangeNotifier {
   String efectoNombre = Cosmeticos.ninguno;
   String tema = Cosmeticos.ninguno;
 
+  /// Color propio del nombre («#RRGGBB») o null. Se guarda aunque se acaben los beneficios.
+  String? colorNombre;
+
+  /// ¿Aparece en la pared de agradecimiento? (casilla del perfil, apagada por defecto).
+  bool enPared = false;
+
   String _cuenta = '';
 
   bool get activo => estado.vigente();
@@ -126,6 +132,12 @@ class Premium extends ChangeNotifier {
   String get marcoEfectivo => activo ? marco : Cosmeticos.ninguno;
   String get efectoNombreEfectivo => activo ? efectoNombre : Cosmeticos.ninguno;
   String get temaEfectivo => activo ? tema : Cosmeticos.ninguno;
+  String? get colorNombreEfectivo => activo ? colorNombre : null;
+
+  /// Donador o fundador de verdad (la prueba no cuenta): la pared y la mascota propia son solo para ellos.
+  bool get donaDeVerdad => esDonadorDeVerdad(estado);
+  static bool esDonadorDeVerdad(EstadoPremium e, [DateTime? ahora]) =>
+      e.vigente(ahora) && (e.tipo == 'donador' || e.tipo == 'fundador');
 
   static const _columnas = 'marco,efecto_nombre,tema_premium';
 
@@ -218,11 +230,24 @@ class Premium extends ChangeNotifier {
         e = Cosmeticos.efectoNombre(f['efecto_nombre']);
         t = Cosmeticos.tema(f['tema_premium']);
       }
-      if (nuevo != estado || m != marco || e != efectoNombre || t != tema) {
+      // el color y la casilla de la pared van aparte: si la base aún no tiene esas columnas, lo de
+      // siempre se sigue leyendo bien
+      var cn = colorNombre, ep = enPared;
+      try {
+        final filas = await social.sesion.pedir('GET', 'perfiles?select=color_nombre,en_pared&id=eq.${social.yo}');
+        final f = filas is List && filas.isNotEmpty && filas.first is Map ? filas.first as Map : const {};
+        if (f.containsKey('color_nombre')) cn = Cosmeticos.colorNombre(f['color_nombre']);
+        if (f.containsKey('en_pared')) ep = f['en_pared'] == true;
+      } on SinConexion {
+        rethrow;
+      } catch (_) {}
+      if (nuevo != estado || m != marco || e != efectoNombre || t != tema || cn != colorNombre || ep != enPared) {
         estado = nuevo;
         marco = m;
         efectoNombre = e;
         tema = t;
+        colorNombre = cn;
+        enPared = ep;
         await _guardarLocal();
         notifyListeners();
       }
@@ -274,12 +299,45 @@ class Premium extends ChangeNotifier {
     }
   }
 
+  /// Guarda el color del nombre ([color] null lo quita). Se ve al momento; si la nube falla se deshace y
+  /// se lanza un [ErrorNube] con un mensaje claro.
+  Future<void> guardarColorNombre(Social social, String? color) =>
+      _guardarCampo(social, 'color_nombre', Cosmeticos.colorNombre(color), () => colorNombre, (v) => colorNombre = v as String?);
+
+  /// La casilla «Aparecer en la pared de agradecimiento».
+  Future<void> guardarEnPared(Social social, bool valor) =>
+      _guardarCampo(social, 'en_pared', valor, () => enPared, (v) => enPared = v as bool);
+
+  Future<void> _guardarCampo(Social social, String columna, Object? valor, Object? Function() leer,
+      void Function(Object?) poner) async {
+    final antes = leer();
+    poner(valor);
+    notifyListeners();
+    await _guardarLocal();
+    try {
+      await social.sesion.pedir('PATCH', 'perfiles?id=eq.${social.yo}', cuerpo: {columna: valor});
+    } catch (e) {
+      poner(antes);
+      notifyListeners();
+      await _guardarLocal();
+      if (e is SinConexion) throw const ErrorNube('Sin internet: no se pudo guardar. Inténtalo otra vez.');
+      // un 400 sin explicación: la base todavía no tiene la columna (falta aplicar donadores_extra.sql)
+      if (e is ErrorNube && e.mensaje.contains('respondió un error (4')) {
+        throw const ErrorNube('Esto todavía no está disponible en tu cuenta. Prueba más tarde.');
+      }
+      if (e is ErrorNube) rethrow;
+      throw const ErrorNube('No se pudo guardar. Revisa tu internet e inténtalo otra vez.');
+    }
+  }
+
   /// Al cerrar sesión: nada de la cuenta anterior se queda a la vista.
   void reiniciar() {
     _pararTemporizadores();
     _cuenta = '';
     estado = EstadoPremium.ninguno;
     marco = efectoNombre = tema = Cosmeticos.ninguno;
+    colorNombre = null;
+    enPared = false;
     notifyListeners();
   }
 
@@ -297,6 +355,8 @@ class Premium extends ChangeNotifier {
       marco = Cosmeticos.marco(d['marco']);
       efectoNombre = Cosmeticos.efectoNombre(d['efecto_nombre']);
       tema = Cosmeticos.tema(d['tema']);
+      colorNombre = Cosmeticos.colorNombre(d['color_nombre']);
+      enPared = d['en_pared'] == true;
       notifyListeners();
     } catch (_) {}
   }
@@ -307,6 +367,7 @@ class Premium extends ChangeNotifier {
       final p = await SharedPreferences.getInstance();
       await p.setString(_clave, jsonEncode({
         'estado': estado.aJson(), 'marco': marco, 'efecto_nombre': efectoNombre, 'tema': tema,
+        'color_nombre': colorNombre, 'en_pared': enPared,
       }));
     } catch (_) {}
   }

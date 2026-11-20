@@ -54,6 +54,8 @@
 		<key>NSAllowsArbitraryLoads</key>
 		<true/>
 	</dict>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Caudal escucha unos segundos solo cuando tocas «¿Qué suena?», para reconocer la canción.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Caudal guarda en tu galería los videos que descargues cuando eliges «Guardar video».</string>
 	<key>LSRequiresIPhoneOS</key>
@@ -97,6 +99,13 @@
 		<string>UIInterfaceOrientationPortraitUpsideDown</string>
 		<string>UIInterfaceOrientationLandscapeLeft</string>
 		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Caudal busca en tu wifi las teles, Chromecast y altavoces para enviarles tu música.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_googlecast._tcp</string>
+		<string>_CC1AD845._googlecast._tcp</string>
 	</array>
 </dict>
 </plist>

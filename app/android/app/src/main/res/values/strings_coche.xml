@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Accesos directos del icono y frases del asistente de Google (shortcuts.xml) -->
+<resources>
+    <string name="atajo_megusta_corto">Me gusta</string>
+    <string name="atajo_megusta_largo">Me gusta en aleatorio</string>
+    <string name="atajo_buscar_corto">Buscar</string>
+    <string name="atajo_buscar_largo">Buscar canciones</string>
+    <string name="atajo_descargas_corto">Descargas</string>
+    <string name="atajo_descargas_largo">Música descargada</string>
+    <string name="atajo_mix_corto">Mi mix</string>
+    <string name="atajo_mix_largo">Poner mi mix del día</string>
+
+    <!-- «Ok Google, abre ... en Caudal»: lo que puede decir la persona para cada acceso -->
+    <string-array name="voz_megusta">
+        <item>me gusta</item>
+        <item>mis me gusta</item>
+        <item>mis favoritas</item>
+        <item>canciones favoritas</item>
+        <item>me gusta en aleatorio</item>
+    </string-array>
+    <string-array name="voz_buscar">
+        <item>buscar</item>
+        <item>buscador</item>
+        <item>búsqueda</item>
+    </string-array>
+    <string-array name="voz_descargas">
+        <item>descargas</item>
+        <item>mis descargas</item>
+        <item>música descargada</item>
+        <item>canciones descargadas</item>
+    </string-array>
+    <string-array name="voz_mix">
+        <item>mi mix</item>
+        <item>mix del día</item>
+        <item>mi mix del día</item>
+        <item>mix diario</item>
+    </string-array>
+</resources>

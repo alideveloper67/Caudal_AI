@@ -42,7 +42,7 @@ def test_audio_sin_recomprimir_elige_la_pista_adecuada():
     from descargador.motor import selector_formato
     assert selector_formato("mejor", tipo="audio", formato_audio="m4a").startswith("ba[ext=m4a]")
     assert selector_formato("mejor", tipo="audio", formato_audio="opus").startswith("ba[acodec=opus]")
-    assert selector_formato("mejor", tipo="audio", formato_audio="mp3") == "ba/b"
+    assert selector_formato("mejor", tipo="audio", formato_audio="mp3") == "ba[format_id!*=drc]/ba/b"
 
 
 def test_solo_video_no_lleva_sonido():

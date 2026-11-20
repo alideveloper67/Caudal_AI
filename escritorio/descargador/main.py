@@ -49,6 +49,9 @@ def main():
         from descargador import registro_fallos
         from descargador.config import carpeta_datos
         registro_fallos.activar(carpeta_datos())
+        # aviso de errores a la nube (ver aviso_errores.py); version y pantalla se toman solas
+        from descargador import aviso_errores
+        aviso_errores.activar(carpeta_datos())
     except Exception:  # noqa: BLE001
         pass
 

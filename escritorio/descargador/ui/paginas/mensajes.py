@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (QDialog, QFrame, QGraphicsOpacityEffect, QHBoxLay
                                QPushButton, QScrollArea, QToolButton, QVBoxLayout, QWidget)
 
 from ... import chat as CH
+from ... import colores_nombre
 from ... import listas_compartidas as LC
 from ... import social as S
 from ...hilos import en_segundo_plano
@@ -145,7 +146,8 @@ class DialogoNuevoChat(QDialog):
                         persona_id=p.get("id")))
         col = QVBoxLayout()
         col.setSpacing(0)
-        n = nombre_efecto(S.nombre_visible(p), "font-weight:700;", p.get("efecto_nombre"), False)
+        n = nombre_efecto(S.nombre_visible(p), "font-weight:700;", p.get("efecto_nombre"), False,
+                          ctx=self.ctx, usuario=p.get("usuario"))
         u = QLabel("@" + (p.get("usuario") or ""))
         u.setStyleSheet(f"color:{C['texto3']};font-size:11.5px;background:transparent;")
         col.addWidget(n)
@@ -617,9 +619,10 @@ class PaginaMensajes(QWidget):
                         persona_id=c.get("otro")))
         col = QVBoxLayout()
         col.setSpacing(0)
-        n = QLabel(c["visible"])
         sin = int(c.get("sin_leer") or 0)
-        n.setStyleSheet(f"font-weight:{900 if sin else 700};background:transparent;")
+        # el color del nombre si es donador (se pide solo y la etiqueta se repinta al llegar)
+        n = nombre_efecto(c["visible"], f"font-weight:{900 if sin else 700};", None, False,
+                          ctx=self.ctx, usuario=c.get("usuario"))
         col.addWidget(n)
         prev = QLabel(CH.vista_previa(c, self.chat.yo))
         prev.setFont(_fuente_emoji(9))
@@ -644,13 +647,27 @@ class PaginaMensajes(QWidget):
         return b
 
     # ------------------------------------------------------------ conversacion
+    def _pintar_cabecera_chat(self):
+        """El nombre de con quién hablas (con su color de donador, si tiene) y su @usuario."""
+        c = self.actual
+        if not c:
+            return
+        usuario = c.get("usuario") or ""
+        color = colores_nombre.gestor(self.ctx).color_de(usuario) if usuario else None
+        nombre = _html(c["visible"])
+        if color:
+            nombre = f"<span style='color:{color}'>{nombre}</span>"
+        self.et_con.setText(f"{nombre}  <span style='color:{C['texto3']};font-size:13px;"
+                            f"font-weight:600'>@{_html(usuario)}</span>" if usuario else nombre)
+
     def _abrir(self, c):
         self.actual = c
         self.mensajes = []
         self.pendientes = {}
-        usuario = c.get("usuario") or ""
-        self.et_con.setText(f"{_html(c['visible'])}  <span style='color:{C['texto3']};font-size:13px;"
-                            f"font-weight:600'>@{_html(usuario)}</span>" if usuario else _html(c["visible"]))
+        self._pintar_cabecera_chat()
+        if not getattr(self, "_colores_atados", False):
+            self._colores_atados = True
+            colores_nombre.gestor(self.ctx).cambiado.connect(self._pintar_cabecera_chat)
         self.campo.setPlaceholderText(f"Escríbele a {c['visible']}")
         amigo = c.get("es_amigo", True)
         self._activar(bool(amigo))

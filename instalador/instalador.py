@@ -102,12 +102,84 @@ def carpeta_menu_inicio():
     return os.path.join(base, "Microsoft", "Windows", "Start Menu", "Programs")
 
 
+def _escritorio_de_windows():
+    """El escritorio que Windows muestra de verdad (con OneDrive, en español
+    es OneDrive\\Escritorio, no OneDrive\\Desktop)."""
+    try:
+        import ctypes
+        from ctypes import wintypes
+        ruta = ctypes.create_unicode_buffer(wintypes.MAX_PATH)
+        # CSIDL_DESKTOPDIRECTORY = 0x10
+        if ctypes.windll.shell32.SHGetFolderPathW(None, 0x10, None, 0, ruta) == 0:
+            return ruta.value
+    except (AttributeError, OSError, ImportError):
+        pass
+    return ""
+
+
 def escritorio():
-    for candidata in (os.path.join(os.path.expanduser("~"), "OneDrive", "Desktop"),
-                      os.path.join(os.path.expanduser("~"), "Desktop")):
-        if os.path.isdir(candidata):
+    inicio = os.path.expanduser("~")
+    for candidata in (_escritorio_de_windows(),
+                      os.path.join(inicio, "OneDrive", "Escritorio"),
+                      os.path.join(inicio, "OneDrive", "Desktop"),
+                      os.path.join(inicio, "Escritorio"),
+                      os.path.join(inicio, "Desktop")):
+        if candidata and os.path.isdir(candidata):
             return candidata
     return ""
+
+
+def sitios_de_accesos():
+    """Donde puede haber accesos directos a Caudal hechos por el usuario."""
+    sitios = []
+    for sitio in (escritorio(), os.path.join(os.path.expanduser("~"), "Desktop"),
+                  carpeta_menu_inicio()):
+        if sitio and os.path.isdir(sitio) and sitio not in sitios:
+            sitios.append(sitio)
+    return sitios
+
+
+def reparar_accesos(ejecutable, sitios=None):
+    """Hace que todo acceso directo a una copia de Caudal apunte a la instalada.
+
+    Si alguien abre Caudal desde una copia vieja (una carpeta suelta, una version
+    portable), esa copia sigue avisando de la actualizacion aunque ya se haya
+    instalado: el instalador pone la nueva en su carpeta, pero el acceso directo
+    sigue abriendo la vieja. Devuelve los accesos que se corrigieron.
+    """
+    sitios = [s for s in (sitios if sitios is not None else sitios_de_accesos())
+              if s and os.path.isdir(s)]
+    if not sitios:
+        return []
+    guion = r'''
+$ErrorActionPreference = 'SilentlyContinue'
+$exe = $env:CAUDAL_EXE
+$ws = New-Object -ComObject WScript.Shell
+foreach ($sitio in ($env:CAUDAL_SITIOS -split '\|')) {
+  if (-not $sitio) { continue }
+  Get-ChildItem -LiteralPath $sitio -Recurse -Filter *.lnk | ForEach-Object {
+    $s = $ws.CreateShortcut($_.FullName)
+    $t = $s.TargetPath
+    if ($t -and ([IO.Path]::GetFileName($t) -ieq 'Caudal Escritorio.exe') -and ($t -ine $exe)) {
+      $s.TargetPath = $exe
+      $s.WorkingDirectory = [IO.Path]::GetDirectoryName($exe)
+      $s.IconLocation = "$exe,0"
+      $s.Save()
+      [Console]::Out.WriteLine($_.FullName)
+    }
+  }
+}
+'''
+    entorno = dict(os.environ, CAUDAL_EXE=os.path.abspath(ejecutable),
+                   CAUDAL_SITIOS="|".join(sitios))
+    banderas = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    try:
+        r = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", guion],
+                           capture_output=True, text=True, encoding="utf-8", errors="replace",
+                           env=entorno, creationflags=banderas, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return []
+    return [linea.strip() for linea in (r.stdout or "").splitlines() if linea.strip()]
 
 
 # ---------------------------------------------------------------- instalar
@@ -199,6 +271,10 @@ def instalar(carpeta, al_progresar=None, crear_escritorio=True):
     menu = carpeta_menu_inicio()
     if os.path.isdir(menu):
         crear_acceso(os.path.join(menu, "Caudal.lnk"), ejecutable, ejecutable, "Caudal")
+
+    # tambien en las actualizaciones automaticas: si se abrio Caudal desde otra
+    # copia, sus accesos directos pasan a abrir esta y el aviso no se repite
+    reparar_accesos(ejecutable)
 
     registrar(carpeta, leer_version())
 

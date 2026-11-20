@@ -654,6 +654,40 @@ class Social:
         return {"marco": marco_valido(d.get("marco")), "efecto_nombre": efecto_valido(d.get("efecto_nombre")),
                 "tema_premium": tema_valido(d.get("tema_premium"))}
 
+    # --- más para donadores (supabase/donadores_extra.sql). Va aparte de leer_personalizacion: si la base
+    # todavía no tiene estas columnas, lo de siempre (marco, efecto, tema) sigue funcionando.
+    def leer_extra_donador(self):
+        """Mi color del nombre y si quiero salir en la pared: {color_nombre, en_pared}."""
+        from .premium_datos import color_valido
+        filas = self.sesion.pedir("GET", f"perfiles?select=color_nombre,en_pared&id=eq.{self.yo}")
+        d = (filas or [{}])[0] or {}
+        return {"color_nombre": color_valido(d.get("color_nombre")), "en_pared": d.get("en_pared") is True}
+
+    def guardar_extra_donador(self, campos):
+        """Guarda `color_nombre` y/o `en_pared` (y nada más)."""
+        limpio = {k: v for k, v in (campos or {}).items() if k in ("color_nombre", "en_pared")}
+        if limpio:
+            self.sesion.pedir("PATCH", f"perfiles?id=eq.{self.yo}", json=limpio)
+
+    def colores_nombre(self, usuarios):
+        """{usuario: '#RRGGBB'} de los que tienen un color vigente (el servidor filtra)."""
+        from .premium_datos import color_valido
+        lista = sorted({str(u).strip().lower() for u in usuarios or [] if str(u or "").strip()})[:200]
+        if not lista:
+            return {}
+        d = self.sesion.rpc("colores_nombre", p_usuarios=lista)
+        salida = {}
+        for u, c in (d.items() if isinstance(d, dict) else []):
+            c = color_valido(c)
+            if c:
+                salida[str(u).lower()] = c
+        return salida
+
+    def pared_agradecimiento(self):
+        from .premium_datos import leer_pared
+        return leer_pared(self.sesion.rpc("pared_agradecimiento"))
+
+
     def subir_fondo(self, datos_jpeg):
         return self._subir_imagen_perfil("fondo.jpg", datos_jpeg, "tu fondo")
 
@@ -849,3 +883,12 @@ def social_de(ctx):
 
 def tipo_de_archivo(ruta):
     return mimetypes.guess_type(str(ruta))[0] or "application/octet-stream"
+
+
+def pared_agradecimiento_publica():
+    """La pared sin sesión (es pública, como en la web)."""
+    from .premium_datos import leer_pared
+    r = nube._peticion("POST", "/rest/v1/rpc/pared_agradecimiento", json={})
+    if r.status_code >= 300:
+        raise nube._traducir(r)
+    return leer_pared(r.json() if r.text.strip() else [])

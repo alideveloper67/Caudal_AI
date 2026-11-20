@@ -20,8 +20,26 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
+    <!-- efectos de sonido (limitador de Volumen maximo) en las sesiones de la app -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>
     <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+    <!-- «¿Qué suena?»: escuchar unos segundos para reconocer la canción (solo al tocar el botón) -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO"/>
+
+    <!-- despertador con musica: suena a la hora exacta con la app cerrada y el telefono
+         bloqueado (Despertador.kt), enciende su pantalla sobre el bloqueo, vibra suave y se
+         vuelve a programar al reiniciar el telefono -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM"/>
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT"/>
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+    <uses-permission android:name="android.permission.VIBRATE"/>
+
+    <!-- modo coche: saber cuando se conecta el Bluetooth del coche (CocheBluetooth.kt) -->
+    <uses-permission android:name="android.permission.BLUETOOTH"
+        android:maxSdkVersion="30"/>
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
+    <uses-feature android:name="android.hardware.bluetooth" android:required="false"/>
 
     <!-- para instalar las actualizaciones desde la propia app -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
@@ -106,6 +124,42 @@
                 android:resource="@xml/caudal_widget_info"/>
         </receiver>
 
+        <!-- modo coche: aviso al conectar el Bluetooth del coche con Caudal cerrado -->
+        <receiver
+            android:name=".CocheReceptor"
+            android:exported="true"
+            tools:ignore="ExportedReceiver">
+            <intent-filter>
+                <action android:name="android.bluetooth.device.action.ACL_CONNECTED"/>
+                <action android:name="android.bluetooth.device.action.ACL_DISCONNECTED"/>
+            </intent-filter>
+        </receiver>
+
+        <!-- Android Auto: las caratulas guardadas en el telefono (solo imagenes de Caudal, solo lectura) -->
+        <provider
+            android:name=".CaratulaProveedor"
+            android:authorities="${applicationId}.caratulas"
+            android:exported="true"
+            android:grantUriPermissions="false"
+            tools:ignore="ExportedContentProvider"/>
+
+        <!-- asistente de Google: «pon ... en Caudal» y «busca ... en Caudal» (VozActivity.kt) -->
+        <activity
+            android:name=".VozActivity"
+            android:exported="true"
+            android:excludeFromRecents="true"
+            android:noHistory="true"
+            android:theme="@android:style/Theme.NoDisplay">
+            <intent-filter>
+                <action android:name="android.media.action.MEDIA_PLAY_FROM_SEARCH"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="com.google.android.gms.actions.SEARCH_ACTION"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+            </intent-filter>
+        </activity>
+
         <!-- Android Auto: la biblioteca en la pantalla del coche -->
         <meta-data
             android:name="com.google.android.gms.car.application"
@@ -113,6 +167,52 @@
         <meta-data
             android:name="com.google.android.gms.car.notification.SmallIcon"
             android:resource="@drawable/ic_notificacion"/>
+
+        <!-- Google Cast: enviar la musica a Chromecast y altavoces (flutter_chrome_cast) -->
+        <meta-data
+            android:name="com.google.android.gms.cast.framework.OPTIONS_PROVIDER_CLASS_NAME"
+            android:value="com.felnanuke.google_cast.GoogleCastOptionsProvider"/>
+        <service
+            android:name="com.google.android.gms.cast.framework.media.MediaNotificationService"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback"/>
+
+        <!-- despertador con musica (Despertador*.kt): la alarma del sistema, el servicio que
+             toca la musica subiendo el volumen y la pantalla sobre el bloqueo -->
+        <receiver
+            android:name=".DespertadorReceptor"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED"/>
+                <action android:name="android.intent.action.TIME_SET"/>
+                <action android:name="android.intent.action.TIMEZONE_CHANGED"/>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
+                <action android:name="android.app.action.SCHEDULE_EXACT_ALARM_PERMISSION_STATE_CHANGED"/>
+            </intent-filter>
+        </receiver>
+        <service
+            android:name=".DespertadorServicio"
+            android:exported="false"
+            android:foregroundServiceType="mediaPlayback"/>
+        <activity
+            android:name=".DespertadorActivity"
+            android:exported="false"
+            android:showWhenLocked="true"
+            android:turnScreenOn="true"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTask"
+            android:taskAffinity="com.kevinrr.caudal.despertador"
+            android:theme="@android:style/Theme.Material.NoActionBar"/>
+
+        <!-- letra en la pantalla bloqueada: el verso en grande sin desbloquear (LetraPantallaBloqueo.kt) -->
+        <activity
+            android:name=".LetraBloqueoActivity"
+            android:exported="false"
+            android:showWhenLocked="true"
+            android:excludeFromRecents="true"
+            android:launchMode="singleTask"
+            android:taskAffinity="com.kevinrr.caudal.letra"
+            android:theme="@android:style/Theme.Material.NoActionBar"/>
 
         <meta-data
             android:name="flutterEmbedding"

@@ -12,6 +12,7 @@ import 'package:caudal/nucleo/fondo_app.dart';
 import 'package:caudal/nucleo/mascota_app.dart';
 import 'package:caudal/nucleo/premium_letras.dart';
 import 'package:caudal/nucleo/streams.dart';
+import 'package:caudal/reproduccion/cast.dart';
 import 'package:caudal/reproduccion/reproductor.dart';
 import 'package:caudal/ui/paginas/karaoke_pagina.dart';
 import 'package:caudal/ui/paginas/reproductor_pagina.dart';
@@ -30,7 +31,11 @@ import 'package:image/image.dart' as img;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'apoyo/cast_falso.dart';
+
 class _R extends ChangeNotifier implements Reproductor {
+  @override
+  late final ControlCast cast = castFalso();
   @override
   Json? actual;
   @override
@@ -126,7 +131,7 @@ late _R _r;
 late Servicios _s;
 
 Future<void> _montar(WidgetTester t, Widget hijo,
-    {Json? pista, bool sinAnimar = false, bool donador = true, Fuente? fuente, bool bajoNivel = true}) async {
+    {Json? pista, bool sinAnimar = false, bool donador = true, Fuente? fuente}) async {
   SharedPreferences.setMockInitialValues({});
   esPremiumLetras = () => donador;
   final ajustes = await Ajustes.cargar('prueba');

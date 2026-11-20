@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Version que se reparte a mano y desde GitHub: el despertador pide la alarma exacta sin que haya
+     que darle «Alarmas y recordatorios» a mano (Android 13+ la concede a las apps con despertador).
+     La de Google Play no lo lleva: alli se usa SCHEDULE_EXACT_ALARM y la app guia al permiso. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>
+</manifest>

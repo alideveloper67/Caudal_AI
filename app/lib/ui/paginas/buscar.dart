@@ -1,13 +1,16 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
+import '../../coche/ejecutar_atajo.dart';
 import '../../nucleo/catalogo.dart';
 import '../../nucleo/coleccion.dart';
 import '../comunes.dart';
 import '../servicios.dart';
 import '../tema.dart';
 import 'inicio.dart';
+import 'que_suena_pagina.dart';
 
 class BuscarPagina extends StatefulWidget {
   const BuscarPagina({super.key});
@@ -54,6 +57,16 @@ class _BuscarPaginaState extends State<BuscarPagina> with AutomaticKeepAliveClie
     });
     _foco.addListener(_alCambiarFoco);
     BuscarPagina._enfocar.addListener(_alPedirFoco);
+    // un acceso directo («buscar X») deja su consulta aquí; si llegó antes de montar la pestaña, se recoge al montar
+    consultaDeAtajo.addListener(_alAtajo);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _alAtajo());
+  }
+
+  void _alAtajo() {
+    final texto = consultaDeAtajo.value;
+    if (!mounted || texto == null) return;
+    consultaDeAtajo.value = null;
+    unawaited(_buscar(texto));
   }
 
   void _alPedirFoco() {
@@ -84,6 +97,7 @@ class _BuscarPaginaState extends State<BuscarPagina> with AutomaticKeepAliveClie
   void dispose() {
     _espera?.cancel();
     BuscarPagina._enfocar.removeListener(_alPedirFoco);
+    consultaDeAtajo.removeListener(_alAtajo);
     _foco.removeListener(_alCambiarFoco);
     _campo.dispose();
     _foco.dispose();
@@ -216,27 +230,40 @@ class _BuscarPaginaState extends State<BuscarPagina> with AutomaticKeepAliveClie
                       child: SizedBox(width: double.infinity, child: Text('Buscar', style: estiloTituloPagina)))
                   : const SizedBox(width: double.infinity),
             ),
-            TextField(
-              controller: _campo,
-              focusNode: _foco,
-              textInputAction: TextInputAction.search,
-              onChanged: _alEscribir,
-              onSubmitted: _buscar,
-              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
-              decoration: InputDecoration(
-                hintText: '¿Qué quieres escuchar o ver?  ·  o pega un enlace',
-                prefixIcon: const Icon(Icons.search_rounded, color: C.texto2),
-                suffixIcon: _campo.text.isEmpty
-                    ? null
-                    : IconButton(icon: const Icon(Icons.close_rounded), onPressed: () {
-                        _campo.clear();
-                        _alEscribir('');
-                      }),
-                fillColor: _foco.hasFocus ? C.superficie3 : C.texto,
-                hintStyle: TextStyle(color: _foco.hasFocus ? C.texto3 : const Color(0xFF3A3F4A)),
+            Row(children: [
+              Expanded(
+                child: TextField(
+                  controller: _campo,
+                  focusNode: _foco,
+                  textInputAction: TextInputAction.search,
+                  onChanged: _alEscribir,
+                  onSubmitted: _buscar,
+                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                  decoration: InputDecoration(
+                    hintText: '¿Qué quieres escuchar o ver?  ·  o pega un enlace',
+                    prefixIcon: const Icon(Icons.search_rounded, color: C.texto2),
+                    suffixIcon: _campo.text.isEmpty
+                        ? null
+                        : IconButton(icon: const Icon(Icons.close_rounded), onPressed: () {
+                            _campo.clear();
+                            _alEscribir('');
+                          }),
+                    fillColor: _foco.hasFocus ? C.superficie3 : C.texto,
+                    hintStyle: TextStyle(color: _foco.hasFocus ? C.texto3 : const Color(0xFF3A3F4A)),
+                  ),
+                  cursorColor: C.acento,
+                ),
               ),
-              cursorColor: C.acento,
-            ),
+              // «¿Qué suena?»: reconoce una canción por el micrófono (no existe en la web)
+              if (!kIsWeb) ...[
+                const SizedBox(width: 6),
+                IconButton.filledTonal(
+                  tooltip: '¿Qué suena?',
+                  icon: const Icon(Icons.graphic_eq_rounded),
+                  onPressed: () => QueSuenaPagina.abrir(context),
+                ),
+              ],
+            ]),
             AnimatedSize(
               duration: Mov.normal,
               curve: Mov.curva,

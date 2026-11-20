@@ -2,6 +2,103 @@
 <!-- Atajo de la app (mantener pulsado el icono): abre el Modo estudio con el
      perfil que usaste la última vez, mediante el enlace caudal://estudio. -->
 <shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Asistente de Google (App Actions): «Ok Google, abre mi mix en Caudal».
+         El asistente reconoce los accesos de abajo por sus frases (los arrays voz_megusta, voz_buscar, voz_descargas y voz_mix) y
+         manda su shortcutId; si no reconoce nada, manda lo dicho tal cual.
+         Lo atiende lib/coche/atajos_caudal.dart (caudal://funcion?nombre=...). -->
+    <capability android:name="actions.intent.OPEN_APP_FEATURE">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.kevinrr.caudal"
+            android:targetClass="com.kevinrr.caudal.MainActivity">
+            <url-template android:value="caudal://funcion{?nombre}" />
+            <parameter
+                android:name="feature"
+                android:key="nombre" />
+        </intent>
+    </capability>
+    <!-- «Ok Google, busca Shakira en Caudal» -->
+    <capability android:name="actions.intent.GET_THING">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.kevinrr.caudal"
+            android:targetClass="com.kevinrr.caudal.MainActivity">
+            <url-template android:value="caudal://buscar{?q}" />
+            <parameter
+                android:name="thing.name"
+                android:key="q" />
+        </intent>
+    </capability>
+
+    <!-- Accesos directos al mantener pulsado el icono (los cuatro primeros son los que se ven) -->
+    <shortcut
+        android:shortcutId="megusta"
+        android:enabled="true"
+        android:icon="@drawable/atajo_megusta"
+        android:shortcutShortLabel="@string/atajo_megusta_corto"
+        android:shortcutLongLabel="@string/atajo_megusta_largo">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.kevinrr.caudal"
+            android:targetClass="com.kevinrr.caudal.MainActivity"
+            android:data="caudal://megusta" />
+        <capability-binding android:key="actions.intent.OPEN_APP_FEATURE">
+            <parameter-binding
+                android:key="feature"
+                android:value="@array/voz_megusta" />
+        </capability-binding>
+    </shortcut>
+    <shortcut
+        android:shortcutId="buscar"
+        android:enabled="true"
+        android:icon="@drawable/atajo_buscar"
+        android:shortcutShortLabel="@string/atajo_buscar_corto"
+        android:shortcutLongLabel="@string/atajo_buscar_largo">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.kevinrr.caudal"
+            android:targetClass="com.kevinrr.caudal.MainActivity"
+            android:data="caudal://buscar" />
+        <capability-binding android:key="actions.intent.OPEN_APP_FEATURE">
+            <parameter-binding
+                android:key="feature"
+                android:value="@array/voz_buscar" />
+        </capability-binding>
+    </shortcut>
+    <shortcut
+        android:shortcutId="descargas"
+        android:enabled="true"
+        android:icon="@drawable/atajo_descargas"
+        android:shortcutShortLabel="@string/atajo_descargas_corto"
+        android:shortcutLongLabel="@string/atajo_descargas_largo">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.kevinrr.caudal"
+            android:targetClass="com.kevinrr.caudal.MainActivity"
+            android:data="caudal://descargas" />
+        <capability-binding android:key="actions.intent.OPEN_APP_FEATURE">
+            <parameter-binding
+                android:key="feature"
+                android:value="@array/voz_descargas" />
+        </capability-binding>
+    </shortcut>
+    <shortcut
+        android:shortcutId="mix"
+        android:enabled="true"
+        android:icon="@drawable/atajo_mix"
+        android:shortcutShortLabel="@string/atajo_mix_corto"
+        android:shortcutLongLabel="@string/atajo_mix_largo">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.kevinrr.caudal"
+            android:targetClass="com.kevinrr.caudal.MainActivity"
+            android:data="caudal://mix" />
+        <capability-binding android:key="actions.intent.OPEN_APP_FEATURE">
+            <parameter-binding
+                android:key="feature"
+                android:value="@array/voz_mix" />
+        </capability-binding>
+    </shortcut>
     <shortcut
         android:shortcutId="estudio"
         android:enabled="true"

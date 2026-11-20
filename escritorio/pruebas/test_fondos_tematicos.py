@@ -13,7 +13,11 @@ from PySide6.QtWidgets import QApplication  # noqa: E402
 from descargador.ui import estilos as E  # noqa: E402
 
 PERSONAJES = {"hellokitty", "kuromi", "pikachu", "charmander", "squirtle", "bulbasaur", "snoopy", "totoro",
-              "mymelody", "purin", "cinnamoroll", "kirby", "doraemon", "olaf", "nyan", "gato_negro", "capibara", "pochacco", "nailong"}
+              "mymelody", "purin", "cinnamoroll", "kirby", "doraemon", "olaf", "nyan", "gato_negro", "capibara", "pochacco", "nailong",
+              # personajes de noviembre
+              "messi", "wos", "nightwing", "goku_ultra", "goku_blue", "wanda", "loki", "jake", "finn", "marceline",
+              "pan_canela", "rigby", "steven", "perla", "lapislazuli", "jaspe", "garnet", "peridot", "amatista", "leon",
+              "richard", "gumball", "darwin", "mordecai"}
 
 
 @pytest.fixture(scope="module")
@@ -21,7 +25,7 @@ def app():
     return QApplication.instance() or QApplication([])
 
 
-def test_estan_los_19_y_los_de_siempre():
+def test_estan_los_43_y_los_de_siempre():
     assert set(E.TEMAS) == PERSONAJES
     for k in ("oscuro", "negro", "noche", "uva", "bosque", "grafito"):
         assert k in E.FONDOS and not E.es_tema(k)

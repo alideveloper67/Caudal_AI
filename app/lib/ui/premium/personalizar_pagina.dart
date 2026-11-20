@@ -4,6 +4,7 @@ import '../../nucleo/cosmeticos.dart';
 import '../../nucleo/nube.dart';
 import '../../nucleo/pases_regalo.dart';
 import '../../nucleo/premium.dart';
+import '../paginas/aspecto_pagina.dart' show SelectorColor;
 import '../paginas/donar.dart';
 import '../paginas/perfil_comun.dart';
 import '../servicios.dart';
@@ -11,6 +12,8 @@ import '../tema.dart';
 import 'atajos_donador.dart';
 import 'canje_pase.dart';
 import 'marcos.dart';
+import 'mas_donadores.dart';
+import 'nombre_color.dart';
 import 'regalo_pases.dart';
 import 'temas_premium.dart';
 
@@ -30,6 +33,7 @@ class _PersonalizarPaginaState extends State<PersonalizarPagina> {
   late String _marco = Premium.i.marco;
   late String _efecto = Premium.i.efectoNombre;
   late String _tema = Premium.i.tema;
+  late String? _color = Premium.i.colorNombre;
   String _foto = '';
   bool _guardando = false;
 
@@ -106,7 +110,48 @@ class _PersonalizarPaginaState extends State<PersonalizarPagina> {
       _marco = Premium.i.marco;
       _efecto = Premium.i.efectoNombre;
       _tema = Premium.i.tema;
+      _color = Premium.i.colorNombre;
     });
+  }
+
+  /// El color del nombre: con beneficios se guarda; sin ellos solo se ve en la vista previa.
+  Future<void> _elegirColor(String? hex) async {
+    final antes = _color;
+    setState(() => _color = hex);
+    if (!Premium.i.activo) {
+      if (hex != null) _bloqueado();
+      return;
+    }
+    final social = socialDe(context);
+    if (social == null) {
+      setState(() => _color = antes);
+      _aviso(textoSinConexion(context));
+      return;
+    }
+    setState(() => _guardando = true);
+    try {
+      await Premium.i.guardarColorNombre(social, hex);
+    } on ErrorNube catch (e) {
+      if (mounted) {
+        setState(() => _color = antes);
+        _aviso(e.mensaje);
+      }
+    } finally {
+      if (mounted) setState(() => _guardando = false);
+    }
+  }
+
+  Future<void> _colorPropio() async {
+    final elegido = await showModalBottomSheet<Color>(
+      context: context,
+      useRootNavigator: true,
+      isScrollControlled: true,
+      useSafeArea: true,
+      backgroundColor: C.panel,
+      showDragHandle: true,
+      builder: (_) => SelectorColor(inicial: colorDeHex(_color) ?? const Color(0xFFFF5C8A), fondo: false),
+    );
+    if (elegido != null && mounted) await _elegirColor(Aspecto.hexDe(elegido));
   }
 
   @override
@@ -141,6 +186,20 @@ class _PersonalizarPaginaState extends State<PersonalizarPagina> {
             const SizedBox(height: Esp.xl),
             _titulo('Tema de color'),
             _opciones([for (final c in Cosmeticos.temas) _tileTema(c, activo)]),
+            const SizedBox(height: Esp.xl),
+            _titulo('Color del nombre'),
+            const Padding(
+              padding: EdgeInsets.only(bottom: Esp.s),
+              child: Text('Se ve en tu perfil, en los chats y en «Juntos».', style: estiloSecundario),
+            ),
+            _opciones([
+              _tileColor(null, 'Sin color', activo),
+              for (final c in Cosmeticos.paletaNombre) _tileColor(c.$2, c.$1, activo),
+              _tileColorPropio(activo),
+            ]),
+            const SizedBox(height: Esp.xl),
+            _titulo('Más para quienes donan'),
+            const MasParaDonadores(),
             const SizedBox(height: Esp.xl),
             const AtajosDonador(),
             if (PasesRegalo.puedeRegalar(e)) ...[
@@ -243,6 +302,7 @@ class _PersonalizarPaginaState extends State<PersonalizarPagina> {
           const SizedBox(height: 12),
           NombreEfecto(_nombre,
               efecto: _efecto,
+              color: colorDeHex(_color),
               animar: true,
               textAlign: TextAlign.center,
               estilo: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900)),
@@ -341,6 +401,49 @@ class _PersonalizarPaginaState extends State<PersonalizarPagina> {
             efecto: clave,
             textAlign: TextAlign.center,
             estilo: const TextStyle(fontSize: 15, fontWeight: FontWeight.w900)),
+      ),
+    );
+  }
+
+  Widget _tileColor(String? hex, String nombre, bool activo) {
+    final c = colorDeHex(hex);
+    return _tile(
+      etiqueta: nombre,
+      seleccionada: _color == hex,
+      bloqueada: !activo && hex != null,
+      alTocar: () => _elegirColor(hex),
+      ancho: 72,
+      hijo: c == null
+          ? Icon(Icons.format_color_reset_rounded, color: C.texto2)
+          : Container(
+              width: 34,
+              height: 34,
+              decoration: BoxDecoration(color: c, shape: BoxShape.circle, border: Border.all(color: Colors.white24)),
+            ),
+    );
+  }
+
+  Widget _tileColorPropio(bool activo) {
+    final propio = _color != null && !Cosmeticos.paletaNombre.any((c) => c.$2 == _color);
+    return _tile(
+      etiqueta: 'Personalizado',
+      seleccionada: propio,
+      bloqueada: !activo,
+      alTocar: _colorPropio,
+      ancho: 72,
+      hijo: Container(
+        width: 34,
+        height: 34,
+        decoration: BoxDecoration(
+          shape: BoxShape.circle,
+          color: propio ? colorDeHex(_color) : null,
+          gradient: propio
+              ? null
+              : const SweepGradient(colors: [
+                  Color(0xFFFF5C8A), Color(0xFFFFC857), Color(0xFF7CFFB2), Color(0xFF22D3EE), Color(0xFFA78BFA), Color(0xFFFF5C8A)
+                ]),
+        ),
+        child: const Icon(Icons.colorize_rounded, size: 16, color: Colors.white),
       ),
     );
   }

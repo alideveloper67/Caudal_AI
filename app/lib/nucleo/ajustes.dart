@@ -3,7 +3,9 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'eq_avanzado.dart';
 import 'plataforma.dart';
+import 'sonoridad.dart';
 
 /// Preferencias de la app. Mismas claves que Caudal Escritorio, para que las
 /// que se comparten (calidad, ecualizador, region...) signifiquen lo mismo.
@@ -35,7 +37,16 @@ class Ajustes extends ChangeNotifier {
     'personaje_x': -1.0,
     'personaje_y': -1.0,
     'personaje_baila': true,
-    'super_volumen': 0, // 0..4
+    'super_volumen': 0, // (antiguo) 0..4; se sigue escribiendo a juego con volumen_maximo
+    // volumen maximo sin distorsion (sonoridad.dart): no | normal | alto | maximo
+    'volumen_maximo': 'alto',
+    // ecualizador avanzado (eq_avanzado.dart, donadores y fundadores); JSON en texto
+    'eq_avanzado': false,
+    'eq_av_bandas': '[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]',
+    'eq_av_preamp': 0.0,
+    'eq_av_nombre': '',
+    'eq_av_guardados': '{}',
+    'eq_por_salida': '{}',
     'ecualizador': false,
     'eq_bandas': '[0,0,0,0,0,0,0,0,0,0]',
     'eq_preset': 'Plano',
@@ -90,6 +101,42 @@ class Ajustes extends ChangeNotifier {
   }
 
   String texto(String clave) => _valor<String>(clave);
+
+  /// ¿Se guardó alguna vez esta clave? (para los ajustes de versiones anteriores)
+  bool tiene(String clave) => _prefs.containsKey(_prefijo + clave);
+
+  /// El nivel de «Volumen máximo» que suena (o null), contando los ajustes de antes.
+  String? get nivelVolumen => nivelEfectivo(
+        guardado: tiene('volumen_maximo') ? texto('volumen_maximo') : null,
+        superVolumen: entero('super_volumen'),
+        normalizar: sino('normalizar'),
+        normalizarGuardado: tiene('normalizar'),
+      );
+
+  /// Guarda el nivel ('no' para apagarlo) y deja la clave antigua al dia.
+  Future<void> ponerNivelVolumen(String nivel, {bool avisar = true}) async {
+    final n = nivelesVolumen.containsKey(nivel) ? nivel : 'no';
+    await poner('super_volumen', aSuperVolumen[n]!, avisar: false);
+    await poner('volumen_maximo', n, avisar: avisar);
+  }
+
+  EstadoEqAvanzado get eqAvanzado => EstadoEqAvanzado.leer(
+        activo: sino('eq_avanzado'),
+        bandas: texto('eq_av_bandas'),
+        preamp: decimal('eq_av_preamp'),
+        nombre: texto('eq_av_nombre'),
+        guardados: texto('eq_av_guardados'),
+        porSalida: texto('eq_por_salida'),
+      );
+
+  Future<void> ponerEqAvanzado(EstadoEqAvanzado e, {bool avisar = true}) async {
+    await poner('eq_av_bandas', e.bandasJson, avisar: false);
+    await poner('eq_av_preamp', e.preamp, avisar: false);
+    await poner('eq_av_nombre', e.nombre, avisar: false);
+    await poner('eq_av_guardados', e.guardadosJson, avisar: false);
+    await poner('eq_por_salida', e.porSalidaJson, avisar: false);
+    await poner('eq_avanzado', e.activo, avisar: avisar);
+  }
   int entero(String clave) => _valor<int>(clave);
   double decimal(String clave) => _valor<double>(clave);
   bool sino(String clave) => _valor<bool>(clave);
@@ -131,6 +178,7 @@ class Ajustes extends ChangeNotifier {
   /// Lo que se sube a la nube (lo comun a todos los dispositivos).
   static const compartidos = [
     'region', 'calidad_audio', 'calidad_video', 'codec_video', 'normalizar', 'super_volumen',
+    'volumen_maximo',
     'ecualizador', 'eq_bandas', 'eq_preset', 'autoplay', 'sponsorblock', 'sponsorblock_videos',
     'formato_audio', 'bitrate_mp3', 'crossfade',
     'descarga_inteligente', 'descarga_inteligente_gb', 'transicion_dj', 'apagado_suave',

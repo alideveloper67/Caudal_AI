@@ -18,10 +18,12 @@ from PySide6.QtWidgets import (QFrame, QGraphicsOpacityEffect, QGridLayout, QHBo
                                QLineEdit, QMenu, QPushButton, QScrollArea,
                                QStackedWidget, QToolButton, QVBoxLayout, QWidget, QWidgetAction)
 
+from ... import colores_nombre
 from ... import juntos as J
 from .. import iconos
 from ..componentes import Portada, _borrar_layout
 from ..estilos import C, hoja
+from ..premium_estilos import nombre_efecto
 
 # Los que salen al tocar el botón de emojis del chat (el teclado de Windows
 # también los tiene con Win + .).
@@ -461,7 +463,12 @@ class PaginaJuntos(QWidget):
         burbuja.setTextInteractionFlags(Qt.TextSelectableByMouse)
         burbuja.setFont(_fuente_emoji(10.5))
         hora = time.strftime("%H:%M", time.localtime((m.get("t") or 0) / 1000))
-        quien = "" if mio else f"<b style='color:{C['acento']}'>{_html(m.get('nombre'))}</b><br>"
+        # el nombre con su color de donador, si quien escribe tiene uno (por su @usuario en la sala)
+        color = C['acento']
+        if not mio and s:
+            usuario = next((x.usuario for x in s.miembros if x.id == m.get("de") and x.usuario), "")
+            color = (colores_nombre.gestor(self.ctx).color_de(usuario) if usuario else None) or color
+        quien = "" if mio else f"<b style='color:{color}'>{_html(m.get('nombre'))}</b><br>"
         burbuja.setText(f"{quien}{_html(m.get('texto'))}"
                         f"<span style='color:{C['acento_texto'] if mio else C['texto3']};font-size:10px'>  {hora}</span>")
         burbuja.setStyleSheet(
@@ -586,8 +593,9 @@ class PaginaJuntos(QWidget):
         h.addWidget(inicial)
         col = QVBoxLayout()
         col.setSpacing(0)
-        nombre = QLabel(m.nombre + ("  (tú)" if m.id == s.mi_id else ""))
-        nombre.setStyleSheet("font-weight:700;background:transparent;")
+        # con su color de donador, si tiene (se pide solo y se repinta al llegar)
+        nombre = nombre_efecto(m.nombre + ("  (tú)" if m.id == s.mi_id else ""), "font-weight:700;", None, False,
+                               ctx=self.ctx, usuario=m.usuario or None)
         col.addWidget(nombre)
         sub = QLabel("🎧 Pone la música" if es_dj else (f"@{m.usuario}" if m.usuario else "Escuchando"))
         sub.setFont(_fuente_emoji(8.5))

@@ -289,6 +289,72 @@
       </figure>
     </div>
   </section>
+  <!-- ===================== pared de agradecimiento (sección autónoma: estilos y script propios) ===================== -->
+  <section class="pared-gracias" id="gracias" aria-labelledby="gracias-titulo">
+    <style>
+      .pared-gracias { padding: 72px 0 88px; background: linear-gradient(180deg, #07202F, var(--fondo)); border-top: 1px solid var(--borde); }
+      .pared-gracias h2 { margin: 0 0 10px; font-size: clamp(28px, 4vw, 40px); line-height: 1.08; letter-spacing: -.02em; }
+      .pared-gracias .sub { margin: 0 0 26px; color: var(--texto2); max-width: 640px; }
+      .pared-lista { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 10px; }
+      .pared-lista li { display: inline-flex; align-items: center; gap: 8px; padding: 9px 14px; border-radius: 999px;
+        background: var(--superficie); border: 1px solid var(--borde); max-width: 100%; }
+      .pared-lista .nombre { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .pared-lista .fundador { font-size: 11px; font-weight: 800; letter-spacing: .02em; padding: 2px 8px; border-radius: 999px;
+        background: #FFC857; color: #1A1203; }
+      .pared-estado { color: var(--texto3); margin: 0; }
+      .pared-pie { margin: 22px 0 0; color: var(--texto3); font-size: 14px; }
+    </style>
+    <div class="contenedor">
+      <h2 id="gracias-titulo">Pared de agradecimiento</h2>
+      <p class="sub">Caudal es gratis y sin anuncios gracias a quienes lo apoyan. Estas personas donaron y quisieron que su nombre estuviera aquí. ¡Gracias!</p>
+      <p class="pared-estado" id="pared-estado" role="status">Cargando los nombres…</p>
+      <ul class="pared-lista" id="pared-lista" aria-label="Donadores y fundadores de Caudal" hidden></ul>
+      <p class="pared-pie">¿Donaste y quieres salir aquí? En la app, busca «Más para donadores» (en Personalizar o en Ajustes) y marca «Aparecer en la pared de agradecimiento».</p>
+    </div>
+    <script>
+    // La pared se lee de la base de Caudal (es pública: solo nombres de quienes marcaron la casilla).
+    (function () {
+      const URL_BASE = 'https://nztirmwqykbxadidpzzt.supabase.co';
+      const CLAVE = 'sb_publishable_ga4gKRk0czj044G-xPptSQ_BZ_sTZLl';
+      const lista = document.getElementById('pared-lista');
+      const estado = document.getElementById('pared-estado');
+      if (!lista || !estado) return;
+      const colorValido = c => typeof c === 'string' && /^#[0-9A-Fa-f]{6}$/.test(c);
+      fetch(URL_BASE + '/rest/v1/rpc/pared_agradecimiento', {
+        method: 'POST',
+        headers: { apikey: CLAVE, 'Content-Type': 'application/json' },
+        body: '{}'
+      })
+        .then(r => r.ok ? r.json() : Promise.reject())
+        .then(filas => {
+          const personas = (Array.isArray(filas) ? filas : []).filter(f => f && f.usuario && (f.tipo === 'donador' || f.tipo === 'fundador'));
+          if (!personas.length) {
+            estado.textContent = 'Todavía no hay nombres en la pared. ¡Puedes ser la primera persona!';
+            return;
+          }
+          for (const f of personas) {
+            const li = document.createElement('li');
+            const n = document.createElement('span');
+            n.className = 'nombre';
+            n.textContent = String(f.nombre || f.usuario).slice(0, 40);
+            n.title = '@' + f.usuario;
+            if (colorValido(f.color)) n.style.color = f.color;
+            li.appendChild(n);
+            if (f.tipo === 'fundador') {
+              const chip = document.createElement('span');
+              chip.className = 'fundador';
+              chip.textContent = 'Fundador';
+              li.appendChild(chip);
+            }
+            lista.appendChild(li);
+          }
+          lista.hidden = false;
+          estado.hidden = true;
+        })
+        .catch(() => { estado.textContent = 'Ahora no se pudo cargar la pared. Vuelve a intentarlo en un rato.'; });
+    })();
+    </script>
+  </section>
 </main>
 
 <footer class="pie">

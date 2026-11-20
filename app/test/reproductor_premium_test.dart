@@ -9,6 +9,7 @@ import 'package:caudal/nucleo/coleccion.dart';
 import 'package:caudal/nucleo/cuentas.dart';
 import 'package:caudal/nucleo/descargas.dart';
 import 'package:caudal/nucleo/streams.dart';
+import 'package:caudal/reproduccion/cast.dart';
 import 'package:caudal/reproduccion/reproductor.dart';
 import 'package:caudal/ui/armazon.dart';
 import 'package:caudal/ui/paginas/reproductor_pagina.dart';
@@ -21,7 +22,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'apoyo/cast_falso.dart';
+
 class _ReproductorFalso extends ChangeNotifier implements Reproductor {
+  @override
+  late final ControlCast cast = castFalso();
   @override
   Json? actual;
   @override

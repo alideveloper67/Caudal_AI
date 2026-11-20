@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 
 import 'base_datos_io.dart' if (dart.library.js_interop) 'base_datos_web.dart';
+import 'huella_cancion.dart';
 import 'plataforma.dart';
 import 'social.dart' show ImagenSocial;
 
@@ -356,6 +357,39 @@ class Coleccion extends ChangeNotifier {
     return pistas(claves.toList());
   }
 
+  /// Pone «me gusta» a muchas canciones de una vez (las traídas de otra app).
+  /// No repite: fuera las que ya están (misma clave o la misma canción con otro
+  /// video). Quedan en el orden dado, la primera arriba. Devuelve (añadidas, repetidas).
+  Future<(int, int)> agregarMeGustaVarios(List<Json> pistas) async {
+    final actuales = [for (final f in await db.query('me_gusta', columns: ['clave'])) '${f['clave']}'];
+    final huellas = [for (final p in await this.pistas(actuales)) huellaPista(p)];
+    final (nuevas, repetidas) = separarNuevas(pistas, actuales, huellas);
+    if (nuevas.isEmpty) return (0, repetidas);
+    final ahora = _ahora;
+    final subir = <Json>[];
+    final b = db.batch();
+    for (var i = 0; i < nuevas.length; i++) {
+      final p = nuevas[i];
+      final clave = p['clave'] as String;
+      // un segundo entre una y otra: la nube guarda segundos y así se respeta el orden
+      final fecha = ahora - i;
+      if (clave.startsWith('yt:')) {
+        b.insert('pistas', {'clave': clave, 'datos': jsonEncode(paraNube(p)), 'actualizada': ahora},
+            conflictAlgorithm: ConflictAlgorithm.replace);
+        subir.add({'clave': clave, 'datos': paraNube(p), 'fecha': fecha});
+      }
+      b.insert('me_gusta', {'clave': clave, 'fecha': fecha}, conflictAlgorithm: ConflictAlgorithm.replace);
+    }
+    await b.commit(noResult: true);
+    _gustan.addAll(nuevas.map((p) => p['clave'] as String));
+    // a la nube de 400 en 400: si algo se corta, lo ya subido no se repite
+    for (var i = 0; i < subir.length; i += 400) {
+      await _anotar('me_gusta_varios', {'items': subir.sublist(i, min(i + 400, subir.length))});
+    }
+    notifyListeners();
+    return (nuevas.length, repetidas);
+  }
+
   /// Los [n] me gusta mas recientes, sin leer ni decodificar los demas.
   Future<List<Json>> meGustaRecientes(int n) async {
     final claves = (await db.query('me_gusta', orderBy: 'fecha DESC', limit: n)).map((f) => '${f['clave']}');
@@ -504,7 +538,14 @@ class Coleccion extends ChangeNotifier {
     }
     b.update('listas', {'tocada': ahora}, where: 'id = ?', whereArgs: [id]);
     await b.commit(noResult: true);
-    if (subir.isNotEmpty) await _anotar('items_poner', {'uuid': await _uuidLista(id), 'items': subir});
+    if (subir.isNotEmpty) {
+      // de 400 en 400: una lista de 5 000 no queda como una sola orden enorme que, si la
+      // nube rechaza un trozo, se perdería entera
+      final uuid = await _uuidLista(id);
+      for (var i = 0; i < subir.length; i += 400) {
+        await _anotar('items_poner', {'uuid': uuid, 'items': subir.sublist(i, min(i + 400, subir.length))});
+      }
+    }
     notifyListeners();
     return entraron;
   }

@@ -23,7 +23,7 @@ def cargar(clave):
 
 
 def main(claves=None):
-    claves = claves or sorted(p.stem for p in AQUI.glob('*.py') if p.stem not in ('pix', 'galeria', 'exportar', 'ascii', 'desde_referencia', 'trazo', '_h', 'pikachu_taller', 'comparar', 'vista_reproductor', 'importar_hoja', 'integrar_v4', 'pokemon_exacto', 'desde_png_ia'))
+    claves = claves or sorted(p.stem for p in AQUI.glob('*.py') if p.stem not in ('pix', 'galeria', 'exportar', 'ascii', 'desde_referencia', 'trazo', '_h', 'pikachu_taller', 'comparar', 'vista_reproductor', 'importar_hoja', 'integrar_v4', 'pokemon_exacto', 'desde_png_ia', 'personajes_nov', 'integrar_nov', 'fondos_tematicos'))
     hojas = []
     for c in claves:
         ancho = pix.W

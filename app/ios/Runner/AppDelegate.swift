@@ -17,6 +17,9 @@ import UIKit
     if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "CaudalNativo") {
       CaudalNativo.register(with: registrar)
     }
+    if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "CaudalSonido") {
+      CaudalSonido.register(with: registrar)
+    }
   }
 
   /// Categoria "playback": suena con la pantalla bloqueada y con el interruptor
@@ -203,5 +206,51 @@ class CaudalNativo: NSObject, FlutterPlugin, FlutterSceneLifeCycleDelegate {
     } else {
       resultado(FlutterMethodNotImplemented)
     }
+  }
+}
+
+/// Por dónde sale el sonido (audífonos, parlante, bluetooth) para el ecualizador avanzado por
+/// salida (canal "caudal/sonido", el mismo nombre que en Android). En iPhone no hay sesiones de
+/// efectos: "sesion" y "ganancia" no existen aquí y Dart sube el volumen sin limitador.
+class CaudalSonido: NSObject, FlutterPlugin {
+  private var canal: FlutterMethodChannel?
+
+  static func register(with registrar: FlutterPluginRegistrar) {
+    let instancia = CaudalSonido()
+    let canal = FlutterMethodChannel(name: "caudal/sonido", binaryMessenger: registrar.messenger())
+    instancia.canal = canal
+    registrar.addMethodCallDelegate(instancia, channel: canal)
+    NotificationCenter.default.addObserver(
+      instancia, selector: #selector(CaudalSonido.rutaCambiada(_:)),
+      name: AVAudioSession.routeChangeNotification, object: nil)
+  }
+
+  func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
+    if call.method == "salida" {
+      result(CaudalSonido.tipoSalida())
+    } else {
+      result(FlutterMethodNotImplemented)
+    }
+  }
+
+  @objc func rutaCambiada(_ aviso: Notification) {
+    let tipo = CaudalSonido.tipoSalida()
+    DispatchQueue.main.async { [weak self] in
+      self?.canal?.invokeMethod("salida", arguments: tipo)
+    }
+  }
+
+  static func tipoSalida() -> String {
+    for puerto in AVAudioSession.sharedInstance().currentRoute.outputs {
+      switch puerto.portType {
+      case .bluetoothA2DP, .bluetoothLE, .bluetoothHFP, .airPlay:
+        return "bluetooth"
+      case .headphones, .usbAudio:
+        return "audifonos"
+      default:
+        continue
+      }
+    }
+    return "parlante"
   }
 }

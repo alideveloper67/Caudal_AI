@@ -203,6 +203,14 @@ class PaginaKaraoke(VistaGrande):
         self.bt_traducir.setFocusPolicy(Qt.NoFocus)
         self.bt_traducir.toggled.connect(self._traducir)
         self.fila_cab.insertWidget(1, self.bt_traducir, 0, Qt.AlignVCenter)
+        # la misma letra, solo el verso que suena y con efectos (letra_escena.py)
+        self.bt_efectos = QPushButton("Con efectos")
+        self.bt_efectos.setToolTip("Solo el verso que suena, en grande y con animaciones (Ctrl+Shift+Y)")
+        self.bt_efectos.setCursor(Qt.PointingHandCursor)
+        self.bt_efectos.setStyleSheet(BOTON)
+        self.bt_efectos.setFocusPolicy(Qt.NoFocus)
+        self.bt_efectos.clicked.connect(self._abrir_efectos)
+        self.fila_cab.insertWidget(2, self.bt_efectos, 0, Qt.AlignVCenter)
         # el estado de la mascota sigue a la letra (cada línea nueva cambia entre cantar y tararear)
         self.r.posicion_cambio.connect(lambda _s: self.mascota._actualizar_estado() if self.isVisible() else None)
 
@@ -214,6 +222,11 @@ class PaginaKaraoke(VistaGrande):
         self.mascota.raise_()
         self.cabecera.raise_()
         self.pie.raise_()
+
+    def _abrir_efectos(self):
+        v = getattr(self.ctx, "ventana", None)
+        if v is not None and hasattr(v, "abrir_escena"):
+            v.abrir_escena()
 
     def _traducir(self, on):
         self.ctx.ajustes["traducir_letra"] = bool(on)

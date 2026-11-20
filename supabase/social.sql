@@ -810,7 +810,7 @@ alter table public.perfiles add constraint perfil_limites check (
 
 insert into public.titulos_especiales (user_id, titulo, nombre)
 select id, 'donador_caudal', 'Donador de Caudal' from public.perfiles
-where usuario in ('arkhux', 'ibxo', 'marieliuwu', 'franzz', 'jonathansv2006', 'thefoxy', 'alexa.not.ia0318', 'pamm', 'christopher', 'mxtxo', 'rodryx', 'starinaa')
+where usuario in ('arkhux', 'ibxo', 'marieliuwu', 'franzz', 'jonathansv2006', 'thefoxy', 'alexa.not.ia0318', 'pamm', 'christopher', 'mxtxo', 'rodryx', 'starinaa', 'choc0val', 'daviel', 'thel')
 on conflict do nothing;
 
 -- ¿esta persona puede tener fondo? (donadores y fundadores)

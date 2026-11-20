@@ -1,8 +1,11 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
+import '../../nucleo/sonoridad.dart';
 import '../plataforma.dart';
 import '../servicios.dart';
 import '../tema.dart';
+import 'eq_avanzado_pagina.dart';
 
 const bandasHz = ['31', '62', '125', '250', '500', '1k', '2k', '4k', '8k', '16k'];
 
@@ -21,9 +24,14 @@ const presetsEq = <String, List<int>>{
   'Nocturno': [3, 2, 1, 0, -1, -2, -3, -4, -5, -6],
 };
 
-const nivelesSuper = ['Normal', 'Fuerte', 'Más fuerte', 'Muy fuerte', 'Máximo'];
+/// Los niveles de «Volumen máximo» por su nombre (y «Apagado»).
+String nombreNivelVolumen(String? nivel) => nivelesVolumen[nivel]?.nombre ?? 'Apagado';
 
-/// Ecualizador, super volumen, velocidad y fundido. Se escucha en vivo
+const textoVolumenMaximo = 'Sube las canciones grabadas bajas hasta que suenen como las fuertes y deja '
+    'todo lo más alto posible sin que el sonido se rompa: un limitador frena los picos. Con audífonos '
+    'puede notarse bastante más fuerte; si te molesta, baja el volumen o elige Normal.';
+
+/// Volumen máximo, ecualizador, velocidad y fundido. Se escucha en vivo
 /// mientras se mueve, pero solo se queda si se pulsa Guardar.
 Future<void> mostrarSonido(BuildContext context) => showModalBottomSheet<void>(
       context: context,
@@ -46,7 +54,7 @@ class _HojaSonidoState extends State<_HojaSonido> {
   late bool _eq;
   late List<int> _bandas;
   late String _preset;
-  late int _super;
+  late String _nivel; // no | normal | alto | maximo
   late bool _normalizar;
   late double _velocidad;
   late int _crossfade;
@@ -64,20 +72,21 @@ class _HojaSonidoState extends State<_HojaSonido> {
     final guardadas = a.bandasEq;
     _bandas = [for (var i = 0; i < 10; i++) i < guardadas.length ? guardadas[i].clamp(-12, 12) : 0];
     _preset = a.texto('eq_preset');
-    _super = a.entero('super_volumen').clamp(0, nivelesSuper.length - 1);
+    _nivel = a.tiene('volumen_maximo') ? a.texto('volumen_maximo') : (a.nivelVolumen ?? 'no');
+    if (_nivel != 'no' && !nivelesVolumen.containsKey(_nivel)) _nivel = nivelVolumenPorDefecto;
     _normalizar = a.sino('normalizar');
     _velocidad = Caudal.leer(context).reproductor.velocidad.clamp(0.5, 2.0);
     _crossfade = a.entero('crossfade').clamp(0, 12);
     _antes = {
       'ecualizador': _eq, 'eq_bandas': List.of(_bandas), 'eq_preset': _preset,
-      'super_volumen': _super, 'normalizar': _normalizar, 'velocidad': _velocidad, 'crossfade': _crossfade,
+      'volumen_maximo': _nivel, 'normalizar': _normalizar, 'velocidad': _velocidad, 'crossfade': _crossfade,
     };
   }
 
   bool _bandasIniciadas = false;
 
   bool get _cambiado =>
-      _eq != _antes['ecualizador'] || _preset != _antes['eq_preset'] || _super != _antes['super_volumen'] ||
+      _eq != _antes['ecualizador'] || _preset != _antes['eq_preset'] || _nivel != _antes['volumen_maximo'] ||
       _normalizar != _antes['normalizar'] || _velocidad != _antes['velocidad'] || _crossfade != _antes['crossfade'] ||
       _bandas.join(',') != (_antes['eq_bandas'] as List).join(',');
 
@@ -88,7 +97,7 @@ class _HojaSonidoState extends State<_HojaSonido> {
     await a.poner('ecualizador', _eq, avisar: false);
     await a.poner('eq_bandas', _bandas, avisar: false);
     await a.poner('eq_preset', _preset, avisar: false);
-    await a.poner('super_volumen', _super, avisar: false);
+    await a.ponerNivelVolumen(_nivel, avisar: false);
     await a.poner('normalizar', _normalizar, avisar: false);
     await s.reproductor.aplicarSonido();
     await s.reproductor.fijarVelocidad(_velocidad, guardar: false);
@@ -100,7 +109,7 @@ class _HojaSonidoState extends State<_HojaSonido> {
     await a.poner('ecualizador', _antes['ecualizador']!, avisar: false);
     await a.poner('eq_bandas', _antes['eq_bandas']!, avisar: false);
     await a.poner('eq_preset', _antes['eq_preset']!, avisar: false);
-    await a.poner('super_volumen', _antes['super_volumen']!, avisar: false);
+    await a.ponerNivelVolumen(_antes['volumen_maximo']! as String, avisar: false);
     await a.poner('normalizar', _antes['normalizar']!, avisar: false);
     await s.reproductor.aplicarSonido();
     await s.reproductor.fijarVelocidad(_antes['velocidad'] as double, guardar: false);
@@ -113,7 +122,7 @@ class _HojaSonidoState extends State<_HojaSonido> {
     await a.poner('ecualizador', _eq, avisar: false);
     await a.poner('eq_bandas', _bandas, avisar: false);
     await a.poner('eq_preset', _preset, avisar: false);
-    await a.poner('super_volumen', _super, avisar: false);
+    await a.ponerNivelVolumen(_nivel, avisar: false);
     await a.poner('normalizar', _normalizar, avisar: false);
     await a.poner('crossfade', _crossfade);
     await s.reproductor.fijarVelocidad(_velocidad);
@@ -156,8 +165,9 @@ class _HojaSonidoState extends State<_HojaSonido> {
   @override
   Widget build(BuildContext context) {
     final alto = MediaQuery.sizeOf(context).height;
-    // en iPhone el libmpv no trae limitador ni normalizador
+    // en iPhone el libmpv no trae limitador: Volumen máximo sube menos
     final limitado = Caudal.leer(context).reproductor.sonidoLimitado;
+    final encendido = nivelesVolumen.containsKey(_nivel);
     Future<void> salir() async {
       if (await _preguntarAlSalir() && context.mounted) Navigator.pop(context);
     }
@@ -190,42 +200,58 @@ class _HojaSonidoState extends State<_HojaSonido> {
           ),
           Expanded(
             child: ListView(padding: const EdgeInsets.symmetric(horizontal: 20), children: [
-              // ---- super volumen
-              const Text('Súper volumen', style: estiloTituloSeccion),
-              const SizedBox(height: 4),
-              Text(limitado ? 'Sube más el volumen que el máximo del teléfono.'
-                  : 'Sube mucho más el volumen sin distorsionar: comprime con cuidado y limita los picos.',
-                  style: estiloSecundario),
-              const SizedBox(height: 10),
-              Wrap(spacing: 8, runSpacing: 8, children: [
-                for (var i = 0; i < nivelesSuper.length; i++)
-                  ChoiceChip(
-                    label: Text(nivelesSuper[i]),
-                    selected: _super == i,
-                    showCheckmark: false,
-                    selectedColor: C.acento,
-                    labelStyle: TextStyle(fontWeight: FontWeight.w700, color: _super == i ? C.acentoTexto : C.texto),
-                    backgroundColor: C.superficie3,
-                    side: BorderSide.none,
-                    shape: const StadiumBorder(),
-                    onSelected: (_) {
-                      setState(() => _super = i);
-                      _probar();
-                    },
-                  ),
+              // ---- volumen maximo
+              Row(children: [
+                const Expanded(child: Text('Volumen máximo', style: estiloTituloSeccion)),
+                Switch.adaptive(value: encendido, onChanged: (v) {
+                  setState(() => _nivel = v ? nivelVolumenPorDefecto : 'no');
+                  _probar();
+                }),
               ]),
+              const SizedBox(height: 4),
+              const Text(textoVolumenMaximo, style: estiloSecundario),
+              const SizedBox(height: 10),
+              AnimatedOpacity(
+                duration: const Duration(milliseconds: 200),
+                opacity: encendido ? 1 : 0.45,
+                child: Wrap(spacing: 8, runSpacing: 8, children: [
+                  for (final n in nivelesVolumen.values)
+                    ChoiceChip(
+                      label: Text(n.nombre),
+                      selected: _nivel == n.clave,
+                      showCheckmark: false,
+                      selectedColor: C.acento,
+                      labelStyle: TextStyle(fontWeight: FontWeight.w700,
+                          color: _nivel == n.clave ? C.acentoTexto : C.texto),
+                      backgroundColor: C.superficie3,
+                      side: BorderSide.none,
+                      shape: const StadiumBorder(),
+                      onSelected: (_) {
+                        setState(() => _nivel = n.clave);
+                        _probar();
+                      },
+                    ),
+                ]),
+              ),
               if (limitado)
                 const Padding(
                   padding: EdgeInsets.only(top: 8),
-                  child: Text('En iPhone los niveles altos pueden distorsionar algo.',
+                  child: Text('En iPhone no hay limitador: sube un poco menos para no distorsionar.',
+                      style: TextStyle(fontSize: 12.5, color: C.texto3)),
+                ),
+              if (kIsWeb)
+                const Padding(
+                  padding: EdgeInsets.only(top: 8),
+                  child: Text('En la web suena el reproductor de YouTube, que pone su propio volumen.',
                       style: TextStyle(fontSize: 12.5, color: C.texto3)),
                 ),
               const SizedBox(height: 8),
-              if (!limitado)
+              if (!encendido)
               SwitchListTile.adaptive(
                 contentPadding: EdgeInsets.zero,
                 title: const Text('Igualar el volumen entre canciones'),
-                subtitle: const Text('Que ninguna suene mucho más bajo o alto que otra', style: estiloSecundario),
+                subtitle: const Text('Que ninguna suene mucho más bajo o alto que otra, sin subir nada',
+                    style: estiloSecundario),
                 value: _normalizar,
                 onChanged: (v) {
                   setState(() => _normalizar = v);
@@ -309,6 +335,8 @@ class _HojaSonidoState extends State<_HojaSonido> {
                   ]),
                 ),
               ),
+              const SizedBox(height: 4),
+              const BotonEqAvanzado(),
               const Divider(height: 30),
               // ---- velocidad
               Row(children: [
@@ -341,7 +369,7 @@ class _HojaSonidoState extends State<_HojaSonido> {
                       _eq = false;
                       _bandas = List.filled(10, 0);
                       _preset = 'Plano';
-                      _super = 0;
+                      _nivel = nivelVolumenPorDefecto;
                       _normalizar = true;
                       _velocidad = 1;
                       _crossfade = 0;

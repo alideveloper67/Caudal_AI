@@ -14,6 +14,7 @@ from ...config import DEFECTOS, carpeta_datos, ruta_ffmpeg
 from ...hilos import en_segundo_plano
 from ...motor import formato_bytes
 from .. import iconos, imagenes
+from ..ajuste_aviso_errores import fila_aviso_errores, fila_logros
 from ..componentes import Pagina
 from ..donar import abrir_donar
 from ..estilos import C
@@ -116,6 +117,10 @@ class PaginaAjustes(Pagina):
             from ..personalizar_ajuste import SeccionPersonalizar
             self.seccion_personalizar = SeccionPersonalizar(ctx)
             self.cuerpo.addWidget(self.seccion_personalizar)
+            # letra con efectos, pared de agradecimiento y mascota propia (con candado para el resto)
+            from ..mas_donadores import SeccionMasDonadores
+            self.seccion_mas_donadores = SeccionMasDonadores(ctx)
+            self.cuerpo.addWidget(self.seccion_mas_donadores)
 
         # ---------------- reproduccion
         s = Seccion("Reproducción")
@@ -213,7 +218,8 @@ class PaginaAjustes(Pagina):
         self.normalizar = _interruptor(a["normalizar"])
         self._conectar(self.normalizar, "normalizar", ctx.reproductor.aplicar_sonido)
         s.fila("Igualar el volumen entre canciones", "Las canciones suaves y las fuertes suenan "
-                                        "parecido, sin tocar los cambios de volumen de cada una.",
+                                        "parecido, sin tocar los cambios de volumen de cada una "
+                                        "(lo hace también Volumen máximo).",
                self.normalizar)
         self.modo_noche = _interruptor(a["modo_noche"])
         self._conectar(self.modo_noche, "modo_noche", ctx.reproductor.aplicar_sonido)
@@ -221,14 +227,22 @@ class PaginaAjustes(Pagina):
         self.envolvente = _interruptor(a["sonido_envolvente"])
         self._conectar(self.envolvente, "sonido_envolvente", ctx.reproductor.aplicar_sonido)
         s.fila("Sonido envolvente", "Abre el sonido para que suene más amplio, sobre todo con audífonos.", self.envolvente)
-        from ...reproduccion import NOMBRES_SUPER_VOLUMEN
-        self.super = _combo([(n, k) for k, n in NOMBRES_SUPER_VOLUMEN.items()],
-                            int(a["super_volumen"] or 0), 200)
-        self._conectar(self.super, "super_volumen",
-                       lambda: (ctx.reproductor.aplicar_sonido(), ctx.sonido_cambio.emit()))
-        s.fila("Súper volumen", "Mucho más fuerte sin que se rompa el sonido: un limitador "
-                                "evita la saturación. También en el botón del altavoz de abajo.",
-               self.super)
+        from ... import sonoridad
+        from ...reproduccion import NOMBRES_VOLUMEN_MAXIMO
+        self.super = _combo([(n, k) for k, n in NOMBRES_VOLUMEN_MAXIMO.items()],
+                            a["volumen_maximo"] if a["volumen_maximo"] in NOMBRES_VOLUMEN_MAXIMO
+                            else "no", 200)
+
+        def poner_volumen_maximo(_i):
+            sonoridad.poner_nivel(self.a, self.super.currentData())
+            self.a.guardar()
+            ctx.reproductor.aplicar_sonido()
+            ctx.sonido_cambio.emit()
+        self.super.currentIndexChanged.connect(poner_volumen_maximo)
+        s.fila("Volumen máximo", "Lo más alto posible sin que se rompa el sonido, y las canciones "
+                                 "grabadas bajas suben hasta sonar como las fuertes. Con audífonos "
+                                 "puede notarse bastante más fuerte. También en el botón del "
+                                 "altavoz de abajo.", self.super)
         caja_fundido = QWidget()
         hf = QHBoxLayout(caja_fundido)
         hf.setContentsMargins(0, 0, 0, 0)
@@ -288,6 +302,48 @@ class PaginaAjustes(Pagina):
         s.fila("Descargar el audio más fuerte", "Lo que descargues como audio se nivela para "
                                                 "sonar muy fuerte sin romperse (ideal parlantes).",
                self.musica_fuerte)
+        bt_despertador = QPushButton("Abrir")
+        bt_despertador.setCursor(Qt.PointingHandCursor)
+        bt_despertador.clicked.connect(lambda: ctx.ventana.abrir_despertador())
+        s.fila("Despertador", "Despiértate con tu música: hora, días y qué suena. Caudal tiene que "
+                              "estar abierto (aunque sea en la bandeja).", bt_despertador)
+        self.cuerpo.addWidget(s)
+
+        # ---------------- escena de escritorio
+        s = Seccion("Escena de escritorio")
+        caja_escena = QWidget()
+        he = QHBoxLayout(caja_escena)
+        he.setContentsMargins(0, 0, 0, 0)
+        he.setSpacing(8)
+        bt_escena = QPushButton("  Abrir")
+        bt_escena.setIcon(iconos.icono("escritorio", 16, C["texto"]))
+        bt_escena.setCursor(Qt.PointingHandCursor)
+        bt_escena.clicked.connect(lambda: ctx.ventana.abrir_escena_escritorio())
+        he.addWidget(bt_escena)
+        s.fila("Escena a pantalla completa", "El videoclip de fondo, un reloj gigante, la carátula "
+               "en 3D, la letra animada y un buscador, con los colores de la canción. "
+               "Esc para salir (también con Ctrl+Shift+D).", caja_escena)
+        caja_fondo = QWidget()
+        hf = QHBoxLayout(caja_fondo)
+        hf.setContentsMargins(0, 0, 0, 0)
+        hf.setSpacing(8)
+        bt_fondo = QPushButton("Poner")
+        bt_fondo.setCursor(Qt.PointingHandCursor)
+        bt_fondo.clicked.connect(lambda: ctx.ventana.abrir_escena_escritorio(solo_ver=True))
+        bt_quitar = QPushButton("Quitar")
+        bt_quitar.setCursor(Qt.PointingHandCursor)
+        bt_quitar.clicked.connect(lambda: getattr(ctx, "escena_escritorio", None) is not None
+                                  and ctx.escena_escritorio.cerrar())
+        hf.addWidget(bt_fondo)
+        hf.addWidget(bt_quitar)
+        s.fila("Como fondo de escritorio", "La escena se queda detrás de los iconos de Windows, "
+               "como un fondo de pantalla vivo. Ahí solo se mira: la música se maneja desde "
+               "Caudal o con las teclas multimedia.", caja_fondo)
+        self.escena_video = _interruptor(a["escena_fondo"] == "video")
+        self.escena_video.toggled.connect(lambda si: (a.__setitem__("escena_fondo", "video" if si else "ambiente"),
+                                                      a.guardar()))
+        s.fila("Videoclip de fondo", "Si se apaga, el fondo es la carátula en movimiento "
+               "(gasta menos internet y procesador).", self.escena_video)
         self.cuerpo.addWidget(s)
 
         # ---------------- ventana
@@ -316,6 +372,11 @@ class PaginaAjustes(Pagina):
         self._conectar(self.notificar, "notificar_al_terminar")
         s.fila("Avisar al terminar cada descarga", "", self.notificar)
         self.cuerpo.addWidget(s)
+        # Discord: solo si la función está disponible en esta versión (si no, no aparece)
+        from ..discord_ajuste import seccion_discord
+        sec_discord = seccion_discord(ctx)
+        if sec_discord is not None:
+            self.cuerpo.addWidget(sec_discord)
 
         # ---------------- descargas
         s = Seccion("Descargas")
@@ -462,7 +523,13 @@ class PaginaAjustes(Pagina):
         bt_datos = QPushButton("Abrir")
         bt_datos.clicked.connect(lambda: __import__("os").startfile(str(carpeta_datos())))
         s.fila("Carpeta de datos de Caudal", str(carpeta_datos()), bt_datos)
+        fila_aviso_errores(s)
+        fila_logros(s, ctx, self)
         self.cuerpo.addWidget(s)
+
+        # ---------------- copia de seguridad (import local: copia_seguridad_ui importa Seccion de este módulo)
+        from ..copia_seguridad_ui import SeccionCopia
+        self.cuerpo.addWidget(SeccionCopia(ctx, self.lienzo))
 
         # ---------------- donar (para todos; discreto)
         s = Seccion("Apoya a Caudal")

@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show MethodChannel;
 
 import '../../nucleo/plataforma.dart';
-import '../plataforma.dart';
 import '../tema.dart';
 
 /// "Música con la pantalla apagada": en algunos teléfonos el ahorro de batería

@@ -17,6 +17,7 @@ import '../reproductor/fondo_ambiente.dart';
 import '../reproductor/linea_karaoke.dart';
 import '../reproductor/mascota_vida.dart';
 import '../reproductor/paleta_portada.dart';
+import '../premium/letra_escena.dart';
 import '../servicios.dart';
 import '../tema.dart';
 import 'reproductor_pagina.dart' show desfaseDeLetra, avisoDesfaseLetra, letraDeCancion, lineasDeLetra;
@@ -222,7 +223,12 @@ class _KaraokePaginaState extends State<KaraokePagina> {
                 maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12.5, color: Color(0xCCFFFFFF))),
           ]),
         ),
-        const SizedBox(width: 48),
+        // la letra con efectos: el mismo verso, solo, enorme y con estilos para elegir
+        IconButton(
+          tooltip: 'Letra con efectos',
+          icon: const Icon(Icons.auto_awesome_rounded),
+          onPressed: () => LetraEscenaPagina.abrir(context, _pista, letra: _letra),
+        ),
       ]),
     );
   }

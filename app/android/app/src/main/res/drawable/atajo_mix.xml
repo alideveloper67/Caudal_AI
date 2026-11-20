@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Acceso directo del icono: Mi mix -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp" android:height="48dp" android:viewportWidth="48" android:viewportHeight="48">
+    <path android:fillColor="#FFFFB443" android:pathData="M24,0A24,24 0 1,1 24,48A24,24 0 1,1 24,0Z"/>
+    <group android:translateX="11" android:translateY="11" android:scaleX="1.0833" android:scaleY="1.0833">
+        <path android:fillColor="#FFFFFFFF" android:pathData="M15,6H3v2h12V6zM15,10H3v2h12v-2zM3,16h8v-2H3v2zM17,6v8.18C16.69,14.07 16.35,14 16,14c-1.66,0 -3,1.34 -3,3s1.34,3 3,3 3,-1.34 3,-3V8h3V6h-5z"/>
+    </group>
+</vector>

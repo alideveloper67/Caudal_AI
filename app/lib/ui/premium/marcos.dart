@@ -189,10 +189,15 @@ class NombreEfecto extends StatefulWidget {
     this.overflow = TextOverflow.ellipsis,
     this.textAlign,
     this.animar = false,
+    this.color,
   });
 
   final String texto;
   final String efecto;
+
+  /// El color propio del nombre (donadores). Sin efecto tiñe el texto; con «Brillo» es el color de
+  /// base por el que pasa el destello; los demás efectos tienen sus colores y lo ignoran.
+  final Color? color;
   final TextStyle? estilo;
   final int? maxLines;
   final TextOverflow overflow;
@@ -250,9 +255,12 @@ class _NombreEfectoState extends State<NombreEfecto> with SingleTickerProviderSt
   Gradient _degradado(double t) {
     switch (widget.efecto) {
       case 'brillo':
-        // un destello claro que cruza el nombre
+        // un destello claro que cruza el nombre (sobre su color propio, si tiene)
+        final c = widget.color;
         return LinearGradient(
-          colors: const [Color(0xFFE6ECF7), Color(0xFFFFFFFF), Color(0xFFFFE08A), Color(0xFFFFFFFF), Color(0xFFE6ECF7)],
+          colors: c == null
+              ? const [Color(0xFFE6ECF7), Color(0xFFFFFFFF), Color(0xFFFFE08A), Color(0xFFFFFFFF), Color(0xFFE6ECF7)]
+              : [c, Color.lerp(c, Colors.white, 0.45)!, const Color(0xFFFFF3B0), Color.lerp(c, Colors.white, 0.45)!, c],
           stops: const [0.0, 0.35, 0.5, 0.65, 1.0],
           transform: _DeslizaDegradado(t),
         );
@@ -302,7 +310,8 @@ class _NombreEfectoState extends State<NombreEfecto> with SingleTickerProviderSt
         if (c == null || !c.isAnimating) return mascara(0.5);
         return AnimatedBuilder(animation: c, builder: (_, _) => mascara(c.value));
       default:
-        return _texto(base);
+        final c = widget.color;
+        return _texto(c == null ? base : (base ?? const TextStyle()).copyWith(color: c));
     }
   }
 }

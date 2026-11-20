@@ -22,7 +22,7 @@ import time
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
-from . import catalogo, mezcla_dj, mpv_carga
+from . import catalogo, eq_avanzado, mezcla_dj, mpv_carga, sonoridad
 from .hilos import en_segundo_plano
 
 FRECUENCIAS_EQ = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]
@@ -43,11 +43,10 @@ PRESETS_EQ = {
     "Altavoz pequeño": [-6, -4, 0, 3, 4, 3, 2, 1, 0, -2],
 }
 
-# super volumen: sonoridad objetivo en LUFS (Spotify normal = -14)
-NIVELES_SUPER_VOLUMEN = {1: -11, 2: -9, 3: -7, 4: -5}
-# subida fija (dB) de cada nivel del super volumen
-GANANCIA_SUPER_VOLUMEN = {1: 3, 2: 5, 3: 7, 4: 9}
+# (antiguo) nombres del super volumen de 0 a 4; ahora manda «Volumen máximo» (sonoridad.py)
 NOMBRES_SUPER_VOLUMEN = {0: "Apagado", 1: "Fuerte", 2: "Muy fuerte", 3: "Fiesta", 4: "Máximo"}
+# lo que se ve en los menús: apagado y los tres niveles
+NOMBRES_VOLUMEN_MAXIMO = {"no": "Apagado", **sonoridad.NOMBRES_NIVEL}
 
 CATEGORIAS_MUSICA = ["music_offtopic"]
 CATEGORIAS_VIDEO = ["sponsor", "selfpromo", "interaction", "music_offtopic"]
@@ -682,6 +681,10 @@ class Reproductor(QObject):
         except Exception:  # noqa: BLE001 - nunca debe impedir que suene la musica
             self.descarga_inteligente = None
 
+        # enviar a Chromecast / altavoces con Google Cast (ver cast.py)
+        from .cast import ControlCast, anfitrion_de
+        self.cast = ControlCast(anfitrion_de(self), padre=self)
+
     # ------------------------------------------------------------ motores
 
     def _crear_audio(self):
@@ -711,6 +714,16 @@ class Reproductor(QObject):
         self.videos[nombre] = m
         self.aplicar_sonido()
         return m
+
+    def soltar_video(self, nombre):
+        """Una pantalla que se cierra (p. ej. la escena de escritorio) suelta su motor."""
+        m = self.videos.pop(nombre, None)
+        if self.destino_video == nombre:
+            self.destino_video = "principal"
+        if m is not None:
+            if self._traspaso and self._traspaso.get("saliente") is m:
+                self._traspaso = None
+            m.cerrar()
 
     def motor_actual(self):
         if self.modo == "video":
@@ -748,44 +761,110 @@ class Reproductor(QObject):
 
     # ------------------------------------------------------------ sonido
 
-    def cadena_filtros(self):
-        partes = []
-        if self.ajustes["ecualizador"]:
-            bandas = list(self.ajustes["eq_bandas"] or [])[:10]
-            for f, g in zip(FRECUENCIAS_EQ, bandas):
-                if g:
-                    partes.append(f"equalizer=f={f}:t=o:w=1:g={float(g):.1f}")
-            if any(g > 0 for g in bandas):
-                # margen para que al subir bandas no sature
-                partes.insert(0, f"volume={-max(bandas) * 0.6:.1f}dB")
-        nivel = int(self.ajustes["super_volumen"] or 0)
-        # Igualar el volumen entre canciones SIN tocar el de dentro de cada una.
-        # Antes iba con loudnorm, que corrige cada pocos segundos: subia las
-        # partes suaves y bajaba las fuertes, y se oia como si el volumen
-        # bajara y volviera a subir. dynaudnorm con una ventana de ~30 segundos
-        # pone una ganancia casi fija por cancion (medido: conserva los 15,6 dB
-        # entre estrofa y estribillo; loudnorm los dejaba en 6,9).
-        if self.ajustes["normalizar"] or nivel > 0:
-            partes.append("dynaudnorm=f=500:g=61:p=0.9:m=4")
+    def _premium(self):
+        """¿Tiene beneficios de donador? (lo conecta la ventana; sin ella, no)."""
+        f = getattr(self, "consultar_premium", None)
+        try:
+            return bool(f()) if f else False
+        except Exception:  # noqa: BLE001
+            return False
+
+    def _cache_sonoridad(self):
+        c = getattr(self, "_sonoridad", None)
+        if c is None:
+            c = self._sonoridad = sonoridad.CacheSonoridad(getattr(self, "coleccion", None))
+        return c
+
+    def medida_de(self, pista=None, fuente=None):
+        """(LUFS, pico) ya medidos de esa canción, o None."""
+        return self._cache_sonoridad().leer(sonoridad.clave_de(fuente, pista))
+
+    def ganancia_actual(self, pista=None, fuente=None):
+        """dB que «Volumen máximo» le da a esa canción (sin contar el ecualizador)."""
+        nivel = sonoridad.nivel_efectivo(self.ajustes)
+        medida = self.medida_de(pista, fuente) if nivel else None
+        return sonoridad.ganancia_db(nivel, *(medida or (None, None)), extra_db=self._previa()[0])
+
+    def _previa(self):
+        """(dB antes del ecualizador, partes del ecualizador) del ecualizador que suena."""
+        if eq_avanzado.activo(self.ajustes, self._premium()):
+            bandas = self.ajustes["eq_av_bandas"]
+            return (eq_avanzado.ganancia_previa(bandas, self.ajustes["eq_av_preamp"]),
+                    eq_avanzado.partes_filtro(bandas))
+        if not self.ajustes["ecualizador"]:
+            return 0.0, []
+        bandas = list(self.ajustes["eq_bandas"] or [])[:10]
+        partes = [f"equalizer=f={f}:t=o:w=1:g={float(g):.1f}"
+                  for f, g in zip(FRECUENCIAS_EQ, bandas) if g]
+        # margen para que al subir bandas no sature
+        previa = -max(bandas) * 0.6 if any(g > 0 for g in bandas) else 0.0
+        return previa, partes
+
+    def cadena_filtros(self, pista=None, extra=(), fuente=None):
+        """Los filtros de sonido de una canción: preamplificador/margen, ecualizador (el normal o el
+        avanzado), `extra` (el de 3 bandas del Mezclador), modo noche, envolvente y, al final, el
+        limitador de picos verdaderos que deja subir la ganancia de «Volumen máximo» sin recortar."""
+        previa, partes = self._previa()
+        partes = list(partes) + list(extra)
+        nivel = sonoridad.nivel_efectivo(self.ajustes)
+        # Igualar el volumen entre canciones SIN tocar el de dentro de cada una: una ganancia fija
+        # por canción (lo medido con ebur128). Nada de loudnorm/dynaudnorm, que suben y bajan
+        # dentro de la canción y se oye como si el volumen «respirara».
+        ganancia = 0.0
+        if nivel:
+            medida = self.medida_de(pista, fuente)
+            ganancia = sonoridad.ganancia_db(nivel, *(medida or (None, None)), extra_db=previa)
+        total = round(previa + ganancia, 2)
+        if abs(total) >= 0.05:
+            partes.insert(0, f"volume={total:.2f}dB")
         if self.ajustes["modo_noche"]:
             # compresor suave: lo fuerte baja y lo bajo sube un poco, para escuchar de noche sin sustos
             partes.append("acompressor=threshold=0.089:ratio=4:attack=20:release=300:makeup=2.5")
         if self.ajustes["sonido_envolvente"]:
             # un poco de mezcla entre canales y retardo: el sonido se abre, sin tocar el tono
             partes.append("stereowiden=delay=20:feedback=0.25:crossfeed=0.25:drymix=0.85")
-        if nivel > 0:
-            # mas fuerte de forma fija y un limitador rapido para los picos
-            partes.append(f"volume={GANANCIA_SUPER_VOLUMEN.get(nivel, 5)}dB")
-            partes.append("alimiter=limit=0.95:attack=5:release=80:level=disabled")
-        if (self.ajustes["modo_noche"] or self.ajustes["sonido_envolvente"]) and nivel == 0:
-            partes.append("alimiter=limit=0.95:attack=5:release=80:level=disabled")
+        if nivel or self.ajustes["modo_noche"] or self.ajustes["sonido_envolvente"] or total > 0:
+            partes += sonoridad.partes_limitador()
         if not partes:
             return ""
         return "lavfi=[" + ",".join(partes) + "]"
 
+    def _medir_sonoridad(self, fuente, pista):
+        """Mide la canción en segundo plano (una sola vez: queda guardado) para darle su ganancia."""
+        if not fuente or sonoridad.nivel_efectivo(self.ajustes) is None:
+            return
+        clave = sonoridad.clave_de(fuente, pista)
+        midiendo = self.__dict__.setdefault("_midiendo", set())
+        if not clave or clave in midiendo or self.medida_de(pista, fuente) is not None:
+            return
+        midiendo.add(clave)
+
+        def listo(medida):
+            midiendo.discard(clave)
+            if not medida:
+                return
+            self._cache_sonoridad().guardar(clave, medida)
+            # si es lo que suena, su ganancia entra ya (una vez; las siguientes ya llegan medidas)
+            if self.actual is None or sonoridad.clave_de(self._fuente, self.actual) != clave:
+                return
+            if self._fundido is None and self.modo == "audio":
+                m = self.motor_actual()
+                if m is not None:
+                    self._poner_af(m, self.cadena_para(self.actual))
+            elif self.modo == "video":
+                self.aplicar_sonido()
+
+        en_segundo_plano(sonoridad.medir, dict(fuente), ok=listo,
+                         error=lambda _e: midiendo.discard(clave), dueno=self)
+
     def aplicar_sonido(self):
-        af = self.cadena_filtros()
+        actual = self.motor_actual()
         for m in self._todos():
+            if self._fundido is None and m is actual and self.actual is not None:
+                af = self.cadena_para(self.actual) if self.modo == "audio" \
+                    else self.cadena_filtros(self.actual)
+            else:
+                af = self.cadena_filtros(fuente=m.fuente)
             m.fijar_filtros(af)
             self._af[id(m)] = af
             m.fijar_velocidad(self.velocidad)
@@ -812,6 +891,8 @@ class Reproductor(QObject):
         self._aplicar_volumen()
 
     def fijar_volumen(self, v):
+        if self.cast.activo:
+            return self.cast.fijar_volumen(max(0, min(100, int(v))) / 100)
         self.volumen = max(0, min(100, int(v)))
         self.ajustes["volumen"] = self.volumen
         self._aplicar_volumen()
@@ -1072,14 +1153,20 @@ class Reproductor(QObject):
         if self.estado == "parado":
             self._cargar(self.actual, inicio=self._posicion)
             return
+        if self.cast.activo:
+            return self.cast.alternar()
         m.pausar(not m.en_pausa())
 
     def pausar(self):
+        if self.cast.activo:
+            return self.cast.pausar()
         m = self.motor_actual()
         if m:
             m.pausar(True)
 
     def reanudar(self):
+        if self.cast.activo and self.actual and self.estado != "parado":
+            return self.cast.reanudar()
         m = self.motor_actual()
         if m and self.actual:
             if self.estado == "parado":
@@ -1088,6 +1175,8 @@ class Reproductor(QObject):
                 m.pausar(False)
 
     def detener(self):
+        if self.cast.activo:
+            self.cast.parar()
         self._traspaso = None
         self._cortar_fundido()
         for m in self._todos():
@@ -1095,6 +1184,8 @@ class Reproductor(QObject):
         self._fijar_estado("parado")
 
     def buscar(self, segundos):
+        if self.cast.activo:
+            return self.cast.ir_a(segundos)
         if self._traspaso:
             self._terminar_traspaso(True)
         m = self.motor_actual()
@@ -1424,6 +1515,9 @@ class Reproductor(QObject):
         if gen != self._gen:
             return
         self._fuente = fuente
+        if self.cast.activo:     # conectado a una tele: suena allí y no en la PC
+            self._traspaso = None
+            return self.cast.enviar(self.actual, fuente, inicio, pausado)
         motor = self.motor_actual()
         if motor is None:
             if self.modo == "video":
@@ -1439,6 +1533,7 @@ class Reproductor(QObject):
         motor.fijar_velocidad(self.velocidad)
         if self.modo == "audio":
             self._poner_af(motor, self.cadena_para(self.actual))
+        self._medir_sonoridad(fuente, self.actual)
         if saliente is not None:
             # el nuevo carga EN PAUSA un poco por delante; cuando lo que suena
             # llega a ese punto, arranca el nuevo y se apaga el viejo a la vez
@@ -1504,7 +1599,15 @@ class Reproductor(QObject):
 
     def calidad_video_efectiva(self):
         """'Maxima' es la mayor que tu pantalla puede mostrar: en un monitor
-        1080p, un 4K solo gasta red y procesador sin verse mejor."""
+        1080p, un 4K solo gasta red y procesador sin verse mejor. `tope_video` (lo pone la
+        escena de escritorio, donde el video es solo el fondo) limita la altura."""
+        calidad = self._calidad_base()
+        tope = getattr(self, "tope_video", None)
+        if tope and str(calidad).isdigit() and int(calidad) > int(tope):
+            return str(tope)
+        return calidad
+
+    def _calidad_base(self):
         calidad = self._calidad_forzada or self.ajustes["calidad_video"]
         if calidad != "maxima":
             return calidad
@@ -1561,12 +1664,14 @@ class Reproductor(QObject):
         if sig.get("archivo") and os.path.exists(sig["archivo"]):
             if dj:
                 self._analizar_bordes(sig, {"archivo": sig["archivo"]})
+            self._medir_sonoridad({"archivo": sig["archivo"]}, sig)
             return
         copia = self.coleccion.copia_local(sig.get("video_id"), self.modo == "video") \
             if self.ajustes["preferir_descargado"] else None
         if copia:
             if dj:
                 self._analizar_bordes(sig, {"archivo": copia[0]})
+            self._medir_sonoridad({"archivo": copia[0]}, sig)
             return
         objetivo = sig.get("video_id") or sig.get("url")
         if not objetivo:
@@ -1577,6 +1682,8 @@ class Reproductor(QObject):
         def resuelta(datos):
             if dj:
                 self._analizar_bordes(sig, datos)
+            if modo == "audio":
+                self._medir_sonoridad(datos, sig)
         en_segundo_plano(catalogo.resolver, objetivo, modo, calidad, self.ajustes["codec_video"],
                          self.ajustes, ok=resuelta, error=lambda _e: None, dueno=self)
         # si quedan pocas, pedir mas canciones parecidas por adelantado
@@ -1964,9 +2071,9 @@ class Reproductor(QObject):
     def cadena_para(self, pista):
         """Los filtros de sonido de siempre más el ecualizador de 3 bandas que se
         eligió para esta canción en el Mezclador (si lo hay)."""
-        base = self.cadena_filtros()
         partes = mezcla_dj.filtros_eq(self._marcas_de(pista).get("eq"))
-        return mezcla_dj.combinar_filtros(base, (), partes) if partes else base
+        # el del Mezclador va antes de la ganancia y del limitador: así tampoco satura
+        return self.cadena_filtros(pista, extra=partes)
 
     def _poner_af(self, m, cadena):
         """Cambia los filtros de un motor solo si de verdad son otros (cada cambio
@@ -2121,7 +2228,7 @@ class Reproductor(QObject):
         self._fundido = None
         self._pasos_fundido.stop()
         self._poner_af(f["saliente"], self.cadena_filtros())
-        self._poner_af(f["entrante"], f["base_ent"] if completo else self.cadena_filtros())
+        self._poner_af(f["entrante"], f["base_ent"] if completo else self.cadena_para(self.actual))
         self._aplicar_volumen()
         ratio = f.get("ratio", 1.0)
         if completo and abs(ratio - 1.0) > 0.001:
@@ -2286,5 +2393,6 @@ class Reproductor(QObject):
             self.guardar_sesion()
         except Exception:
             pass
+        self.cast.cerrar()
         for m in self._todos():
             m.cerrar()

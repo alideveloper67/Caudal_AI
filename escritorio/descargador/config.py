@@ -84,6 +84,10 @@ DEFECTOS = {
     # deja leer 50 canciones por lista
     "spotify_id": "",
     "spotify_secreto": "",
+    # igual para SoundCloud (soundcloud.com/you/apps). Si se dejan vacios se usan los del
+    # sitio de Caudal en Netlify, que son los que pone el dueno
+    "soundcloud_id": "",
+    "soundcloud_secreto": "",
     "formato_salida": "mp4",
     "formato_audio": "mp3",
     "simultaneas": 2,
@@ -140,6 +144,7 @@ DEFECTOS = {
     "eq_preset": "Plano",
     "segundo_plano": True,           # (antiguo) se sustituye por al_cerrar
     "al_cerrar": "preguntar",        # preguntar | bandeja | salir (con musica sonando)
+    "escena_fondo": "video",         # fondo de la escena de escritorio: video | ambiente
     "mini_encima": True,             # el mini reproductor queda por encima de todo
     "letras_auto": False,            # abrir las letras al reproducir
     "vinilo_auto": False,            # abrir el modo vinilo al reproducir
@@ -151,7 +156,16 @@ DEFECTOS = {
     "panel_derecho": "sonando",      # sonando | cola | letras | oculto
     "subtitulos_video": False,
     "teclas_multimedia": True,
-    "super_volumen": 0,              # 0 apagado, 1..4 cada vez mas fuerte (sin saturar)
+    "super_volumen": 0,              # (antiguo) 0..4; se sigue escribiendo a juego con volumen_maximo
+    # volumen maximo sin distorsion (sonoridad.py): no | normal | alto | maximo
+    "volumen_maximo": "alto",
+    # ecualizador avanzado (eq_avanzado.py, donadores y fundadores)
+    "eq_avanzado": False,
+    "eq_av_bandas": [0] * 15,
+    "eq_av_preamp": 0.0,
+    "eq_av_nombre": "",
+    "eq_av_guardados": {},
+    "eq_por_salida": {"audifonos": "", "parlante": "", "bluetooth": ""},
     "recordar_sesion": True,
     # --- compartidos con la app movil (mismas claves en los dos lados)
     "descarga_inteligente": False,   # bajar solo tus me gusta y lo mas escuchado
@@ -181,6 +195,11 @@ class Ajustes:
                 for k, v in guardado.items():
                     if k in DEFECTOS:
                         self.datos[k] = v
+                # quien tenia el super volumen antiguo encendido conserva un nivel parecido
+                from .sonoridad import migrar
+                migrado = dict(guardado)
+                if migrar(migrado):
+                    self.datos["volumen_maximo"] = migrado["volumen_maximo"]
         except Exception:
             pass
 

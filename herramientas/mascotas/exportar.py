@@ -21,7 +21,7 @@ import pix  # noqa: E402
 
 def main(claves):
     catalogo = {m['clave']: m for m in json.loads((DESTINOS[0] / 'catalogo.json').read_text(encoding='utf-8'))}
-    claves = claves or sorted(p.stem for p in AQUI.glob('*.py') if p.stem not in ('pix', 'galeria', 'exportar', 'ascii', 'desde_referencia', 'trazo', '_h', 'pikachu_taller', 'comparar', 'vista_reproductor', 'importar_hoja', 'integrar_v4', 'pokemon_exacto', 'desde_png_ia'))
+    claves = claves or sorted(p.stem for p in AQUI.glob('*.py') if p.stem not in ('pix', 'galeria', 'exportar', 'ascii', 'desde_referencia', 'trazo', '_h', 'pikachu_taller', 'comparar', 'vista_reproductor', 'importar_hoja', 'integrar_v4', 'pokemon_exacto', 'desde_png_ia', 'personajes_nov', 'integrar_nov', 'fondos_tematicos'))
     hechas, fallas = [], []
     for c in claves:
         m = catalogo.get(c)

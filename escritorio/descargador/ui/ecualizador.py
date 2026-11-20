@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Ecualizador, super volumen y velocidad.
+"""Volumen máximo, ecualizador (y el avanzado de los donadores) y velocidad.
 
 Todo se oye al momento mientras mueves los controles, pero solo queda guardado
 al pulsar «Guardar». Cancelar, Esc o cerrar la ventana dejan el sonido como
@@ -10,10 +10,17 @@ from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QComboBox, QDialog, QHBoxLayout, QLabel,
                                QPushButton, QSlider, QVBoxLayout)
 
-from ..reproduccion import FRECUENCIAS_EQ, NOMBRES_SUPER_VOLUMEN, PRESETS_EQ
+from .. import sonoridad
+from ..reproduccion import FRECUENCIAS_EQ, PRESETS_EQ
 from .estilos import C
 
-CLAVES = ("ecualizador", "eq_bandas", "eq_preset", "normalizar", "super_volumen", "velocidad")
+CLAVES = ("ecualizador", "eq_bandas", "eq_preset", "normalizar", "super_volumen", "volumen_maximo",
+          "velocidad")
+NIVELES = list(sonoridad.NIVELES)          # normal, alto, maximo
+TEXTO_VOLUMEN = ("Sube las canciones grabadas bajas hasta que suenen como las fuertes y deja todo "
+                 "lo más alto posible sin que el sonido se rompa: un limitador frena los picos. "
+                 "Con audífonos puede notarse bastante más fuerte: si te molesta, baja el volumen "
+                 "o elige Normal.")
 
 
 def _nombre_frecuencia(f):
@@ -39,31 +46,42 @@ class DialogoEcualizador(QDialog):
         v.setContentsMargins(26, 22, 26, 20)
         v.setSpacing(14)
 
-        # ---------------- super volumen
-        t = QLabel("Súper volumen")
+        # ---------------- volumen maximo
+        cab_v = QHBoxLayout()
+        t = QLabel("Volumen máximo")
         t.setObjectName("titulo_seccion")
-        v.addWidget(t)
-        nota = QLabel("Sube mucho el volumen percibido sin que el sonido se rompa: un "
-                      "limitador evita que la onda se recorte. Ideal para parlantes y fiestas.")
+        cab_v.addWidget(t)
+        cab_v.addStretch(1)
+        nivel = sonoridad.nivel_efectivo(self.a) if self.a["volumen_maximo"] != "no" else None
+        self.vol_max = QCheckBox("Activado")
+        self.vol_max.setChecked(self.a["volumen_maximo"] in sonoridad.NIVELES)
+        self.vol_max.setCursor(Qt.PointingHandCursor)
+        self.vol_max.toggled.connect(self._aplicar)
+        cab_v.addWidget(self.vol_max)
+        v.addLayout(cab_v)
+        nota = QLabel(TEXTO_VOLUMEN)
         nota.setObjectName("secundario")
         nota.setWordWrap(True)
         v.addWidget(nota)
         fila_sv = QHBoxLayout()
         fila_sv.setSpacing(8)
         self.grupo_sv = QButtonGroup(self)
-        for nivel, nombre in NOMBRES_SUPER_VOLUMEN.items():
-            b = QPushButton(nombre)
+        for i, clave in enumerate(NIVELES):
+            b = QPushButton(sonoridad.NOMBRES_NIVEL[clave])
             b.setObjectName("chip")
             b.setCheckable(True)
             b.setCursor(Qt.PointingHandCursor)
-            self.grupo_sv.addButton(b, nivel)
+            self.grupo_sv.addButton(b, i)
             fila_sv.addWidget(b)
         fila_sv.addStretch(1)
+        self.et_ganancia = QLabel("")
+        self.et_ganancia.setObjectName("ayuda")
+        fila_sv.addWidget(self.et_ganancia)
         v.addLayout(fila_sv)
-        boton = self.grupo_sv.button(int(self.a["super_volumen"] or 0))
+        boton = self.grupo_sv.button(NIVELES.index(nivel or sonoridad.NIVEL_POR_DEFECTO))
         if boton:
             boton.setChecked(True)
-        self.grupo_sv.idClicked.connect(lambda _i: self._aplicar())
+        self.grupo_sv.idClicked.connect(self._elegir_nivel)
 
         sep = QLabel("")
         sep.setObjectName("separador")
@@ -135,9 +153,24 @@ class DialogoEcualizador(QDialog):
         nota = QLabel("Graves a la izquierda, agudos a la derecha (dB). Se oye al momento.")
         nota.setObjectName("ayuda")
         v.addWidget(nota)
+        from .ecualizador_avanzado import es_premium
+        premium = es_premium(ctx)
+        fila_av = QHBoxLayout()
+        self.bt_avanzado = QPushButton(("" if premium else "🔒 ") + "Ecualizador avanzado…")
+        self.bt_avanzado.setObjectName("contorno")
+        self.bt_avanzado.setCursor(Qt.PointingHandCursor)
+        self.bt_avanzado.clicked.connect(self._abrir_avanzado)
+        fila_av.addWidget(self.bt_avanzado)
+        av = QLabel("15 bandas, preamplificador, ajustes con nombre y uno por salida"
+                    + ("" if premium else " · para donadores y fundadores")
+                    + (" · en uso" if premium and self.a["eq_avanzado"] else ""))
+        av.setObjectName("ayuda")
+        fila_av.addWidget(av)
+        fila_av.addStretch(1)
+        v.addLayout(fila_av)
 
         # ---------------- mas
-        self.normalizar = QCheckBox("Normalizar el volumen entre canciones")
+        self.normalizar = QCheckBox("Igualar el volumen entre canciones (si Volumen máximo está apagado)")
         self.normalizar.setChecked(bool(self.a["normalizar"]))
         self.normalizar.setCursor(Qt.PointingHandCursor)
         self.normalizar.toggled.connect(self._aplicar)
@@ -186,6 +219,7 @@ class DialogoEcualizador(QDialog):
         v.addLayout(pie)
 
         self._velocidad(self.velocidad.value(), aplicar=False)
+        self._pintar_ganancia()
         self._cargando = False
 
     # ------------------------------------------------------------ cambios
@@ -223,9 +257,33 @@ class DialogoEcualizador(QDialog):
         self.a["eq_bandas"] = [s.value() for s in self.deslizadores]
         self.a["eq_preset"] = self.preset.currentText()
         self.a["normalizar"] = self.normalizar.isChecked()
-        self.a["super_volumen"] = max(0, self.grupo_sv.checkedId())
+        i = max(0, self.grupo_sv.checkedId())
+        sonoridad.poner_nivel(self.a, NIVELES[i] if self.vol_max.isChecked() else "no")
         self.r.aplicar_sonido()
+        self._pintar_ganancia()
         self._marcar()
+
+    def _elegir_nivel(self, _i):
+        if not self.vol_max.isChecked():
+            self._cargando = True
+            self.vol_max.setChecked(True)
+            self._cargando = False
+        self._aplicar()
+
+    def _pintar_ganancia(self):
+        """Lo que se le está sumando (o quitando) a la canción que suena."""
+        if sonoridad.nivel_efectivo(self.a) is None or self.r.actual is None:
+            self.et_ganancia.setText("")
+            return
+        g = self.r.ganancia_actual(self.r.actual)
+        medida = self.r.medida_de(self.r.actual)
+        texto = f"Esta canción: {g:+.1f} dB".replace(".", ",")
+        self.et_ganancia.setText(texto if medida else texto + " (midiéndola…)")
+
+    def _abrir_avanzado(self):
+        from . import ecualizador_avanzado
+        ecualizador_avanzado.abrir(self.ctx, self)
+        self.r.aplicar_sonido()
 
     def _velocidad(self, v, aplicar=True):
         self.et_vel.setText(f"{v / 100:g}×")
@@ -244,9 +302,9 @@ class DialogoEcualizador(QDialog):
         self.a["velocidad"] = self.r.velocidad
         self.a.guardar()
         self._guardado = True
-        nombre = NOMBRES_SUPER_VOLUMEN.get(int(self.a["super_volumen"] or 0), "")
-        self.ctx.aviso.emit("Sonido guardado" + (f" · súper volumen {nombre.lower()}"
-                                                 if int(self.a["super_volumen"] or 0) else ""))
+        nivel = self.a["volumen_maximo"]
+        self.ctx.aviso.emit("Sonido guardado" + (f" · volumen máximo {sonoridad.NOMBRES_NIVEL[nivel].lower()}"
+                                                 if nivel in sonoridad.NIVELES else ""))
         self.ctx.sonido_cambio.emit()
         super().accept()
 

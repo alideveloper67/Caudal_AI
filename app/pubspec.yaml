@@ -1,7 +1,7 @@
 name: caudal
 description: "Descarga musica y videos desde su propio navegador"
 publish_to: 'none'
-version: 2.6.1+44
+version: 2.7.0+45
 
 environment:
   sdk: ^3.13.0
@@ -49,6 +49,13 @@ dependencies:
   sqflite_common_ffi_web: ^1.2.2
   web: ^1.1.2
   image: ^4.13.1
+  # la copia de seguridad (.caudal) es un zip: el mismo que escribe Caudal Escritorio
+  archive: ^4.0.7
+  # enviar la musica a Chromecast y altavoces/teles con Google Cast (SDK nativo
+  # de Google en Android e iPhone; la 2.x pide permission_handler 13)
+  flutter_chrome_cast: ^1.4.8
+  # «¿Qué suena?»: grabar unos segundos del micrófono para reconocer la canción
+  record: ^6.1.1
 
 dev_dependencies:
   flutter_test:
@@ -65,3 +72,5 @@ flutter:
     - assets/fondos/
     - assets/donar/
     - assets/sonidos/
+    # el sonido suave del despertador (si no hay musica ni internet al sonar)
+    - assets/despertador/

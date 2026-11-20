@@ -397,6 +397,9 @@ void main() {
       await Premium.i.iniciar('yo', Social(ses));
       await _montar(t, await _servicios(ses), const PersonalizarPagina());
       await t.pump(const Duration(milliseconds: 300));
+      // la tarjeta va al final de la lista (tras las secciones nuevas): hay que bajar hasta ella
+      await t.scrollUntilVisible(find.text('Regala una prueba a tus amigos'), 300,
+          scrollable: find.byType(Scrollable).first);
       expect(find.text('Regala una prueba a tus amigos'), findsOneWidget);
       expect(find.text('AAAA-BBBB'), findsOneWidget);
       expect(t.takeException(), isNull);

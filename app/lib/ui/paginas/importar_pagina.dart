@@ -6,15 +6,22 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:path/path.dart' as p;
 
+import '../../nucleo/importacion.dart';
 import '../../nucleo/importar.dart';
 import '../../nucleo/importar_archivos.dart';
 import '../servicios.dart';
 import '../tema.dart';
+import 'me_gusta_externos_pagina.dart';
 
-/// Traer a Caudal una lista de Spotify, Apple Music o YouTube Music pegando su enlace, o la música de Snaptube.
+/// Traer a Caudal una lista de Spotify, Apple Music, YouTube Music o SoundCloud pegando
+/// su enlace, o la música de Snaptube. Las canciones van a una lista nueva o a tus Me gusta.
+///
+/// La búsqueda de las canciones sigue aunque se salga de esta pantalla
+/// ([TrabajoImportacion]) y, si se cierra la app, se puede seguir donde quedó.
 class ImportarPagina extends StatefulWidget {
-  const ImportarPagina({super.key, this.enlace = ''});
+  const ImportarPagina({super.key, this.enlace = '', this.aMeGusta = false});
   final String enlace;
+  final bool aMeGusta;
 
   @override
   State<ImportarPagina> createState() => _ImportarPaginaState();
@@ -22,24 +29,36 @@ class ImportarPagina extends StatefulWidget {
 
 class _ImportarPaginaState extends State<ImportarPagina> {
   late final _campo = TextEditingController(text: widget.enlace);
-  bool _trabajando = false;
-  bool _cancelado = false;
-  String _fase = '';
-  int _hechas = 0;
-  int _total = 0;
+  late bool _aMeGusta = widget.aMeGusta;
+  final _trabajo = TrabajoImportacion.i;
+  bool _leyendo = false;
   String? _error;
+  Map<String, dynamic>? _pendiente;
 
   @override
   void initState() {
     super.initState();
     if (widget.enlace.isEmpty) _pegarSiHay();
+    _trabajo.addListener(_cambio);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _mirarPendiente());
   }
 
   @override
   void dispose() {
-    _cancelado = true;
+    // la búsqueda NO se cancela al salir: sigue y avisa al terminar
+    _trabajo.removeListener(_cambio);
     _campo.dispose();
     super.dispose();
+  }
+
+  void _cambio() {
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _mirarPendiente() async {
+    if (!mounted || _trabajo.enMarcha) return;
+    final p = await TrabajoImportacion.pendiente(Caudal.leer(context).coleccion);
+    if (mounted) setState(() => _pendiente = p);
   }
 
   /// Si lo copiado es un enlace de lista, se pone solo.
@@ -60,69 +79,94 @@ class _ImportarPaginaState extends State<ImportarPagina> {
 
   Future<void> _traer() async {
     FocusScope.of(context).unfocus();
-    await _procesar(() => Importar.leer(_campo.text));
+    final enlace = Importar.enlaceDe(_campo.text);
+    await _procesar(() => Importar.leer(enlace), enlace: enlace);
   }
 
-  /// Lee la lista con [leer], busca sus canciones en YouTube Music y crea la lista.
-  Future<void> _procesar(Future<ListaExterna> Function() leer) async {
+  /// Lee la lista con [leer] y deja la búsqueda de sus canciones en marcha.
+  Future<void> _procesar(Future<ListaExterna> Function() leer, {String enlace = ''}) async {
+    if (_trabajo.enMarcha) {
+      setState(() => _error = 'Ya se están pasando canciones. Espera a que termine o páusalo.');
+      return;
+    }
     final s = Caudal.leer(context);
     setState(() {
-      _trabajando = true;
+      _leyendo = true;
       _error = null;
-      _fase = 'Leyendo la lista…';
-      _hechas = 0;
-      _total = 0;
     });
     try {
       final l = await leer();
       if (!mounted) return;
+      final meGusta = _aMeGusta;
+      _trabajo.olvidarTerminado();
+      await _trabajo.empezar(s.coleccion, l, meGusta: meGusta, enlace: enlace);
+      _avisarAlTerminar(s);
       setState(() {
-        _fase = 'Buscando las canciones de «${l.titulo}»';
-        _total = l.canciones.length;
+        _leyendo = false;
+        _pendiente = null;
       });
-      final pistas = await Importar.resolver(l, cancelado: () => _cancelado, alAvanzar: (h, t) {
-        if (mounted) setState(() => _hechas = h);
-      });
-      if (!mounted || _cancelado) return;
-      if (pistas.isEmpty) {
-        setState(() {
-          _trabajando = false;
-          _error = 'No se encontró ninguna de esas canciones en YouTube Music.';
-        });
-        return;
-      }
-      var nombre = l.titulo;
-      int id;
-      try {
-        id = await s.coleccion.crearLista(nombre, descripcion: 'Traída de ${l.plataforma}');
-      } on FormatException {
-        // ya hay una lista con ese nombre: "Nombre n.º 2"...
-        nombre = await s.coleccion.nombreLibre(l.titulo);
-        id = await s.coleccion.crearLista(nombre, descripcion: 'Traída de ${l.plataforma}');
-      }
-      await s.coleccion.agregarALista(id, pistas);
-      if (!mounted) return;
-      final faltan = l.canciones.length - pistas.length;
-      var aviso = 'Lista «$nombre» creada con ${pistas.length} canciones.';
-      if (faltan > 0) aviso += ' $faltan no se encontraron.';
-      if (l.aviso.isNotEmpty) aviso += ' ${l.aviso}';
-      s.avisar(aviso);
-      Navigator.of(context).pop();
-      s.abrirElemento(context, {'tipo': 'mi_lista', 'id': id, 'titulo': nombre});
     } on ErrorImportar catch (e) {
       if (mounted) {
         setState(() {
-          _trabajando = false;
+          _leyendo = false;
           _error = e.mensaje;
         });
       }
     } catch (_) {
       if (mounted) {
         setState(() {
-          _trabajando = false;
+          _leyendo = false;
           _error = 'No se pudo traer la lista. Revisa tu internet y vuelve a probar.';
         });
       }
+    }
+  }
+
+  /// Al terminar avisa aunque ya se haya salido de esta pantalla.
+  void _avisarAlTerminar(Servicios s) {
+    void oir() {
+      if (_trabajo.enMarcha) return;
+      _trabajo.removeListener(oir);
+      if (_trabajo.terminado) {
+        final aviso = _trabajo.aviso;
+        s.avisar(_trabajo.resumen() + (aviso.isEmpty ? '' : ' $aviso'));
+      }
+    }
+
+    _trabajo.addListener(oir);
+  }
+
+  Future<void> _seguir() async {
+    final s = Caudal.leer(context);
+    try {
+      _trabajo.olvidarTerminado();
+      await _trabajo.reanudar(s.coleccion);
+      _avisarAlTerminar(s);
+      setState(() => _pendiente = null);
+    } on ErrorImportar catch (e) {
+      setState(() {
+        _pendiente = null;
+        _error = e.mensaje;
+      });
+    }
+  }
+
+  Future<void> _descartar() async {
+    await _trabajo.descartar(Caudal.leer(context).coleccion);
+    if (mounted) setState(() => _pendiente = null);
+  }
+
+  void _abrirResultado() {
+    final s = Caudal.leer(context);
+    final id = _trabajo.listaId;
+    final meGusta = _trabajo.aMeGusta;
+    final titulo = _trabajo.titulo;
+    _trabajo.olvidarTerminado();
+    Navigator.of(context).pop();
+    if (meGusta) {
+      s.abrirElemento(context, {'tipo': 'me_gusta', 'id': 'me_gusta', 'titulo': 'Tus me gusta'});
+    } else if (id != null) {
+      s.abrirElemento(context, {'tipo': 'mi_lista', 'id': id, 'titulo': titulo});
     }
   }
 
@@ -201,9 +245,12 @@ class _ImportarPaginaState extends State<ImportarPagina> {
     await _procesar(() async => Importar.deLineas(texto.split(RegExp(r'[\r\n]+')), titulo: titulo, plataforma: 'texto pegado'));
   }
 
+  // ------------------------------------------------------------ pantalla
+
   @override
   Widget build(BuildContext context) {
-    final progreso = _total > 0 ? _hechas / _total : null;
+    final t = _trabajo;
+    final ocupado = _leyendo || t.enMarcha;
     return Scaffold(
       appBar: AppBar(
         backgroundColor: C.fondo,
@@ -211,9 +258,16 @@ class _ImportarPaginaState extends State<ImportarPagina> {
         title: const Text('Traer una lista', style: estiloTituloBarra),
       ),
       body: ListView(padding: const EdgeInsets.all(Esp.lado), children: [
+        if (t.enMarcha || t.terminado || t.error != null) ...[
+          _TarjetaAvance(trabajo: t, alAbrir: _abrirResultado),
+          const SizedBox(height: Esp.xl),
+        ] else if (_pendiente != null) ...[
+          _TarjetaPendiente(datos: _pendiente!, alSeguir: _seguir, alDescartar: _descartar),
+          const SizedBox(height: Esp.xl),
+        ],
         const Text(
-          'Pega el enlace de una lista, un álbum o una canción de Spotify, Apple Music '
-          'o YouTube Music. Caudal busca cada canción y te crea la lista en tu biblioteca.',
+          'Pega el enlace de una lista, un álbum o una canción de Spotify, Apple Music, YouTube Music '
+          'o SoundCloud. Caudal busca cada canción, sin límite de cantidad, y la guarda donde elijas.',
           style: TextStyle(color: C.texto2, height: 1.4),
         ),
         const SizedBox(height: Esp.l),
@@ -222,7 +276,7 @@ class _ImportarPaginaState extends State<ImportarPagina> {
         const SizedBox(height: Esp.xl),
         TextField(
           controller: _campo,
-          enabled: !_trabajando,
+          enabled: !ocupado,
           keyboardType: TextInputType.url,
           decoration: InputDecoration(
             hintText: 'https://open.spotify.com/playlist/…',
@@ -230,21 +284,64 @@ class _ImportarPaginaState extends State<ImportarPagina> {
             fillColor: C.superficie,
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
             suffixIcon: IconButton(tooltip: 'Pegar', icon: const Icon(Icons.content_paste_rounded),
-                onPressed: _trabajando ? null : _pegar),
+                onPressed: ocupado ? null : _pegar),
           ),
           onChanged: (_) => setState(() => _error = null),
           onSubmitted: (_) => _traer(),
         ),
         const SizedBox(height: Esp.m),
-        Row(children: const [
+        const Wrap(spacing: Esp.s, runSpacing: Esp.s, children: [
           _Marca('Spotify', Color(0xFF1DB954)),
-          SizedBox(width: Esp.s),
           _Marca('Apple Music', Color(0xFFFA2D48)),
-          SizedBox(width: Esp.s),
           _Marca('YouTube Music', Color(0xFFFF3B30)),
+          _Marca('SoundCloud', Color(0xFFFF5500)),
         ]),
+        const SizedBox(height: Esp.l),
+        const Text('Guardar en', style: TextStyle(color: C.texto2, fontWeight: FontWeight.w700)),
+        const SizedBox(height: Esp.s),
+        Wrap(spacing: Esp.s, children: [
+          ChoiceChip(
+            label: const Text('Una lista nueva'),
+            selected: !_aMeGusta,
+            onSelected: ocupado ? null : (_) => setState(() => _aMeGusta = false),
+          ),
+          ChoiceChip(
+            label: const Text('Mis Me gusta'),
+            selected: _aMeGusta,
+            onSelected: ocupado ? null : (_) => setState(() => _aMeGusta = true),
+          ),
+        ]),
+        const SizedBox(height: Esp.l),
+        if (_error != null) ...[
+          Text(_error!, style: const TextStyle(color: C.error, height: 1.35)),
+          const SizedBox(height: Esp.l),
+        ],
+        if (_leyendo) ...[
+          const Text('Leyendo la lista…', style: TextStyle(color: C.texto, fontWeight: FontWeight.w700)),
+          const SizedBox(height: Esp.m),
+          ClipRRect(
+            borderRadius: BorderRadius.circular(4),
+            child: LinearProgressIndicator(minHeight: 6, color: C.acento, backgroundColor: C.superficie2),
+          ),
+        ] else if (!t.enMarcha)
+          FilledButton.icon(
+            onPressed: _campo.text.trim().isEmpty ? null : _traer,
+            style: FilledButton.styleFrom(backgroundColor: C.acento, foregroundColor: C.acentoTexto,
+                minimumSize: const Size.fromHeight(50)),
+            icon: Icon(_aMeGusta ? Icons.favorite_rounded : Icons.playlist_add_rounded),
+            label: Text(_aMeGusta ? 'Pasar a Me gusta' : 'Traer lista', style: const TextStyle(fontWeight: FontWeight.w800)),
+          ),
+        const SizedBox(height: Esp.m),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton.icon(
+            onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MeGustaExternosPagina())),
+            icon: const Icon(Icons.favorite_border_rounded),
+            label: const Text('Pasar tus me gusta de Spotify, YouTube Music o SoundCloud'),
+          ),
+        ),
         const SizedBox(height: Esp.xl),
-        if (!_trabajando) ...[
+        if (!ocupado) ...[
           const Text('Snaptube y otras apps', style: estiloTituloSeccion),
           const SizedBox(height: 4),
           const Text(
@@ -274,30 +371,121 @@ class _ImportarPaginaState extends State<ImportarPagina> {
           ]),
           const SizedBox(height: Esp.xl),
         ],
-        if (_error != null) ...[
-          Text(_error!, style: const TextStyle(color: C.error, height: 1.35)),
-          const SizedBox(height: Esp.l),
-        ],
-        if (_trabajando) ...[
-          Text(_fase, style: const TextStyle(color: C.texto, fontWeight: FontWeight.w700)),
-          const SizedBox(height: Esp.m),
+      ]),
+    );
+  }
+}
+
+/// El avance de lo que se está pasando: «1 240 de 5 300 canciones».
+class _TarjetaAvance extends StatefulWidget {
+  const _TarjetaAvance({required this.trabajo, required this.alAbrir});
+  final TrabajoImportacion trabajo;
+  final VoidCallback alAbrir;
+
+  @override
+  State<_TarjetaAvance> createState() => _TarjetaAvanceState();
+}
+
+class _TarjetaAvanceState extends State<_TarjetaAvance> {
+  bool _verFaltan = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final t = widget.trabajo;
+    final destino = t.aMeGusta ? 'tus Me gusta' : 'la lista «${t.titulo}»';
+    final progreso = t.total > 0 ? t.hechas / t.total : null;
+    final faltan = t.noEncontradas;
+    return Container(
+      padding: const EdgeInsets.all(Esp.l),
+      decoration: BoxDecoration(color: C.superficie, borderRadius: BorderRadius.circular(16)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text(t.terminado ? 'Listo' : (t.error != null ? 'Se detuvo' : 'Pasando canciones a $destino'),
+            style: const TextStyle(color: C.texto, fontWeight: FontWeight.w800, fontSize: 16)),
+        const SizedBox(height: Esp.m),
+        if (!t.terminado) ...[
           ClipRRect(
             borderRadius: BorderRadius.circular(4),
-            child: LinearProgressIndicator(value: progreso, minHeight: 6,
-                color: C.acento, backgroundColor: C.superficie2),
+            child: LinearProgressIndicator(value: progreso, minHeight: 6, color: C.acento, backgroundColor: C.superficie2),
           ),
-          if (_total > 0) ...[
+          const SizedBox(height: Esp.s),
+          Text('${textoAvance(t.hechas, t.total)} canciones · ${miles(t.encontradas)} encontradas',
+              style: const TextStyle(color: C.texto2, fontWeight: FontWeight.w600)),
+          const SizedBox(height: Esp.xs),
+          Text(
+              t.error ??
+                  (t.pausando
+                      ? 'Pausando después de esta tanda…'
+                      : 'Puedes salir de aquí: sigue buscando y te avisa al terminar. Lo encontrado se guarda por tandas.'),
+              style: TextStyle(color: t.error != null ? C.error : C.texto3, fontSize: 12, height: 1.35)),
+        ] else ...[
+          Text(t.resumen(), style: const TextStyle(color: C.texto2, height: 1.35)),
+          if (t.aviso.isNotEmpty) ...[
             const SizedBox(height: Esp.s),
-            Text('$_hechas de $_total canciones', style: estiloDetalle),
+            Text(t.aviso, style: estiloDetalle),
           ],
-        ] else
-          FilledButton.icon(
-            onPressed: _campo.text.trim().isEmpty ? null : _traer,
-            style: FilledButton.styleFrom(backgroundColor: C.acento, foregroundColor: C.acentoTexto,
-                minimumSize: const Size.fromHeight(50)),
-            icon: const Icon(Icons.playlist_add_rounded),
-            label: const Text('Traer lista', style: TextStyle(fontWeight: FontWeight.w800)),
+        ],
+        const SizedBox(height: Esp.m),
+        Wrap(spacing: Esp.s, runSpacing: Esp.s, children: [
+          if (t.enMarcha)
+            OutlinedButton(onPressed: t.pausando ? null : t.pausar, child: const Text('Pausar')),
+          if (t.terminado)
+            FilledButton(
+              onPressed: widget.alAbrir,
+              style: FilledButton.styleFrom(backgroundColor: C.acento, foregroundColor: C.acentoTexto),
+              child: Text(t.aMeGusta ? 'Ver mis Me gusta' : 'Abrir la lista'),
+            ),
+          if (t.terminado && faltan.isNotEmpty)
+            TextButton(
+              onPressed: () => setState(() => _verFaltan = !_verFaltan),
+              child: Text(_verFaltan ? 'Ocultar las que faltan' : 'Ver las ${miles(faltan.length)} que no se encontraron'),
+            ),
+        ]),
+        if (_verFaltan && faltan.isNotEmpty)
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 220),
+            child: ListView.builder(
+              shrinkWrap: true,
+              itemCount: faltan.length,
+              itemBuilder: (_, i) => Padding(
+                padding: const EdgeInsets.symmetric(vertical: 2),
+                child: Text(faltan[i], style: estiloDetalle, maxLines: 1, overflow: TextOverflow.ellipsis),
+              ),
+            ),
           ),
+      ]),
+    );
+  }
+}
+
+class _TarjetaPendiente extends StatelessWidget {
+  const _TarjetaPendiente({required this.datos, required this.alSeguir, required this.alDescartar});
+  final Map<String, dynamic> datos;
+  final VoidCallback alSeguir;
+  final VoidCallback alDescartar;
+
+  @override
+  Widget build(BuildContext context) {
+    final meGusta = datos['me_gusta'] == true;
+    final destino = meGusta ? 'tus Me gusta' : 'la lista «${datos['titulo'] ?? ''}»';
+    final hechas = (datos['hechas'] as num?)?.toInt() ?? 0;
+    final total = (datos['total'] as num?)?.toInt() ?? 0;
+    return Container(
+      padding: const EdgeInsets.all(Esp.l),
+      decoration: BoxDecoration(color: C.superficie, borderRadius: BorderRadius.circular(16)),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        Text('Quedó a medias el paso de canciones a $destino',
+            style: const TextStyle(color: C.texto, fontWeight: FontWeight.w800)),
+        const SizedBox(height: Esp.xs),
+        Text('Van ${textoAvance(hechas, total)}. Lo encontrado ya está guardado.', style: estiloSecundario),
+        const SizedBox(height: Esp.m),
+        Wrap(spacing: Esp.s, children: [
+          FilledButton(
+            onPressed: alSeguir,
+            style: FilledButton.styleFrom(backgroundColor: C.acento, foregroundColor: C.acentoTexto),
+            child: const Text('Seguir'),
+          ),
+          TextButton(onPressed: alDescartar, child: const Text('Dejarlo así')),
+        ]),
       ]),
     );
   }
@@ -309,12 +497,10 @@ class _Marca extends StatelessWidget {
   final Color color;
 
   @override
-  Widget build(BuildContext context) => Flexible(
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-          decoration: BoxDecoration(color: color.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(20)),
-          child: Text(nombre, maxLines: 1, overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w700)),
-        ),
+  Widget build(BuildContext context) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(color: color.withValues(alpha: 0.14), borderRadius: BorderRadius.circular(20)),
+        child: Text(nombre, maxLines: 1, overflow: TextOverflow.ellipsis,
+            style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w700)),
       );
 }

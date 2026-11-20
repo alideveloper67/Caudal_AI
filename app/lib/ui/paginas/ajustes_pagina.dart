@@ -7,8 +7,11 @@ import '../../nucleo/catalogo.dart';
 import '../../nucleo/cuentas.dart';
 import '../../nucleo/formato.dart';
 import '../../nucleo/gustos.dart';
+import '../../nucleo/logros_vigia.dart';
 import '../../nucleo/mixes.dart';
+import '../../nucleo/plataforma.dart';
 import '../../nucleo/version.dart';
+import '../../coche/modo_coche_ajustes_pagina.dart';
 import '../comunes.dart';
 import '../cumpleanos.dart';
 import '../../nucleo/cumpleanos.dart';
@@ -22,10 +25,13 @@ import '../../nucleo/premium.dart';
 import '../premium/canje_pase.dart';
 import '../premium/personalizar_pagina.dart';
 import 'mascota_pagina.dart';
+import 'ajuste_aviso_errores.dart';
 import 'aspecto_pagina.dart';
 import 'fondo_pagina.dart';
 import 'gustos_pagina.dart';
 import 'bateria_ajuste.dart';
+import 'copia_seguridad_pagina.dart';
+import 'despertador_ajuste.dart';
 import 'donar.dart';
 import 'mezclador_ajustes.dart';
 import 'mezclador_pagina.dart';
@@ -237,6 +243,16 @@ class _AjustesPaginaState extends State<AjustesPagina> {
           trailing: const Icon(Icons.chevron_right_rounded, color: C.texto3),
           onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const PrivacidadPagina())),
         ),
+        const AjusteAvisoErrores(),
+        if (VigiaLogros.vigente != null) EntradaLogros(vigia: VigiaLogros.vigente!),
+        ListTile(
+          leading: const Icon(Icons.backup_rounded, color: C.texto2),
+          title: const Text('Copia de seguridad'),
+          subtitle: const Text('Guarda todo en un archivo y recupéralo en otro teléfono o en la PC',
+              style: estiloSecundario),
+          trailing: const Icon(Icons.chevron_right_rounded, color: C.texto3),
+          onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const CopiaSeguridadPagina())),
+        ),
 
         _seccion('Aspecto'),
         SwitchListTile.adaptive(
@@ -362,13 +378,22 @@ class _AjustesPaginaState extends State<AjustesPagina> {
         ),
 
         _seccion('Sonido'),
+        const AjustesDespertador(),
+        if (Plataforma.esAndroid)
+          ListTile(
+            leading: const Icon(Icons.directions_car_rounded, color: C.texto2),
+            title: const Text('Modo coche'),
+            subtitle: const Text('Botones grandes, Android Auto y voz', style: estiloSecundario),
+            trailing: const Icon(Icons.chevron_right_rounded, color: C.texto3),
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ModoCocheAjustesPagina())),
+          ),
         if (!kIsWeb) const AjusteBateria(),
         if (!kIsWeb) ListTile(
           leading: const Icon(Icons.graphic_eq_rounded, color: C.texto2),
-          title: const Text('Ecualizador, súper volumen y velocidad'),
+          title: const Text('Volumen máximo, ecualizador y velocidad'),
           subtitle: Text([
             a.sino('ecualizador') ? 'Ecualizador: ${a.texto('eq_preset')}' : 'Ecualizador apagado',
-            'Volumen: ${nivelesSuper[a.entero('super_volumen').clamp(0, 4)]}',
+            'Volumen máximo: ${nombreNivelVolumen(a.nivelVolumen).toLowerCase()}',
           ].join(' · '), style: estiloSecundario),
           trailing: const Icon(Icons.chevron_right_rounded, color: C.texto3),
           onTap: () async {

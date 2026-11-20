@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex, nofollow">
+<meta name="theme-color" content="#061A2B">
+<title>Fiesta en Caudal</title>
+<meta name="description" content="Pide canciones y vota las siguientes desde tu teléfono, sin instalar nada.">
+<meta property="og:site_name" content="Caudal">
+<meta property="og:title" content="Fiesta en Caudal">
+<meta property="og:description" content="Pide canciones y vota las siguientes desde tu teléfono, sin instalar nada.">
+<meta property="og:image" content="https://caudal-musica.netlify.app/icono.png">
+<link rel="icon" href="/favicon.png">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,700;12..96,800&family=Figtree:wght@400;600;700;800&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+:root{--fondo:#061A2B;--panel:#0B2740;--superficie:#0F2D47;--superficie2:#13344F;--borde:rgba(143,167,184,.22);--texto:#F3F5F9;--texto2:#C6D6E0;--texto3:#8FA7B8;--acento:#2FD4F0;--acento-alto:#67E8F9;--acento-texto:#061A2B;--violeta:#7C5CFF;--rosa:#FF5FA2;--error:#FF8A8A;--ok:#5BE3A1}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;min-height:100vh;color:var(--texto);font-family:"Figtree",system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;line-height:1.45;-webkit-font-smoothing:antialiased;
+background:radial-gradient(900px 500px at 15% -10%,rgba(124,92,255,.28),transparent 60%),radial-gradient(800px 500px at 100% 0,rgba(255,95,162,.16),transparent 60%),var(--fondo);background-attachment:fixed}
+a{color:var(--acento);text-decoration:none}
+button,input{font:inherit;color:inherit}
+button{cursor:pointer}
+[hidden]{display:none!important}
+.cab{display:flex;align-items:center;gap:10px;width:min(640px,100% - 32px);margin:0 auto;padding:16px 0 10px}
+.cab a{display:flex;align-items:center;gap:9px;color:var(--texto);font-family:"Bricolage Grotesque","Figtree",sans-serif;font-weight:800;font-size:19px;letter-spacing:-.4px}
+.cab img{width:30px;height:30px;border-radius:8px}
+.vivo{margin-left:auto;display:inline-flex;align-items:center;gap:6px;font-size:13px;font-weight:700;color:var(--texto2);background:rgba(15,45,71,.7);border:1px solid var(--borde);padding:4px 10px;border-radius:999px}
+.vivo i{width:8px;height:8px;border-radius:50%;background:var(--texto3)}
+.vivo.si i{background:var(--ok);box-shadow:0 0 0 0 rgba(91,227,161,.6);animation:latir 2s infinite}
+@keyframes latir{70%{box-shadow:0 0 0 8px rgba(91,227,161,0)}100%{box-shadow:0 0 0 0 rgba(91,227,161,0)}}
+main{width:min(640px,100% - 32px);margin:0 auto;padding-bottom:calc(56px + env(safe-area-inset-bottom))}
+h1{font-family:"Bricolage Grotesque","Figtree",sans-serif;font-size:clamp(26px,7vw,38px);line-height:1.1;letter-spacing:-.8px;margin:8px 0 2px;overflow-wrap:anywhere}
+h2{font-family:"Bricolage Grotesque","Figtree",sans-serif;font-size:20px;letter-spacing:-.3px;margin:0}
+.sub{color:var(--texto3);font-size:14px;margin:0 0 16px}
+.tarjeta{background:linear-gradient(180deg,var(--panel),var(--superficie));border:1px solid var(--borde);border-radius:20px;padding:16px;margin-top:14px}
+/* lo que suena */
+.suena{display:flex;gap:14px;align-items:center;background:linear-gradient(135deg,rgba(124,92,255,.35),rgba(47,212,240,.12) 60%,var(--superficie));}
+.suena .car{width:84px;height:84px;border-radius:14px;flex:none}
+.etq{display:inline-block;font-size:11px;font-weight:800;letter-spacing:1px;color:var(--acento-alto);text-transform:uppercase}
+.suena b{display:block;font-size:18px;font-weight:800;line-height:1.2;overflow-wrap:anywhere;margin-top:2px}
+.suena .art{color:var(--texto2);font-size:14px}
+.suena .quien{color:var(--texto3);font-size:12.5px;margin-top:2px}
+.barra{height:4px;border-radius:4px;background:rgba(143,167,184,.25);margin-top:10px;overflow:hidden}
+.barra span{display:block;height:100%;width:0;background:var(--acento);border-radius:4px;transition:width 1s linear}
+.txt{min-width:0;flex:1}
+.car{flex:none;width:52px;height:52px;border-radius:10px;background:linear-gradient(135deg,var(--violeta),var(--acento));object-fit:cover;display:block}
+/* nombre */
+.nombre{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.nombre label{font-size:14px;color:var(--texto2);flex:1 1 100%}
+/* buscar */
+.campo{display:flex;gap:8px;margin-top:10px}
+input[type=text],input[type=search]{flex:1;min-width:0;background:rgba(6,26,43,.6);border:1px solid var(--borde);border-radius:14px;padding:12px 14px;font-size:16px;outline:none}
+input:focus{border-color:var(--acento)}
+.boton{display:inline-flex;justify-content:center;align-items:center;gap:6px;padding:12px 18px;border-radius:999px;background:var(--acento);color:var(--acento-texto);font-weight:800;font-size:15px;border:0;white-space:nowrap}
+.boton:hover{background:var(--acento-alto)}
+.boton:disabled{opacity:.5;cursor:default}
+.boton.sec{background:var(--superficie2);color:var(--texto);border:1px solid var(--borde)}
+.boton.chico{padding:8px 14px;font-size:14px}
+.quedan{font-size:13.5px;color:var(--texto2);margin:10px 2px 0}
+.lista{list-style:none;margin:12px 0 0;padding:0;display:grid;gap:8px}
+.lista li{display:flex;align-items:center;gap:12px;background:rgba(6,26,43,.45);border:1px solid var(--borde);border-radius:14px;padding:8px 10px 8px 8px;min-width:0}
+.lista .txt b{display:block;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lista .txt span{display:block;color:var(--texto3);font-size:13.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.lista .num{flex:none;width:20px;text-align:center;color:var(--texto3);font-weight:800;font-size:14px}
+.lista .tuya{display:inline-block;font-size:11px;font-weight:800;color:var(--acento-texto);background:var(--acento);border-radius:6px;padding:0 6px;margin-left:6px;vertical-align:1px}
+.voto{flex:none;display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:52px;height:52px;border-radius:14px;border:1px solid var(--borde);background:var(--superficie2);font-weight:800;font-size:13px;gap:0;padding:0 6px}
+.voto svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:2}
+.voto.si{background:rgba(255,95,162,.18);border-color:rgba(255,95,162,.6);color:var(--rosa)}
+.voto.si svg{fill:currentColor}
+.voto:disabled{opacity:.5}
+.vacio{color:var(--texto3);text-align:center;padding:18px 8px;font-size:14.5px}
+.cabsec{display:flex;align-items:baseline;justify-content:space-between;gap:10px}
+.cabsec small{color:var(--texto3);font-size:13px}
+details summary{cursor:pointer;color:var(--texto2);font-weight:700;list-style:none}
+details summary::-webkit-details-marker{display:none}
+details summary::after{content:" ▾";color:var(--texto3)}
+details[open] summary::after{content:" ▴"}
+/* entrada, fin, errores */
+.centro{text-align:center;padding:34px 20px}
+.codigo{font-family:"JetBrains Mono",ui-monospace,Consolas,monospace;font-size:28px;letter-spacing:.18em;text-transform:uppercase;text-align:center}
+.aviso{position:fixed;left:50%;bottom:calc(18px + env(safe-area-inset-bottom));transform:translateX(-50%) translateY(20px);opacity:0;pointer-events:none;background:var(--superficie2);border:1px solid var(--borde);color:var(--texto);padding:12px 18px;border-radius:14px;font-weight:700;font-size:14.5px;max-width:calc(100% - 32px);width:max-content;box-shadow:0 10px 30px rgba(0,0,0,.35);transition:.25s}
+.aviso.ver{opacity:1;transform:translateX(-50%) translateY(0)}
+.aviso.mal{border-color:rgba(255,138,138,.6);color:var(--error)}
+.pie{text-align:center;color:var(--texto3);font-size:12.5px;margin-top:26px}
+.cargando{color:var(--texto3);text-align:center;padding:40px 0}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<header class="cab">
+  <a href="/"><img src="/icono.png" alt="" width="30" height="30">Caudal</a>
+  <span class="vivo" id="vivo" hidden><i></i><span id="vivo-txt">En vivo</span></span>
+</header>
+<main>
+  <p class="cargando" id="cargando">Entrando a la fiesta…</p>
+
+  <!-- sin código en la dirección -->
+  <section class="tarjeta centro" id="v-entrada" hidden>
+    <h1>Únete a la fiesta</h1>
+    <p class="sub">Escribe el código de 6 letras que aparece en la pantalla del anfitrión.</p>
+    <form id="f-codigo" class="campo" autocomplete="off">
+      <input type="text" id="i-codigo" class="codigo" maxlength="9" placeholder="ABC234" aria-label="Código de la fiesta" autocapitalize="characters" spellcheck="false">
+      <button class="boton" type="submit">Entrar</button>
+    </form>
+    <p class="quedan" id="e-codigo" role="alert"></p>
+  </section>
+
+  <!-- fiesta cerrada / no existe -->
+  <section class="tarjeta centro" id="v-fin" hidden>
+    <h1 id="fin-titulo">La fiesta terminó</h1>
+    <p class="sub" id="fin-texto">El anfitrión cerró la fiesta. ¡Gracias por la música!</p>
+    <a class="boton sec" href="/">Conoce Caudal</a>
+  </section>
+
+  <!-- dentro de la fiesta -->
+  <div id="v-fiesta" hidden>
+    <h1 id="f-nombre">Fiesta</h1>
+    <p class="sub" id="f-sub"></p>
+
+    <section class="tarjeta suena" id="suena" aria-live="polite">
+      <img class="car" id="s-car" alt="" width="84" height="84">
+      <div class="txt">
+        <span class="etq" id="s-etq">Ahora suena</span>
+        <b id="s-titulo">Todavía no suena nada</b>
+        <div class="art" id="s-artista">Pide la primera canción</div>
+        <div class="quien" id="s-quien"></div>
+        <div class="barra" id="s-barra" hidden><span id="s-progreso"></span></div>
+      </div>
+    </section>
+
+    <section class="tarjeta">
+      <div class="nombre">
+        <label for="i-nombre">Tu nombre (así sabrán quién pidió cada canción)</label>
+        <input type="text" id="i-nombre" maxlength="30" placeholder="Tu nombre" autocomplete="nickname">
+      </div>
+      <form id="f-buscar" class="campo" role="search" autocomplete="off">
+        <input type="search" id="i-buscar" placeholder="Busca una canción o artista" aria-label="Buscar canción" enterkeyhint="search">
+        <button class="boton" type="submit">Buscar</button>
+      </form>
+      <p class="quedan" id="quedan"></p>
+      <ul class="lista" id="resultados" aria-label="Resultados de la búsqueda"></ul>
+    </section>
+
+    <section class="tarjeta">
+      <div class="cabsec"><h2>Siguientes</h2><small id="c-total"></small></div>
+      <p class="quedan">Toca el corazón de las que quieres oír antes: suenan primero las más votadas.</p>
+      <ul class="lista" id="cola"></ul>
+    </section>
+
+    <section class="tarjeta" id="sec-sonadas" hidden>
+      <details>
+        <summary>Ya sonaron</summary>
+        <ul class="lista" id="sonadas"></ul>
+      </details>
+    </section>
+    <p class="pie">No necesitas cuenta ni instalar nada. Lo que pides lo ve todo el mundo en la fiesta.</p>
+  </div>
+</main>
+<div class="aviso" id="aviso" role="status" aria-live="polite"></div>
+<script type="module" src="/fiesta.js"></script>
+</body>
+</html>

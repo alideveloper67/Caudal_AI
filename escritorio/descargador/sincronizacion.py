@@ -28,6 +28,7 @@ AL_VOLVER = 60                # y al volver a la ventana, si la última vez fue 
 # que Ajustes.compartidos de la app movil: si se toca una, tocar la otra).
 COMPARTIDOS = (
     "region", "calidad_audio", "calidad_video", "codec_video", "normalizar", "super_volumen",
+    "volumen_maximo",
     "ecualizador", "eq_bandas", "eq_preset", "autoplay", "sponsorblock", "sponsorblock_videos",
     "formato_audio", "bitrate_mp3", "crossfade",
     "descarga_inteligente", "descarga_inteligente_gb", "transicion_dj", "apagado_suave",
@@ -285,6 +286,11 @@ class Sincronizador(QObject):
         if op == "me_gusta_poner":
             self._upsert("me_gusta", [{"clave": d["clave"], "datos": d.get("datos", {})}],
                          "user_id,clave")
+        elif op == "me_gusta_varios":
+            # los me gusta traidos de otra app, de una tanda (ya llegan de 400 en 400)
+            self._upsert("me_gusta", [{"clave": i["clave"], "datos": i.get("datos", {}),
+                                       "fecha": _iso(i.get("fecha"))} for i in d["items"]],
+                         "user_id,clave")
         elif op == "me_gusta_quitar":
             s.pedir("DELETE", f"me_gusta?clave=eq.{_q(d['clave'])}")
         elif op == "lista_poner":
@@ -398,7 +404,10 @@ class Sincronizador(QObject):
     def _pedir_remoto(self):
         """Solo red, sin tocar la base: todo lo que hace falta para `_escribir_remoto`."""
         s = self.sesion
-        gustan = s.pedir("GET", "me_gusta?select=clave,datos,fecha&order=fecha.desc&limit=5000") or []
+        # paginado: la nube entrega como mucho 1000 filas por peticion. Antes se pedian
+        # «5000» de golpe, llegaban 1000 y los me gusta de mas en esta PC se BORRABAN
+        # (lo de la nube manda). Con miles de me gusta traidos de otra app, se perdian.
+        gustan = self._paginado("me_gusta?select=clave,datos,fecha&order=fecha.desc,clave")
         try:
             listas = s.pedir("GET", "listas?select=id,nombre,descripcion,fijada,creada,publica,en_perfil"
                                     "&order=creada")

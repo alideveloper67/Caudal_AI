@@ -60,8 +60,12 @@ void main() {
       expect(tocaNovedades('2.0.0', '2.4.9'), isFalse);
     });
 
-    test('la version de la app es la de la edicion', () {
-      expect(versionApp, '2.6.0');
+    test('la version de la app es la de la edicion o una posterior de la misma gran version', () {
+      // la prueba no fija el numero: la app puede pasar a 2.7.0 (o mas) sin romperla
+      expect(hayNovedad(versionApp, edicionNovedades), isFalse,
+          reason: 'la app no puede ser anterior a la edicion');
+      expect(versionApp.split('.').first, edicionNovedades.split('.').first,
+          reason: 'misma gran version que la edicion');
     });
   });
 
