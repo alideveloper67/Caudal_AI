@@ -1,7 +1,7 @@
 name: caudal
 description: "Descarga musica y videos desde su propio navegador"
 publish_to: 'none'
-version: 2.7.3+48
+version: 2.7.4+49
 
 environment:
   sdk: ^3.13.0
@@ -70,6 +70,7 @@ flutter:
     - assets/logo/
     - assets/mascotas/
     - assets/fondos/
+    - assets/escenarios/
     - assets/donar/
     - assets/sonidos/
     # el sonido suave del despertador (si no hay musica ni internet al sonar)

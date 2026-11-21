@@ -32,7 +32,7 @@ Json _p(String t, String a, {String? genero}) => {
       ],
       'miniatura': '',
       'duracion': 200,
-      if (genero != null) 'genero': genero,
+      'genero': ?genero,
     };
 
 class _Repro extends ChangeNotifier implements Reproductor {
@@ -156,7 +156,7 @@ Future<List<String>> _montar(WidgetTester t, _Mundo m, Widget pagina,
     {Size tam = const Size(320, 568), double escala = 1.0, Future<void> Function(WidgetTester)? despues}) async {
   final errores = <String>[];
   final anterior = FlutterError.onError;
-  FlutterError.onError = (d) => errores.add('${d.exceptionAsString().split('\n').first}');
+  FlutterError.onError = (d) => errores.add(d.exceptionAsString().split('\n').first);
   t.view.physicalSize = tam * 2;
   t.view.devicePixelRatio = 2;
   addTearDown(t.view.reset);

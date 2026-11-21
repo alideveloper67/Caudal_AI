@@ -2,7 +2,6 @@
 // conseguir uno, la vitrina del perfil (propia y de otra persona) y la casilla del aviso de errores.
 // Con CAPTURAS=<carpeta> guarda imágenes para revisarlas a ojo.
 import 'dart:io';
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:caudal/nucleo/aviso_errores.dart';

@@ -32,6 +32,8 @@ class Ajustes extends ChangeNotifier {
     'traducir_letra': true, // la traduccion bajo cada linea de la letra
     'acento': 'cian', // color de la app (ver Aspecto.acentos)
     'fondo': 'oscuro', // fondo de la app (ver Aspecto.fondos)
+    // escenario animado de fondo del reproductor (ui/escenarios; '' = ninguno; solo con beneficios)
+    'escenario_reproductor': '',
     'tamano_personaje': 160, // alto del personaje del fondo con personaje (se cambia pellizcándolo)
     // dónde dejó el personaje del fondo (0..1 del espacio libre; -1 = su esquina de siempre) y si baila
     'personaje_x': -1.0,

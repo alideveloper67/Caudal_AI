@@ -93,3 +93,26 @@ def test_acento_y_reloj(app, clave):
     assert w._timer.isActive()
     w.hide()
     assert not w._timer.isActive()
+
+
+def test_propia_con_imagen_y_sin_ella(app, tmp_path):
+    from descargador.ui.escena.escenarios import propia
+    png = str(tmp_path / "mini.png")
+    img = QImage(64, 64, QImage.Format_ARGB32)
+    img.fill(QColor("#FF8844"))
+    assert img.save(png)
+    try:
+        propia.fijar_ruta(png)
+        w = escenarios.crear("propia")
+        assert w is not None
+        w.resize(640, 360)
+        _avanzar(w, 3, [0.5] * 32)
+        _render(w)
+        propia.fijar_ruta("")
+        w = escenarios.crear("propia")
+        assert w is not None
+        w.resize(640, 360)
+        _avanzar(w, 3, [0.5] * 32)
+        _render(w)
+    finally:
+        propia.fijar_ruta("")

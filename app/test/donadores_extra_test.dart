@@ -474,8 +474,9 @@ void main() {
         await t.pump(const Duration(seconds: 2));
         expect(t.takeException(), isNull);
         expect(find.bySemanticsLabel('Segunda línea que suena'), findsOneWidget);
-        expect(find.text('Primera línea'), findsOneWidget);
-        expect(find.text('♪'), findsOneWidget, reason: 'el siguiente es un tramo sin letra');
+        // el texto aparece dos veces: el relleno y su contorno oscuro debajo (este va sin semántica)
+        expect(find.text('Primera línea'), findsWidgets);
+        expect(find.text('♪'), findsWidgets, reason: 'el siguiente es un tramo sin letra');
         // cambia de verso: la entrada vuelve a empezar sin errores
         await t.pumpWidget(MaterialApp(
           home: Scaffold(

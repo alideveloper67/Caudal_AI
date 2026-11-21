@@ -28,7 +28,7 @@ Json _p(String t, String a, {String? genero}) => {
       ],
       'miniatura': '',
       'duracion': 200,
-      if (genero != null) 'genero': genero,
+      'genero': ?genero,
     };
 
 class _Col extends ChangeNotifier implements Coleccion {

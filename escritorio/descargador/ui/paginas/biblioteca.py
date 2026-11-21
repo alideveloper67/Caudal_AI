@@ -4,9 +4,20 @@
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton
 
 from .. import iconos
-from ..componentes import Chip, Pagina, _borrar_layout
+from ...hilos import en_segundo_plano
+from ..componentes import Chip, Esqueleto, Pagina, _borrar_layout
 from ..estilos import C
 from .comun import Rejilla
+
+
+def _descargadas_fondo(col):
+    """Las descargas del disco (cada archivo se comprueba en la PC): corre en segundo plano con
+    una conexión propia a la base, si la colección la ofrece."""
+    copiar = getattr(col, "copia_de_lectura", None)
+    if copiar is None:
+        return col.descargadas()[:300]
+    with copiar() as c:
+        return c.descargadas()[:300]
 
 
 class PaginaBiblioteca(Pagina):
@@ -14,6 +25,7 @@ class PaginaBiblioteca(Pagina):
         super().__init__(ctx, padre)
         self.titulo = "Tu biblioteca"
         self.filtro = "todo"
+        self._pedido_disco = 0
         cab = QHBoxLayout()
         t = QLabel("Tu biblioteca")
         t.setObjectName("titulo_pagina")
@@ -96,10 +108,33 @@ class PaginaBiblioteca(Pagina):
                 self._pintar()
         en_segundo_plano(nube.mis_compartidas, ok=listo, error=lambda _e: None, dueno=self)
 
+    def _disco_llego(self, n, filas):
+        # una respuesta vieja (pedida antes de cambiar de filtro) no pinta nada
+        if n != self._pedido_disco or self.filtro != "disco":
+            return
+        self._pintar_disco(filas)
+
+    def _pintar_disco(self, filas):
+        _borrar_layout(self.zv)
+        if not filas:
+            from ..componentes import SinResultados
+            self.zv.addWidget(SinResultados("biblioteca", "Aquí no hay nada todavía",
+                                            "Guarda álbumes, sigue artistas o crea listas."))
+            return
+        self.zv.addWidget(Rejilla(self.ctx, "", filas))
+
     def _pintar(self, *_):
         _borrar_layout(self.zv)
         col = self.ctx.coleccion
         f = self.filtro
+        if f == "disco":
+            # leer el disco comprueba cada archivo: va en segundo plano y muestra el esqueleto mientras
+            self._pedido_disco += 1
+            n = self._pedido_disco
+            self.zv.addWidget(Esqueleto("filas"))
+            en_segundo_plano(_descargadas_fondo, col, ok=lambda r, n=n: self._disco_llego(n, r),
+                             error=lambda _e, n=n: self._disco_llego(n, []), dueno=self)
+            return
         el = []
         from ... import listas_compartidas as LC
         mias_comp = {u for u in LC.codigos_guardados(col)}
@@ -118,8 +153,6 @@ class PaginaBiblioteca(Pagina):
             el += col.guardados("album")
         if f in ("todo", "artistas"):
             el += [dict(g, subtitulo="Artista") for g in col.guardados("artista")]
-        if f == "disco":
-            el += col.descargadas()[:300]
         comp = []
         if f in ("todo", "listas", "compartidas"):
             comp = [{"tipo": "lista_compartida", "id": c["id"], "titulo": c["nombre"],

@@ -34,7 +34,7 @@ void main() {
       ));
       await t.tap(find.text('abrir'));
       await t.pumpAndSettle();
-      expect(tester_sinExcepciones(t), isNull);
+      expect(testerSinExcepciones(t), isNull);
       final boton = find.text('Usar este');
       expect(boton, findsOneWidget);
       final y = t.getCenter(boton).dy;
@@ -46,4 +46,4 @@ void main() {
   }
 }
 
-Object? tester_sinExcepciones(WidgetTester t) => t.takeException();
+Object? testerSinExcepciones(WidgetTester t) => t.takeException();

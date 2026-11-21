@@ -101,6 +101,38 @@ class SeccionMasDonadores(QFrame):
         ayuda.setWordWrap(True)
         v.addWidget(ayuda)
 
+        # ---- pregunta única: ¿quieres aparecer en el muro? (solo donadores que aún no decidieron)
+        self.tarjeta_pared = QFrame()
+        self.tarjeta_pared.setObjectName("fila_donador")
+        self.tarjeta_pared.setStyleSheet(f"QFrame#fila_donador{{background:{C['superficie']};border-radius:14px;}}")
+        tp = QVBoxLayout(self.tarjeta_pared)
+        tp.setContentsMargins(16, 12, 16, 12)
+        tp.setSpacing(6)
+        pregunta = QLabel("¿Quieres aparecer en el muro de donadores?")
+        pregunta.setStyleSheet("font-size:15px;font-weight:800;background:transparent;")
+        pregunta.setWordWrap(True)
+        tp.addWidget(pregunta)
+        detalle = QLabel("Tu nombre y avatar se verán aquí como agradecimiento. Puedes quitarlo cuando quieras.")
+        detalle.setObjectName("secundario")
+        detalle.setWordWrap(True)
+        tp.addWidget(detalle)
+        botones = QHBoxLayout()
+        botones.setSpacing(8)
+        self.bt_aparecer = QPushButton("Aparecer")
+        self.bt_aparecer.setObjectName("principal")
+        self.bt_aparecer.setCursor(Qt.PointingHandCursor)
+        self.bt_aparecer.clicked.connect(self._aparecer_en_pared)
+        self.bt_ahora_no = QPushButton("Ahora no")
+        self.bt_ahora_no.setObjectName("contorno")
+        self.bt_ahora_no.setCursor(Qt.PointingHandCursor)
+        self.bt_ahora_no.clicked.connect(self._pared_ahora_no)
+        botones.addStretch(1)
+        botones.addWidget(self.bt_ahora_no)
+        botones.addWidget(self.bt_aparecer)
+        tp.addLayout(botones)
+        self.tarjeta_pared.hide()
+        v.addWidget(self.tarjeta_pared)
+
         # ---- letra con efectos
         self.fila_letra = _Fila("Letra con efectos a pantalla completa",
                                 "Solo el verso que suena, enorme, con animaciones al entrar cada línea y un "
@@ -179,6 +211,32 @@ class SeccionMasDonadores(QFrame):
         if donador:
             self.fila_pared.caja_explica.hide()
             self.fila_mascota.caja_explica.hide()
+        self.tarjeta_pared.setVisible(self._pregunta_pendiente())
+
+    def _pregunta_pendiente(self):
+        """Solo si es donador, no está ya en la pared y nunca respondió la pregunta."""
+        a = getattr(self.ctx, "ajustes", None)
+        if a is None or not self._donador:
+            return False
+        return not (self.gestor is not None and self.gestor.en_pared) and a.get("pared_preguntado") is not True
+
+    def _marcar_preguntado(self):
+        a = getattr(self.ctx, "ajustes", None)
+        if a is not None:
+            a["pared_preguntado"] = True
+            a.guardar()
+        self.tarjeta_pared.hide()
+
+    def _aparecer_en_pared(self):
+        self._marcar_preguntado()
+        if self.gestor is not None:
+            # la misma función que la casilla: guarda aquí y en la cuenta en segundo plano
+            self.gestor.guardar_en_pared(True, alerta=self._avisar)
+        self._avisar("Listo: ya sales en la pared. ¡Gracias!")
+        self.refrescar()
+
+    def _pared_ahora_no(self):
+        self._marcar_preguntado()
 
     def _avisar(self, texto):
         self.msg.setText(texto)

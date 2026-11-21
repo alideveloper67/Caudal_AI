@@ -156,7 +156,7 @@ Json _pista(int i) => {
 void main() {
   setUp(() => SharedPreferences.setMockInitialValues({}));
 
-  _pantalla('Acceso (crear cuenta)', () => AccesoPagina(alEntrar: (_, __) async {}), conServicios: false);
+  _pantalla('Acceso (crear cuenta)', () => AccesoPagina(alEntrar: (_, _) async {}), conServicios: false);
 
   _pantalla('Términos', () => const LegalPagina(nombre: 'terminos'), conServicios: false);
   _pantalla('Privacidad', () => const LegalPagina(nombre: 'privacidad'), conServicios: false);

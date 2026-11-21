@@ -43,6 +43,7 @@ def _renderizar(widget):
     ("fondo", "cambiar_fondo"),
     ("abrir", "abrir_caudal"),
     ("salir", "salir"),
+    ("restablecer", "pidio_restablecer"),
 ])
 def test_clic_en_centro_de_boton_emite_su_senal(app, boton, senal):
     w = BarraMini()
@@ -146,9 +147,9 @@ def test_render_de_todos_los_estados_sin_errores(app):
     w.fijar_estado("parado")
 
 
-def test_tamano_sugerido_es_698_por_92(app):
+def test_tamano_sugerido_es_736_por_92(app):
     w = BarraMini()
-    assert w.sizeHint().width() == 698
+    assert w.sizeHint().width() == 736
     assert w.sizeHint().height() == 92
 
 
@@ -165,7 +166,7 @@ def test_boton_buscar_no_vacio_ni_solapado(app):
     r = w.rect_boton("buscar")
     assert not r.isEmpty()
     for otro in ("anterior", "alternar", "siguiente", "aleatorio", "repetir",
-                 "fondo", "abrir", "salir"):
+                 "fondo", "abrir", "salir", "restablecer"):
         assert not r.intersects(w.rect_boton(otro)), f"«buscar» se solapa con «{otro}»"
 
 
@@ -175,8 +176,19 @@ def test_clic_en_buscar_emite_pidio_buscar_una_vez_y_ninguna_otra(app):
     w.show()
     recibidas = []
     for nombre in ("anterior", "alternar", "siguiente", "aleatorio", "repetir",
-                   "cambiar_fondo", "abrir_caudal", "salir", "pidio_buscar"):
+                   "cambiar_fondo", "abrir_caudal", "salir", "pidio_buscar", "pidio_restablecer"):
         getattr(w, nombre).connect(lambda nombre=nombre: recibidas.append(nombre))
     w.buscar_pos.connect(lambda f: recibidas.append("buscar_pos"))
     _clic(w, w.rect_boton("buscar").center())
     assert recibidas == ["pidio_buscar"]
+
+
+def test_clic_en_restablecer_emite_pidio_restablecer_una_vez(app):
+    w = BarraMini()
+    w.resize(ANCHO, ALTO)
+    w.show()
+    recibidas = []
+    for nombre in ("pidio_buscar", "salir", "cambiar_fondo", "abrir_caudal", "pidio_restablecer"):
+        getattr(w, nombre).connect(lambda nombre=nombre: recibidas.append(nombre))
+    _clic(w, w.rect_boton("restablecer").center())
+    assert recibidas == ["pidio_restablecer"]

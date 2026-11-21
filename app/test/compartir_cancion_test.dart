@@ -7,7 +7,6 @@
 //   $env:CAUDAL_COMPARTIR_SALIDA='C:\ruta'; flutter test test/compartir_cancion_test.dart
 // La carátula de ejemplo sale de CAUDAL_COMPARTIR_CARATULA (un PNG) o, si no, se dibuja aquí.
 import 'dart:io';
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:caudal/nucleo/coleccion.dart';
@@ -17,7 +16,6 @@ import 'package:caudal/ui/reproductor/paleta_portada.dart';
 import 'package:caudal/ui/reproductor/tarjetas_compartir.dart';
 import 'package:caudal/ui/tema.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart' show debugDisableShadows;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';

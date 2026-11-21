@@ -35,6 +35,18 @@ def _con_copia(col, funcion):
         return funcion(c)
 
 
+def _armar_mixes_hoy(c):
+    """(lista, completos, historial): lo guardado de hoy, o el armado sin radio si aún no hay.
+    Corre en segundo plano con la copia de la base; el historial sale solo si hace falta."""
+    from ... import mixes as mx
+    guardados, completos = mx.guardados_de_hoy(c)
+    historial = None
+    if not (guardados and completos):
+        historial = mx.historial_para_mixes(c)
+    lista = guardados if guardados else mx.construir(historial, radio=None)
+    return lista, completos, historial
+
+
 def saludo():
     h = time.localtime().tm_hour
     if 5 <= h < 12:
@@ -276,29 +288,32 @@ class PaginaInicio(Pagina):
         """Tus mixes diarios: salen al momento con lo tuyo y, cuando llega la
         radio de YouTube Music, se completan (una vez al dia)."""
         from PySide6.QtWidgets import QVBoxLayout
-        from ... import mixes as mx
         col = self.ctx.coleccion
         self.caja_mixes = QWidget()
         self.v_mixes = QVBoxLayout(self.caja_mixes)
         self.v_mixes.setContentsMargins(0, 0, 0, 0)
         self.zv.addWidget(self.caja_mixes)
-        guardados, completos = mx.guardados_de_hoy(col)
-        historial = None
-        if guardados:
-            self._pintar_mixes(guardados)
-        else:
-            historial = mx.historial_para_mixes(col)
-            self._pintar_mixes(mx.construir(historial, radio=None))
-        if completos or not self.v_mixes.count():
-            return
-        dia = mx.clave_dia(datetime.now())
-        if _INTENTO_MIXES.get("dia") == dia and time.time() - _INTENTO_MIXES.get("t", 0) < 600:
-            return            # sin red hace un momento: no se insiste en cada vuelta a Inicio
-        _INTENTO_MIXES.update(dia=dia, t=time.time())
-        if historial is None:
-            historial = mx.historial_para_mixes(col)
-        en_segundo_plano(mx.construir, historial, mx.radio_catalogo,
-                         ok=self._mixes_listos, error=lambda _e: None, dueno=self)
+        # leer la base y armar los mixes va en segundo plano: aparecen al llegar
+        en_segundo_plano(_con_copia, col, _armar_mixes_hoy, ok=self._mixes_hoy_listos,
+                         error=lambda _e: None, dueno=self)
+
+    def _mixes_hoy_listos(self, r):
+        from ... import mixes as mx
+        lista, completos, historial = r
+        try:
+            self._pintar_mixes(lista)
+            if completos or not self.v_mixes.count():
+                return
+            dia = mx.clave_dia(datetime.now())
+            if _INTENTO_MIXES.get("dia") == dia and time.time() - _INTENTO_MIXES.get("t", 0) < 600:
+                return            # sin red hace un momento: no se insiste en cada vuelta a Inicio
+            if historial is None:
+                return
+            _INTENTO_MIXES.update(dia=dia, t=time.time())
+            en_segundo_plano(mx.construir, historial, mx.radio_catalogo,
+                             ok=self._mixes_listos, error=lambda _e: None, dueno=self)
+        except RuntimeError:
+            pass              # la página se rehizo mientras llegaban los mixes
 
     # ------------------------------------------------------------ hecho para ti
 
@@ -461,14 +476,31 @@ class PaginaInicio(Pagina):
             pass
 
     def _banner_resumen(self):
+        """El resumen de la semana se calcula en segundo plano; el banner aparece al llegar."""
+        from PySide6.QtWidgets import QVBoxLayout
         from ... import mixes as mx
-        r = mx.calcular_resumen(mx.leer_historial(
-            self.ctx.coleccion, desde=datetime.now() - timedelta(days=8)), "semana")
-        if r["vacio"]:
-            return
-        b = BannerResumen(r)
-        b.clicked.connect(lambda: self.ctx.navegar({"pagina": "resumen"}))
-        self.zv.addWidget(b)
+        caja = QWidget()
+        v = QVBoxLayout(caja)
+        v.setContentsMargins(0, 0, 0, 0)
+        self.zv.addWidget(caja)
+        caja.hide()
+
+        def calcular(c):
+            return mx.calcular_resumen(mx.leer_historial(
+                c, desde=datetime.now() - timedelta(days=8)), "semana")
+
+        def listo(r):
+            if r["vacio"]:
+                return
+            try:
+                b = BannerResumen(r)
+                b.clicked.connect(lambda: self.ctx.navegar({"pagina": "resumen"}))
+                v.addWidget(b)
+                caja.show()
+            except RuntimeError:
+                pass
+        en_segundo_plano(_con_copia, self.ctx.coleccion, calcular, ok=listo,
+                         error=lambda _e: None, dueno=self)
 
     def _mixes(self):
         col = self.ctx.coleccion

@@ -134,6 +134,8 @@ class _HojaCompartirCancionState extends State<HojaCompartirCancion> with Single
     _relojAviso?.cancel();
     _brillo.dispose();
     _paginas?.dispose();
+    // la ilustracion del escenario se pinto solo para esta hoja: se libera al cerrarla
+    _d?.escenario?.dispose();
     super.dispose();
   }
 

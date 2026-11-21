@@ -109,7 +109,7 @@ void main() {
               {'id': 'g$i', 'titulo': 'Gato número $i', 'vista': 'https://media.test/v$i.gif', 'gif': 'https://media.test/g$i.gif', 'ancho': 320, 'alto': 240, 'peso': 90000}
           ],
           'siguiente': siguiente,
-          if (aviso != null) 'aviso': aviso,
+          'aviso': ?aviso,
         };
 
     GifBuscador falso(List<Uri> pedidos, {Map<String, dynamic> Function(Uri u)? alBuscar, int estado = 200}) => GifBuscador(

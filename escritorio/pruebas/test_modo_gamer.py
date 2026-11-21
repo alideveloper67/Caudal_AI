@@ -149,6 +149,14 @@ def test_curva_de_nivel_suave_y_consistente():
     assert MG.info_nivel(MG.xp_para_nivel(6))[3] == "Aprendiz"
 
 
+def test_el_nivel_se_planta_en_99_y_la_barra_queda_llena():
+    assert MG.nivel_de_xp(10**9) == 99
+    assert MG.nivel_de_xp(MG.xp_para_nivel(99)) == 99
+    assert MG.nivel_de_xp(MG.xp_para_nivel(98)) == 98
+    n, dentro, largo, rango = MG.info_nivel(10**9)
+    assert n == 99 and largo > 0 and dentro == largo and rango == "Leyenda"
+
+
 def test_misiones_deterministas_por_fecha():
     d = date(2026, 9, 26)
     a, b = MG.misiones_del_dia(d), MG.misiones_del_dia(d)

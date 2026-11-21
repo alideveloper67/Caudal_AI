@@ -6,7 +6,6 @@ import 'package:caudal/nucleo/plataforma.dart';
 import 'package:caudal/ui/paginas/despertador_ajuste.dart';
 import 'package:caudal/ui/paginas/despertador_pagina.dart';
 import 'package:caudal/ui/paginas/despertador_sonando.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';

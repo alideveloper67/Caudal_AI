@@ -13,6 +13,7 @@ import 'package:share_plus/share_plus.dart';
 
 import 'nucleo/ajustes.dart';
 import 'nucleo/aviso_errores.dart';
+import 'nucleo/avisos_dispositivo.dart';
 import 'nucleo/cumpleanos.dart';
 import 'nucleo/avisos.dart';
 import 'nucleo/capturador_oculto.dart';
@@ -47,6 +48,8 @@ import 'nucleo/social.dart';
 import 'ui/despertador_enganche.dart';
 import 'ui/fondo_capa.dart';
 import 'ui/logros_aviso.dart';
+import 'ui/novedades/presentacion_100.dart';
+import 'ui/novedades/presentacion_donadores.dart';
 import 'ui/paginas/acceso.dart';
 import 'ui/paginas/ajustes_pagina.dart';
 import 'ui/paginas/aviso_dialogo.dart';
@@ -116,6 +119,8 @@ class _CaudalAppState extends State<CaudalApp> {
 
   /// Un tema exclusivo que se pone, se quita o se pierde (la prueba venció): se repinta toda la app.
   void _alCambiarPremium() {
+    // quien se vuelve donador con la app abierta ve «Gracias, donador» en cuanto se confirma
+    if (_inicioListo && !_revisandoDonador && Premium.i.donaDeVerdad) unawaited(_revisarDonador());
     final nuevo = Premium.i.temaEfectivo;
     if (nuevo == _temaPremium) return;
     _temaPremium = nuevo;
@@ -362,9 +367,11 @@ class _CaudalAppState extends State<CaudalApp> {
         .iniciar(c.id, c.sesion != null && c.sesion!.acceso.isNotEmpty ? Social(c.sesion!) : null)
         .catchError((_) {}));
     unawaited(SonidosInterfaz.i.alAbrir().catchError((_) {})); // el sonidito al abrir (donadores, si lo activó)
-    unawaited(_buscarVersion());
+    unawaited(_buscarVersion()); // «Somos 100» (si toca) y luego las novedades de la versión
     unawaited(_buscarAvisos());
     unawaited(_pedirNotificaciones());
+    // aviso con la app cerrada: se registra el token de este teléfono en el servidor
+    if (c.sesion != null) unawaited(AvisosDispositivo.registrar(c.sesion!));
     // logros: el vigía cuenta lo que suena y avisa al conseguir uno (uno por cuenta)
     _vigia?.detener();
     _vigia = null;
@@ -432,6 +439,8 @@ class _CaudalAppState extends State<CaudalApp> {
   }
 
   Future<void> _cerrarSesion(Servicios s) async {
+    // este teléfono deja de recibir avisos de mensajes y solicitudes de la cuenta que sale
+    unawaited(AvisosDispositivo.olvidar());
     _navegador.currentState?.popUntil((r) => r.isFirst);
     await s.reproductor.detener();
     s.sincronizador?.detener();
@@ -473,11 +482,46 @@ class _CaudalAppState extends State<CaudalApp> {
     }
   }
 
+  /// A los 6 s: primero «Somos 100» (si toca; su revisión tiene timeout de 8 s y, sin red, no sale),
+  /// y solo cuando se cierra salen las novedades de la versión. Así nunca se encima una con la otra.
   Future<void> _buscarVersion() async {
     await Future.delayed(const Duration(seconds: 6));
-    final n = await buscarActualizacion().catchError((_) => null);
+    final pendiente = buscarActualizacion().catchError((_) => null); // se busca en paralelo
+    final ctx0 = _navegador.currentContext;
+    if (mounted && ctx0 != null && ctx0.mounted) await Presentacion100.revisar(ctx0);
+    final n = await pendiente;
     final ctx = _navegador.currentContext;
     if (n != null && ctx != null && ctx.mounted) await mostrarActualizacion(ctx, n);
+    // por último «Gracias, donador» (solo donadores de verdad, una vez): espera a que no haya nada encima
+    _inicioListo = true;
+    await _revisarDonador();
+  }
+
+  /// Ya pasaron «Somos 100» y las novedades: desde aquí un donador nuevo puede ver su presentación.
+  bool _inicioListo = false;
+  bool _revisandoDonador = false;
+
+  Future<void> _revisarDonador() async {
+    if (_revisandoDonador) return;
+    _revisandoDonador = true;
+    try {
+      if (!await _esperarSinRutas()) return; // sigue algo encima: se verá en el próximo cambio o arranque
+      final ctxD = _navegador.currentContext;
+      if (mounted && ctxD != null && ctxD.mounted) await PresentacionDonadores.revisar(ctxD);
+    } finally {
+      _revisandoDonador = false;
+    }
+  }
+
+  /// Espera a que no haya ninguna ruta abierta encima (reintento cada 2 s, como mucho 1 minuto).
+  /// Devuelve false si al cabo de ese minuto sigue algo encima o la pantalla ya no está.
+  Future<bool> _esperarSinRutas() async {
+    for (var i = 0; i < 30; i++) {
+      if (!mounted) return false;
+      if (!(_navegador.currentState?.canPop() ?? false)) return true;
+      await Future.delayed(const Duration(seconds: 2));
+    }
+    return mounted && !(_navegador.currentState?.canPop() ?? false);
   }
 
   @override
@@ -543,7 +587,7 @@ class _CaudalAppState extends State<CaudalApp> {
         // Todo lo que se abre (pantallas, dialogos, hojas) cuelga de aqui.
         return Caudal(s: s, child: ValueListenableBuilder<bool>(
           valueListenable: Pip.enVentana,
-          builder: (_, enVentana, __) => Stack(children: [
+          builder: (_, enVentana, _) => Stack(children: [
             const CapaFondoApp(),
             contenido,
             // el personaje del fondo con personaje, encima, en su esquina (se agranda pellizcándolo)

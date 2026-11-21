@@ -379,6 +379,31 @@ def test_un_donador_marca_la_pared_y_pide_su_mascota_por_whatsapp(app, monkeypat
     s.deleteLater()
 
 
+def test_la_tarjeta_de_la_pared_pregunta_una_sola_vez(app):
+    from descargador.ui import mas_donadores as M
+
+    class _Aj(dict):
+        def guardar(self):
+            pass
+    ctx, g, ses = _premium(app)
+    ctx.ajustes = _Aj()
+    s = M.SeccionMasDonadores(ctx)
+    assert not s.tarjeta_pared.isHidden() and s.bt_aparecer.objectName() == "principal"
+    s.bt_ahora_no.click()
+    assert s.tarjeta_pared.isHidden() and ctx.ajustes["pared_preguntado"] is True and g.en_pared is False
+    s2 = M.SeccionMasDonadores(ctx)
+    assert s2.tarjeta_pared.isHidden()                       # ya respondió: no vuelve a salir
+    s2.deleteLater()
+    s.deleteLater()
+    ctx.ajustes = _Aj()
+    s3 = M.SeccionMasDonadores(ctx)
+    s3.bt_aparecer.click()
+    assert s3.tarjeta_pared.isHidden() and ctx.ajustes["pared_preguntado"] is True
+    esperar(app, lambda: {"en_pared": True} in _patches(ses), "guardar la pared desde la tarjeta")
+    assert g.en_pared is True and s3.casilla_pared.isChecked()
+    s3.deleteLater()
+
+
 def test_la_pared_se_pinta_con_fundadores_colores_y_estado_vacio(app, monkeypatch):
     from descargador.ui import mas_donadores as M
     ses = SesionFalsa({"pared_agradecimiento": [

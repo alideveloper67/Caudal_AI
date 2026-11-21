@@ -73,6 +73,12 @@ def carpeta_descargas_por_defecto() -> str:
 
 
 DEFECTOS = {
+    # 2.8.3: presentación «Somos 100», imagen o GIF propios de la escena, pregunta del muro y diagnóstico
+    "presentacion_100_vista": False,
+    "presentacion_donadores_vista": False,
+    "escena_imagen_propia": "",
+    "pared_preguntado": False,
+    "diagnostico_trabones": True,
     "carpeta": carpeta_descargas_por_defecto(),
     "calidad": "mejor",
     "tipo_descarga": "completo",   # completo | video | audio

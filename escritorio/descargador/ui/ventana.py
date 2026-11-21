@@ -218,7 +218,8 @@ class Ventana(QWidget):
         self._aviso_mascotas = None
         self._grande_en_sesion = False
         self._novedad_pendiente = None
-        QTimer.singleShot(2500, self._avisar_novedades)
+        # primero el agradecimiento «Somos 100» (si toca) y, al cerrarlo, las novedades de la versión
+        QTimer.singleShot(2500, self._presentaciones_inicio)
         # «ya puedes regalar códigos de prueba»: una vez, a donadores y fundadores (cuando se sepa que lo son)
         self._aviso_regalo = None
         self._t_regalo = QTimer(self)
@@ -235,6 +236,7 @@ class Ventana(QWidget):
         # precalentar: cargar con calma lo que usan las páginas pesadas, para que abrirlas la primera vez
         # no se trabe (Ajustes cargaba ~190 módulos de golpe)
         QTimer.singleShot(12000, self._precalentar)
+
         QApplication.instance().installEventFilter(_Teclas(self))
         from . import arrastre
         arrastre.instalar()        # arrastrar con el ratón para desplazar, como con el dedo
@@ -1309,6 +1311,15 @@ class Ventana(QWidget):
 
         en_segundo_plano(avisos.pendientes, ok=listos, error=lambda _e: None, dueno=self)
 
+    def _presentaciones_inicio(self):
+        """Orden al abrir: 1) «Somos 100» si se llegó a 100 personas y no se vio; 2) las novedades de la versión.
+        Sin red, la cifra no llega y se pasa directo a las novedades."""
+        try:
+            from .presentacion_100 import revisar_hito_100
+            revisar_hito_100(self, despues=self._avisar_novedades)
+        except Exception:  # noqa: BLE001 - un aviso nunca debe romper la app
+            self._avisar_novedades()
+
     def _avisar_novedades(self):
         """Una sola vez por versión, y sin tocar la música."""
         if self.en_completa or self._saliendo:
@@ -1335,6 +1346,8 @@ class Ventana(QWidget):
             return
         if self._aviso_mascotas is not None:
             self._aviso_mascotas.finished.connect(self._tras_novedades)
+        else:
+            self._donador_al_final()        # no sale ningún aviso: ya no queda nada abierto
 
     def _avisar_regalo(self):
         """El aviso único de los códigos de regalo: espera a que no haya otro aviso abierto."""
@@ -1402,6 +1415,29 @@ class Ventana(QWidget):
         pendiente, self._novedad_pendiente = self._novedad_pendiente, None
         if pendiente:
             QTimer.singleShot(400, lambda: mostrar_aviso(pendiente, self))
+        self._donador_al_final()
+
+    def _donador_al_final(self):
+        """«Gracias, donador»: solo cuando ya no queda ningún aviso de arranque abierto. Una vez por sesión."""
+        if getattr(self, "_donador_en_sesion", False):
+            return
+        self._donador_en_sesion = True
+        try:
+            from .presentacion_donadores import revisar_donador
+            revisar_donador(self)
+            # si el servidor confirma la donación más tarde (copia local vieja o donación nueva), se vuelve a mirar
+            gestor = getattr(self, "premium", None)
+            if gestor is not None and not self.ajustes.get("presentacion_donadores_vista"):
+                def _al_cambiar():
+                    if self.ajustes.get("presentacion_donadores_vista"):
+                        return
+                    try:
+                        revisar_donador(self)
+                    except Exception:  # noqa: BLE001
+                        pass
+                gestor.cambiado.connect(_al_cambiar)
+        except Exception:  # noqa: BLE001 - un aviso nunca debe romper la app
+            pass
 
     # ------------------------------------------------------------ arrastrar y soltar
 

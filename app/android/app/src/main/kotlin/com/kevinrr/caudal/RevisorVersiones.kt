@@ -54,12 +54,12 @@ class RevisorVersiones(contexto: Context, parametros: WorkerParameters) : Worker
         fun programar(contexto: Context) {
             // la version de Google Play se actualiza desde la tienda
             if (BuildConfig.FLAVOR == "play") return
-            val pedido = PeriodicWorkRequestBuilder<RevisorVersiones>(1, TimeUnit.DAYS)
+            val pedido = PeriodicWorkRequestBuilder<RevisorVersiones>(6, TimeUnit.HOURS)
                 .setConstraints(Constraints.Builder().setRequiredNetworkType(NetworkType.CONNECTED).build())
                 .setInitialDelay(2, TimeUnit.HOURS)
                 .build()
             WorkManager.getInstance(contexto)
-                .enqueueUniquePeriodicWork(TRABAJO, ExistingPeriodicWorkPolicy.KEEP, pedido)
+                .enqueueUniquePeriodicWork(TRABAJO, ExistingPeriodicWorkPolicy.UPDATE, pedido)
         }
 
         fun revisar(contexto: Context) {

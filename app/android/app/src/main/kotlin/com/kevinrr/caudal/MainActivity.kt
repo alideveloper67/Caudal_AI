@@ -28,6 +28,18 @@ class MainActivity : AudioServiceActivity() {
         // antes que nada: si el arranque se congela, queda anotado donde (Vigilante.kt)
         Vigilante.iniciar(this)
         super.onCreate(savedInstanceState)
+
+        // permiso de notificaciones (avisos, mensajes, solicitudes): se pide una sola vez
+        if (Build.VERSION.SDK_INT >= 33 &&
+            checkSelfPermission(android.Manifest.permission.POST_NOTIFICATIONS) !=
+            android.content.pm.PackageManager.PERMISSION_GRANTED
+        ) {
+            val prefs = getSharedPreferences("caudal_novedades", MODE_PRIVATE)
+            if (!prefs.getBoolean("permiso_pedido", false)) {
+                prefs.edit().putBoolean("permiso_pedido", true).apply()
+                requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 7402)
+            }
+        }
     }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -51,6 +63,7 @@ class MainActivity : AudioServiceActivity() {
         // aviso de versiones nuevas aunque la app este cerrada (RevisorVersiones.kt)
         try {
             RevisorVersiones.programar(applicationContext)
+            RevisorNovedades.programar(applicationContext)
         } catch (_: Exception) {
         }
 

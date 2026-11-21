@@ -8,7 +8,8 @@ import math
 import time
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QTimer
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QFontMetricsF, QPainter, QPainterPath, QPen
+from PySide6.QtGui import (QBrush, QColor, QFont, QFontMetrics, QFontMetricsF, QLinearGradient, QPainter,
+                           QPainterPath, QPen)
 from PySide6.QtWidgets import QWidget
 
 from ..componentes import a_la_vista
@@ -93,6 +94,56 @@ def _peso_palabra(palabra):
 
 
 # --------------------------------------------------------------------------- utilidades de dibujo
+
+def _pintar_palabra(p, it, tam, color_fuerte, destello=0.0):
+    """Una palabra legible sobre cualquier fondo: sombra suave hacia abajo, borde oscuro fino, resplandor del
+    acento en la palabra fuerte (y un destello al entrar) y relleno con un degradado vertical sutil."""
+    k = max(0.5, tam / 60.0)
+    trazo = it.trazo
+    p.setBrush(Qt.NoBrush)
+    # sombra difusa (tres pasadas cada vez más finas y oscuras), un poco hacia abajo
+    p.save()
+    p.translate(0, 2.2 * k)
+    for ancho, a in ((16, 22), (9, 40), (4.5, 70)):
+        p.setPen(QPen(QColor(0, 0, 0, a), ancho * k, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+        p.drawPath(trazo)
+    p.restore()
+    # resplandor: la palabra fuerte siempre; todas al entrar
+    brillo = (0.55 if it.fuerte else 0.0) + 0.6 * destello
+    if brillo > 0.02:
+        col = QColor(color_fuerte if it.fuerte else QColor(255, 255, 255))
+        for ancho, a in ((20, 30), (10, 55)):
+            col.setAlpha(int(min(255, a * brillo * 1.6)))
+            p.setPen(QPen(col, ancho * k, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+            p.drawPath(trazo)
+    # borde oscuro fino que recorta la letra del fondo
+    p.setPen(QPen(QColor(10, 8, 16, 170), 2.4 * k, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+    p.drawPath(trazo)
+    # relleno con degradado: blanco arriba y un toque cálido abajo; la fuerte en su color
+    r = it.rect
+    g = QLinearGradient(0, r.top(), 0, r.bottom())
+    if it.fuerte:
+        claro = QColor(color_fuerte).lighter(150)
+        g.setColorAt(0, claro)
+        g.setColorAt(0.55, QColor(color_fuerte))
+        g.setColorAt(1, QColor(color_fuerte).darker(115))
+    else:
+        g.setColorAt(0, QColor(255, 255, 255))
+        g.setColorAt(1, QColor(236, 230, 246) if not it.contorno else QColor(255, 255, 255, 215))
+    p.setPen(Qt.NoPen)
+    p.setBrush(QBrush(g))
+    p.drawPath(trazo)
+
+
+def _texto_legible(p, rect, flags, texto, color, tam):
+    """Texto corto (traducción, línea siguiente) con sombra suave para que se lea sobre cualquier fondo."""
+    k = max(0.6, tam / 22.0)
+    for dx, dy, a in ((0, 2 * k, 150), (0, 1 * k, 120), (1 * k, 0, 70), (-1 * k, 0, 70)):
+        p.setPen(QColor(0, 0, 0, a))
+        p.drawText(rect.translated(dx, dy), flags, texto)
+    p.setPen(color)
+    p.drawText(rect, flags, texto)
+
 
 def _ease_out_back(t):
     t = min(1.0, max(0.0, t))
@@ -476,6 +527,7 @@ class LetraCinetica(QWidget):
                 texto, es, f, _, _, ancho = medidas[k]
                 trazo = QPainterPath()
                 trazo.addText(QPointF(x, y + asc), f, texto)
+                trazo = trazo.simplified()        # sin contornos solapados: el borde no raya el interior
                 rect = QRectF(x, y, ancho, asc + desc)
                 items.append(_Item(k, trazo, rect, es, contorno_linea and not es))
                 x += ancho + separacion
@@ -515,19 +567,19 @@ class LetraCinetica(QWidget):
                     alfa = 1.0 - (1.0 - max(0.0, t)) ** 2
             if alfa <= 0.0:
                 continue
+            # destello al entrar: la palabra nace con un brillo que se apaga en la transición
+            destello = 0.0
+            if entradas is not None:
+                t0 = entradas.get(it.indice)
+                if t0 is not None:
+                    destello = max(0.0, 1.0 - (ahora - t0) / (DURACION_ENTRADA * 1.6))
             p.save()
             p.setOpacity(opacidad * alfa)
             c = it.rect.center()
             p.translate(c.x() + dx, c.y() + dy)
             p.scale(escala, escala)
             p.translate(-c.x(), -c.y())
-            if it.contorno:
-                p.setPen(QPen(QColor(255, 255, 255), 1.6))
-                p.setBrush(Qt.NoBrush)
-            else:
-                p.setPen(Qt.NoPen)
-                p.setBrush(color_fuerte if it.fuerte else TEXTO)
-            p.drawPath(it.trazo)
+            _pintar_palabra(p, it, disp.tam, color_fuerte, destello)
             p.restore()
 
     def _pintar_pausa(self, p, disp, ahora, dy, opacidad, color):
@@ -585,8 +637,8 @@ class LetraCinetica(QWidget):
             return
         p.save()
         p.setFont(f)
-        p.setPen(QColor(255, 255, 255, alfa))
-        p.drawText(rect, Qt.AlignLeft | Qt.AlignVCenter, texto)
+        p.setOpacity(alfa / 255.0)
+        _texto_legible(p, rect, Qt.AlignLeft | Qt.AlignVCenter, texto, QColor(255, 236, 200), f.pixelSize() or 18)
         p.restore()
 
     def _pintar_mensaje(self, p):
@@ -629,13 +681,12 @@ class LetraCinetica(QWidget):
             # línea siguiente, en pequeño; si es pausa o vacía, no se muestra nada
             sig = self._indice + 1
             if 0 <= sig < len(ef) and not ef[sig]["pausa"] and ef[sig]["texto"].strip():
-                f = fuente(15)
+                f = fuente(16, QFont.DemiBold)
                 p.setFont(f)
-                p.setPen(TEXTO_3)
                 ancho = max(1, int(self.width() - 2 * PAD))
                 texto = QFontMetrics(f).elidedText(ef[sig]["texto"], Qt.ElideRight, ancho)
-                p.drawText(QRectF(PAD, self.height() - PAD - 24, ancho, 24),
-                           Qt.AlignLeft | Qt.AlignVCenter, texto)
+                _texto_legible(p, QRectF(PAD, self.height() - PAD - 24, ancho, 24),
+                               Qt.AlignLeft | Qt.AlignVCenter, texto, QColor(255, 255, 255, 175), 16)
 
             # bloque anterior que sube y se desvanece
             if self._prev is not None:

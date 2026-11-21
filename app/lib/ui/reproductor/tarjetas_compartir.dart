@@ -29,7 +29,9 @@ enum DisenoCompartir {
   holograma('Holograma', Icons.auto_awesome_motion_rounded, exclusivo: true),
   oro('Oro', Icons.workspace_premium_rounded, exclusivo: true),
   galaxia('Galaxia', Icons.blur_circular_rounded, exclusivo: true),
-  neon('Neón', Icons.nightlife_rounded, exclusivo: true);
+  neon('Neón', Icons.nightlife_rounded, exclusivo: true),
+  // el escenario elegido en el reproductor (1080 x 1920, formato de estado)
+  escenario('Escenario', Icons.landscape_rounded, exclusivo: true);
 
   const DisenoCompartir(this.nombre, this.icono, {this.exclusivo = false});
   final String nombre;
@@ -84,7 +86,11 @@ class DatosCompartir {
     this.hojaMascota,
     this.fecha,
     this.sello = 'Donador',
+    this.escenario,
   });
+
+  /// La ilustracion del escenario ya pintada a 1080 x 1920 (la tarjeta «Escenario»); sin ella, la caratula.
+  final ui.Image? escenario;
 
   /// El sello de los diseños exclusivos: «Donador» o «Fundador».
   final String sello;
@@ -120,7 +126,7 @@ class DatosCompartir {
     return d <= 0 ? 0 : (posicion.inMilliseconds / d).clamp(0.0, 1.0);
   }
 
-  DatosCompartir copiar({String? caratula, ui.Image? hojaMascota, PaletaPortada? paleta}) => DatosCompartir(
+  DatosCompartir copiar({String? caratula, ui.Image? hojaMascota, PaletaPortada? paleta, ui.Image? escenario}) => DatosCompartir(
         titulo: titulo,
         artista: artista,
         caratula: caratula ?? this.caratula,
@@ -135,6 +141,7 @@ class DatosCompartir {
         hojaMascota: hojaMascota ?? this.hojaMascota,
         fecha: fecha,
         sello: sello,
+        escenario: escenario ?? this.escenario,
       );
 }
 
@@ -190,6 +197,7 @@ class TarjetaCancion extends StatelessWidget {
         DisenoCompartir.oro => _Oro(t),
         DisenoCompartir.galaxia => _Galaxia(t),
         DisenoCompartir.neon => _Neon(t),
+        DisenoCompartir.escenario => _Escenario(t),
       };
       // se mezcla con el estilo del tema para conservar su letra (Roboto en Android)
       return DefaultTextStyle.merge(
@@ -614,6 +622,90 @@ class _TarjetaVerso extends StatelessWidget {
 
 /// Inspirada en la pantalla del reproductor: el degradado de la carátula, la carátula
 /// grande con borde de luz, título, artista, la barra con la mascota y los botones.
+/// Estado de WhatsApp o Instagram: arriba el escenario elegido (su ilustracion, recortada a lo
+/// alto) y abajo, sobre un degradado oscuro, la cancion que suena. Sin imagen, la caratula difuminada.
+class _Escenario extends StatelessWidget {
+  const _Escenario(this.t);
+  final _Trazo t;
+
+  @override
+  Widget build(BuildContext context) {
+    final k = t.k;
+    final img = t.d.escenario;
+    final altoArriba = t.alto * 0.62;
+    return Stack(fit: StackFit.expand, children: [
+      ColoredBox(color: Color.lerp(t.p.fondo, Colors.black, 0.5)!),
+      if (img != null)
+        Positioned(
+          left: 0,
+          right: 0,
+          top: 0,
+          height: altoArriba,
+          child: RawImage(image: img, fit: BoxFit.cover, alignment: Alignment.topCenter, filterQuality: FilterQuality.medium),
+        )
+      else
+        Positioned.fill(child: _FondoDifuminado(t, sigma: 46)),
+      // el escenario se funde hacia abajo para que se lea la cancion
+      Positioned(
+        left: 0,
+        right: 0,
+        top: altoArriba * 0.5,
+        bottom: 0,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topCenter,
+              end: Alignment.bottomCenter,
+              colors: [
+                Colors.black.withValues(alpha: 0),
+                Color.lerp(t.p.fondo, Colors.black, 0.7)!.withValues(alpha: 0.92),
+                Color.lerp(t.p.fondo, Colors.black, 0.8)!,
+              ],
+              stops: const [0, 0.4, 1],
+            ),
+          ),
+        ),
+      ),
+      Padding(
+        padding: EdgeInsets.fromLTRB(24 * k, 0, 24 * k, 26 * k),
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.end,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(children: [
+              _caratula(t.d.caratula, 110 * k, 14 * k),
+              SizedBox(width: 16 * k),
+              Expanded(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(t.d.titulo,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(fontSize: 24 * k, fontWeight: FontWeight.w800, height: 1.12, letterSpacing: -0.4 * k)),
+                    if (t.d.artista.isNotEmpty) ...[
+                      SizedBox(height: 5 * k),
+                      Text(t.d.artista,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(fontSize: 16 * k, fontWeight: FontWeight.w600, color: Colors.white.withValues(alpha: 0.8))),
+                    ],
+                  ],
+                ),
+              ),
+            ]),
+            SizedBox(height: 22 * k),
+            _BarraProgreso(t, color: t.acento, pista: Colors.white.withValues(alpha: 0.22)),
+            SizedBox(height: 14 * k),
+            _Marca(k, color: Colors.white.withValues(alpha: 0.85)),
+          ],
+        ),
+      ),
+    ]);
+  }
+}
+
 class _Historia extends StatelessWidget {
   const _Historia(this.t);
   final _Trazo t;

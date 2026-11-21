@@ -515,7 +515,8 @@ class _PerfilEditarPaginaState extends State<PerfilEditarPagina> {
                   shape: BoxShape.circle,
                   border: AvatarMarco.tiene(Premium.i.marcoEfectivo) ? null : Border.all(color: color, width: 2.5)),
               child: _fotoNueva != null
-                  ? ClipOval(child: Image.memory(_fotoNueva!, width: 104, height: 104, fit: BoxFit.cover))
+                  ? ClipOval(child: Image.memory(_fotoNueva!, width: 104, height: 104, fit: BoxFit.cover,
+                      cacheWidth: (104 * MediaQuery.devicePixelRatioOf(context)).round()))
                   : AvatarPerfil(nombre: _nombre.text.isEmpty ? p.nombre : _nombre.text, fotoUrl: p.fotoUrl, color: color, radio: 52,
                       marco: Premium.i.marcoEfectivo, userId: Cumpleanos.i.miId),
             ),

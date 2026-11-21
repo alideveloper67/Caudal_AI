@@ -6,20 +6,20 @@ ESCENARIOS: clave -> (nombre visible, "modulo:Clase"). Se importan al elegirse (
 import importlib
 
 ESCENARIOS = {
-    "synthwave": ("Synthwave", "descargador.ui.escena.fondo_synthwave:FondoSynthwave"),
     "retro": ("Retro", "descargador.ui.escena.escenarios.retro:EscenarioRetro"),
-    "cyberpunk": ("Cyberpunk", "descargador.ui.escena.escenarios.cyberpunk:EscenarioCyberpunk"),
-    "samurai": ("Japón samurái", "descargador.ui.escena.escenarios.samurai:EscenarioSamurai"),
-    "boxeo": ("Boxeo", "descargador.ui.escena.escenarios.boxeo:EscenarioBoxeo"),
-    "gym": ("Gym", "descargador.ui.escena.escenarios.gym:EscenarioGym"),
-    "fan_kitty": ("Fan de Hello Kitty", "descargador.ui.escena.escenarios.fan_kitty:EscenarioFanKitty"),
-    "gotico": ("Gótico", "descargador.ui.escena.escenarios.gotico:EscenarioGotico"),
-    "lofi": ("Lo-fi", "descargador.ui.escena.escenarios.lofi:EscenarioLofi"),
-    "kuromi": ("Kuromi", "descargador.ui.escena.escenarios.kuromi:EscenarioKuromi"),
-    "cinnamoroll": ("Cinnamoroll", "descargador.ui.escena.escenarios.cinnamoroll:EscenarioCinnamoroll"),
-    "pompompurin": ("Pompompurin", "descargador.ui.escena.escenarios.pompompurin:EscenarioPompompurin"),
-    "hellokitty": ("Hello Kitty", "descargador.ui.escena.escenarios.hellokitty:EscenarioHelloKitty"),
-    "mymelody": ("My Melody", "descargador.ui.escena.escenarios.mymelody:EscenarioMyMelody"),
+    "synthwave": ("Synthwave", "descargador.ui.escena.fondo_synthwave:FondoSynthwave"),
+    "lofi": ("Lo-fi", "descargador.ui.escena.escenarios.imagenes:EscenarioLofi"),
+    "cyberpunk": ("Cyberpunk", "descargador.ui.escena.escenarios.imagenes:EscenarioCyberpunk"),
+    "samurai": ("Japón antiguo", "descargador.ui.escena.escenarios.imagenes:EscenarioSamurai"),
+    "cinnamoroll": ("Cinnamoroll", "descargador.ui.escena.escenarios.imagenes:EscenarioCinnamoroll"),
+    "pompompurin": ("Pompompurin", "descargador.ui.escena.escenarios.imagenes:EscenarioPompompurin"),
+    "mymelody": ("My Melody", "descargador.ui.escena.escenarios.imagenes:EscenarioMyMelody"),
+    "hellokitty": ("Hello Kitty", "descargador.ui.escena.escenarios.imagenes:EscenarioHelloKitty"),
+    "kuromi": ("Kuromi", "descargador.ui.escena.escenarios.imagenes:EscenarioKuromi"),
+    "ippo": ("Hajime no Ippo", "descargador.ui.escena.escenarios.imagenes:EscenarioIppo"),
+    "kaneki": ("Kaneki", "descargador.ui.escena.escenarios.imagenes:EscenarioKaneki"),
+    "goku": ("Goku", "descargador.ui.escena.escenarios.imagenes:EscenarioGoku"),
+    "propia": ("Mi imagen o GIF", "descargador.ui.escena.escenarios.propia:EscenarioPropia"),
 }
 
 
@@ -38,6 +38,5 @@ def crear(clave):
 def _para_empaquetar():  # pragma: no cover
     """Nunca se llama: deja escritos los imports para que PyInstaller meta todos los escenarios en el .exe
     (se cargan por nombre con importlib y, sin esto, el empaquetador no los ve)."""
-    from . import base, boxeo, cinnamoroll, cyberpunk, fan_kitty, gotico, gym, hellokitty  # noqa: F401
-    from . import kuromi, lofi, mymelody, pompompurin, retro, sakura, samurai  # noqa: F401
+    from . import base, imagen_motor, imagenes, propia, retro  # noqa: F401
     from .. import fondo_synthwave  # noqa: F401

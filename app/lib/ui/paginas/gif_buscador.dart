@@ -341,13 +341,14 @@ class _Baldosa extends StatelessWidget {
             child: InkWell(
               onTap: alPulsar,
               child: Stack(fit: StackFit.expand, children: [
-                CachedNetworkImage(
+                LayoutBuilder(builder: (_, c) => CachedNetworkImage(
                   imageUrl: gif.vista,
                   fit: BoxFit.cover,
+                  memCacheWidth: (c.maxWidth * MediaQuery.devicePixelRatioOf(context)).round(),
                   fadeInDuration: const Duration(milliseconds: 120),
                   placeholder: (_, _) => ColoredBox(color: C.superficie2),
                   errorWidget: (_, _, _) => const Center(child: Icon(Icons.broken_image_outlined, color: C.texto2)),
-                ),
+                )),
                 if (bajando)
                   ColoredBox(
                     color: Colors.black54,

@@ -21,6 +21,7 @@ import '../../reproduccion/frenos.dart';
 import '../../reproduccion/reproductor.dart';
 import '../paginas/reproductor_pagina.dart' show desfaseDeLetra, avisoDesfaseLetra, letraDeCancion, lineasDeLetra;
 import '../reproductor/fondo_ambiente.dart';
+import '../reproductor/letra_estilo.dart';
 import '../reproductor/paleta_portada.dart';
 import '../servicios.dart';
 import '../tema.dart';
@@ -315,7 +316,10 @@ class EscenaLetraVista extends StatelessWidget {
           child: Opacity(
             key: ValueKey('a$actual'),
             opacity: 0.28,
-            child: Text(anterior, textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis, style: pequeno),
+            child: Stack(children: [
+              ContornoLetra(texto: anterior, alinear: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis, estilo: pequeno),
+              Text(anterior, textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis, style: pequeno),
+            ]),
           ),
         ),
         const SizedBox(height: 18),
@@ -338,7 +342,10 @@ class EscenaLetraVista extends StatelessWidget {
           child: Opacity(
             key: ValueKey('s$actual'),
             opacity: 0.5,
-            child: Text(siguiente, textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis, style: pequeno),
+            child: Stack(children: [
+              ContornoLetra(texto: siguiente, alinear: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis, estilo: pequeno),
+              Text(siguiente, textAlign: TextAlign.center, maxLines: 2, overflow: TextOverflow.ellipsis, style: pequeno),
+            ]),
           ),
         ),
       ]),
@@ -424,7 +431,10 @@ class _VersoEscenaState extends State<VersoEscena> with SingleTickerProviderStat
                   opacity: p,
                   child: Transform.translate(
                     offset: Offset(0, widget.tamano * 0.7 * (1 - sube)),
-                    child: Text(palabras[k], style: base.copyWith(shadows: _brillo(0.35 + 0.65 * p))),
+                    child: Stack(children: [
+                      ContornoLetra(texto: palabras[k], estilo: base),
+                      Text(palabras[k], style: base.copyWith(shadows: _brillo(0.35 + 0.65 * p))),
+                    ]),
                   ),
                 );
               }),
@@ -435,7 +445,12 @@ class _VersoEscenaState extends State<VersoEscena> with SingleTickerProviderStat
         final tubo = Color.lerp(Colors.white, widget.paleta.acento, 0.25)!;
         return Opacity(
           opacity: 0.25 + 0.75 * luz,
-          child: Text(widget.texto,
+          child: Stack(children: [
+            ContornoLetra(
+                texto: widget.texto,
+                alinear: TextAlign.center,
+                estilo: base.copyWith(fontWeight: FontWeight.w700, letterSpacing: 1.2)),
+            Text(widget.texto,
               textAlign: TextAlign.center,
               style: base.copyWith(
                 fontWeight: FontWeight.w700,
@@ -447,11 +462,17 @@ class _VersoEscenaState extends State<VersoEscena> with SingleTickerProviderStat
                   Shadow(color: widget.paleta.contraste.withValues(alpha: 0.7 * luz), blurRadius: 40),
                 ],
               )),
+          ]),
         );
       case 'cine':
         final letras = widget.texto.characters.toList();
         final sigma = 7.0 * (1 - Curves.easeOut.transform(t));
-        final texto = Text.rich(
+        final texto = Stack(children: [
+          ContornoLetra(
+              texto: widget.texto,
+              alinear: TextAlign.center,
+              estilo: base.copyWith(fontWeight: FontWeight.w600, letterSpacing: widget.tamano * 0.08)),
+          Text.rich(
           TextSpan(children: [
             for (var k = 0; k < letras.length; k++)
               TextSpan(
@@ -465,7 +486,8 @@ class _VersoEscenaState extends State<VersoEscena> with SingleTickerProviderStat
             letterSpacing: widget.tamano * 0.08,
             shadows: _brillo(0.6 * t),
           ),
-        );
+          ),
+        ]);
         return sigma < 0.05
             ? texto
             : ImageFiltered(imageFilter: ImageFilter.blur(sigmaX: sigma, sigmaY: sigma), child: texto);
@@ -478,7 +500,10 @@ class _VersoEscenaState extends State<VersoEscena> with SingleTickerProviderStat
             offset: Offset(0, widget.tamano * 0.6 * (1 - e)),
             child: Transform.scale(
               scale: 0.94 + 0.06 * e,
-              child: Text(widget.texto, textAlign: TextAlign.center, style: base.copyWith(shadows: _brillo(e * pulso))),
+              child: Stack(children: [
+                ContornoLetra(texto: widget.texto, alinear: TextAlign.center, estilo: base),
+                Text(widget.texto, textAlign: TextAlign.center, style: base.copyWith(shadows: _brillo(e * pulso))),
+              ]),
             ),
           ),
         );

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' as ui;
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/foundation.dart' show ValueListenable;
@@ -24,6 +25,8 @@ import '../../reproduccion/frenos.dart';
 import '../../reproduccion/jugador.dart';
 import '../../reproduccion/reproductor.dart';
 import '../comunes.dart';
+import '../escenarios/catalogo.dart';
+import '../escenarios/escenario_fondo.dart';
 import '../plataforma.dart';
 import '../reproductor/animaciones.dart';
 import '../reproductor/barra_progreso.dart';
@@ -33,7 +36,7 @@ import '../reproductor/fondo_ambiente.dart';
 import '../reproductor/insignia_calidad.dart';
 import '../reproductor/paleta_portada.dart';
 import '../reproductor/personalizar_hoja.dart';
-import '../reproductor/linea_karaoke.dart';
+import '../reproductor/letra_estilo.dart';
 import '../reproductor/portada_deslizable.dart';
 import '../reproductor/tarjetas_compartir.dart';
 import '../reproductor/vinilo.dart';
@@ -197,6 +200,13 @@ class _ReproductorPaginaState extends State<ReproductorPagina> with SingleTicker
     super.dispose();
   }
 
+  /// El escenario elegido para el fondo del reproductor. Solo con beneficios (si no, null: fondo normal).
+  EscenarioDef? _escenarioDelReproductor(Ajustes a) {
+    final clave = a.texto('escenario_reproductor');
+    if (clave.isEmpty || !Premium.i.activo) return null;
+    return escenarioPorClave(clave);
+  }
+
   /// El ritmo de la cancion si Caudal ya lo conoce (sin analizar nada ni gastar datos).
   AnalisisRitmo? _ritmoDe(Servicios s, String clave) {
     try {
@@ -287,7 +297,7 @@ class _ReproductorPaginaState extends State<ReproductorPagina> with SingleTicker
         child: NotificationListener<ScrollNotification>(
         onNotification: _alDesplazar,
         child: ListenableBuilder(
-          listenable: Listenable.merge([r, s.coleccion]),
+          listenable: Listenable.merge([r, s.coleccion, s.ajustes, Premium.i]),
           builder: (context, _) {
             final p = r.actual;
             if (p == null) {
@@ -309,15 +319,33 @@ class _ReproductorPaginaState extends State<ReproductorPagina> with SingleTicker
             final gusta = s.coleccion.meGusta(clave);
             final ctx = r.contexto;
             final video = r.modo == 'video';
+            final escenario = _escenarioDelReproductor(s.ajustes);
             return Stack(children: [
-              // ---- modo ambiente: la portada desenfocada, moviendose despacio
+              // ---- modo ambiente: la portada desenfocada, moviendose despacio (o un escenario elegido)
               Positioned.fill(
                 child: ValueListenableBuilder<PaletaPortada>(
                   valueListenable: _vista,
                   builder: (_, pal, _) => Stack(fit: StackFit.expand, children: [
-                    FondoAmbiente(url: url, color: pal.fondo, enMovimiento: !video && r.estado == EstadoRepro.sonando),
+                    if (escenario != null) ...[
+                      // sin espectro de audio en la app: el escenario respira solo (bandas: null)
+                      EscenarioFondo(clave: escenario.clave, bandas: null),
+                      // velo oscuro suave abajo para que se lean los controles
+                      IgnorePointer(
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [Colors.black.withValues(alpha: 0), Colors.black.withValues(alpha: 0.55)],
+                              stops: const [0.45, 1],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ] else
+                      FondoAmbiente(url: url, color: pal.fondo, enMovimiento: !video && r.estado == EstadoRepro.sonando),
                     // con los colores de la caratula, el fondo se funde hacia su segundo tono
-                    if (_prefs.coloresActivos)
+                    if (escenario == null && _prefs.coloresActivos)
                       IgnorePointer(
                         child: DecoratedBox(
                           decoration: BoxDecoration(
@@ -597,7 +625,19 @@ class _ReproductorPaginaState extends State<ReproductorPagina> with SingleTicker
         _versoQueSuena(p, posicion),
         _caratulaGrande(context, url),
       ).wait;
+      // la tarjeta «Escenario»: el escenario elegido, o el samurai (solo con beneficios)
+      ui.Image? escenarioImg;
+      if (Premium.i.activo) {
+        final elegido = Caudal.leer(context).ajustes.texto('escenario_reproductor');
+        final clave = escenarioPorClave(elegido) != null ? elegido : 'samurai';
+        try {
+          escenarioImg = await EscenarioFondo.capturar(clave, const Size(1080, 1920));
+        } catch (_) {
+          escenarioImg = null;
+        }
+      }
       return DatosCompartir(
+        escenario: escenarioImg,
         titulo: '${p['titulo'] ?? ''}',
         artista: '${p['artista'] ?? ''}'.trim(),
         caratula: caratula,
@@ -1106,7 +1146,8 @@ class _LetraCompletaState extends State<LetraCompleta> {
                       ),
                     Expanded(
                       child: _VistaLetra(
-                          key: ValueKey('${_pista['clave']}'), letra: l, compacta: false, clave: '${_pista['clave']}'),
+                          key: ValueKey('${_pista['clave']}'), letra: l, compacta: false, clave: '${_pista['clave']}',
+                          acento: Color.lerp(widget.color, Colors.white, 0.4)),
                     ),
                   ]),
       ),
@@ -1115,12 +1156,15 @@ class _LetraCompletaState extends State<LetraCompleta> {
 }
 
 class _VistaLetra extends StatefulWidget {
-  const _VistaLetra({super.key, required this.letra, required this.compacta, required this.clave});
+  const _VistaLetra({super.key, required this.letra, required this.compacta, required this.clave, this.acento});
   final Map<String, dynamic> letra;
   final bool compacta;
 
   /// La cancion (para guardar su traduccion).
   final String clave;
+
+  /// Color de brillo de la línea que suena (null = sin brillo de acento).
+  final Color? acento;
 
   @override
   State<_VistaLetra> createState() => _VistaLetraState();
@@ -1252,7 +1296,8 @@ class _VistaLetraState extends State<_VistaLetra> {
     if (_ls.isEmpty) {
       final estilo = TextStyle(fontSize: widget.compacta ? 18 : 22, fontWeight: FontWeight.w800, height: 1.5);
       if (_trad.isEmpty) {
-        return SingleChildScrollView(child: Text('${widget.letra['texto'] ?? ''}', style: estilo));
+        return SingleChildScrollView(
+            child: TextoLetraResaltado(texto: '${widget.letra['texto'] ?? ''}', estilo: estilo, colorReposo: Colors.white));
       }
       final textos = _textos;
       return SingleChildScrollView(
@@ -1260,7 +1305,8 @@ class _VistaLetraState extends State<_VistaLetra> {
           for (var i = 0; i < textos.length; i++)
             Padding(
               padding: const EdgeInsets.only(bottom: 4),
-              child: _conTraduccion(Text(textos[i], style: estilo), i, Colors.white),
+              child: _conTraduccion(
+                  TextoLetraResaltado(texto: textos[i], estilo: estilo, colorReposo: Colors.white), i, Colors.white),
             ),
         ]),
       );
@@ -1290,13 +1336,20 @@ class _VistaLetraState extends State<_VistaLetra> {
             final inicio = _ls[i].$1;
             final siguiente = i + 1 < _ls.length ? _ls[i + 1].$1 : inicio + 5000;
             final fin = inicio + (siguiente - inicio).clamp(600, 1500 + texto.length * 85);
-            linea = LineaKaraoke(texto: texto, estilo: estilo, inicio: inicio, fin: fin, r: _r!,
-                hecho: Colors.white, falta: _porVenir);
+            linea = LineaActivaKaraoke(texto: texto, estilo: estilo, inicio: inicio, fin: fin, r: _r!,
+                acento: widget.acento);
           } else {
-            linea = AnimatedDefaultTextStyle(
+            // el color de cada estado (cantada / por venir / activa) se anima como antes, 260 ms
+            linea = TweenAnimationBuilder<Color?>(
+              tween: ColorTween(end: estilo.color),
               duration: const Duration(milliseconds: 260),
-              style: estilo,
-              child: Text(texto),
+              builder: (_, color, _) => TextoLetraResaltado(
+                texto: texto,
+                estilo: estilo,
+                activo: estado == 0,
+                acento: widget.acento,
+                colorReposo: color,
+              ),
             );
           }
           return GestureDetector(

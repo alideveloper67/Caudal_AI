@@ -102,6 +102,7 @@ class PiezaEditable(QObject):
     """
 
     cambiado = Signal(str)
+    ocultado = Signal(str)     # la persona ocultó la pieza con la ✕ (no se emite al cargar un estado guardado)
 
     def __init__(self, widget, nombre, minimo=(120, 60), padre=None, libre=False, bloqueo=None):
         super().__init__(padre if padre is not None else widget)
@@ -329,11 +330,12 @@ class PiezaEditable(QObject):
     # ----- ocultar, mostrar y estado -----
 
     def ocultar(self):
-        """Oculta la pieza y avisa con `cambiado`."""
+        """Oculta la pieza y avisa con `cambiado` y `ocultado`."""
         try:
             self._modo = None
             self._widget.hide()
             self.cambiado.emit(self._nombre)
+            self.ocultado.emit(self._nombre)
         except RuntimeError:
             pass
 

@@ -256,6 +256,7 @@ class ConfigGamer:
 # ===================================================================== nivel, XP y misiones
 
 XP_POR_MINUTO = 1
+NIVEL_MAXIMO = 99
 MINUTOS_DIA_ACTIVO = 10          # con tanto escuchado el dia cuenta para la racha
 
 RANGOS = ["Novato", "Aprendiz", "Jugador", "Veterano", "Élite", "Maestro", "Leyenda"]
@@ -269,6 +270,8 @@ def xp_para_nivel(n):
 
 def nivel_de_xp(xp):
     xp = max(0, int(xp))
+    if xp >= xp_para_nivel(NIVEL_MAXIMO):
+        return NIVEL_MAXIMO
     n = int((1 + math.sqrt(1 + 4 * xp / 25.0)) / 2)
     while xp_para_nivel(n + 1) <= xp:
         n += 1
@@ -278,10 +281,15 @@ def nivel_de_xp(xp):
 
 
 def info_nivel(xp):
-    """(nivel, xp dentro del nivel, xp que dura el nivel, rango)."""
+    """(nivel, xp dentro del nivel, xp que dura el nivel, rango).
+    En el nivel máximo la barra queda llena: dentro == dura (así el progreso es 1.0 y nunca se divide entre 0)."""
     n = nivel_de_xp(xp)
     base = xp_para_nivel(n)
-    return n, int(xp) - base, xp_para_nivel(n + 1) - base, RANGOS[min(len(RANGOS) - 1, (n - 1) // 5)]
+    rango = RANGOS[min(len(RANGOS) - 1, (n - 1) // 5)]
+    if n >= NIVEL_MAXIMO:
+        dura = xp_para_nivel(n) - xp_para_nivel(n - 1)
+        return n, dura, dura, rango
+    return n, int(xp) - base, xp_para_nivel(n + 1) - base, rango
 
 
 _PLANTILLAS = {

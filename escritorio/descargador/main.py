@@ -214,6 +214,14 @@ def main():
         ventana = Ventana(ctx)
         estado["ventana"] = ventana
         ventana.show()
+        # diagnóstico de tirones de la interfaz (descargador/vigia.py); apagable en ajustes
+        try:
+            if ajustes.get("diagnostico_trabones", True):
+                from descargador import vigia
+                from descargador.config import carpeta_datos as _carpeta_datos
+                vigia.iniciar(app, _carpeta_datos())
+        except Exception:  # noqa: BLE001
+            pass
         revisar_terminos(cuenta, ventana)
         if estado["acceso"] is not None:
             estado["acceso"].close()

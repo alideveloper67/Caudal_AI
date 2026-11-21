@@ -239,7 +239,10 @@ class PaginaModoGamer(Pagina):
         n, dentro, largo, rango = MG.info_nivel(pr.xp)
         self.et_nivel.setText(f"Nivel {n} · {rango}")
         self.barra_xp.poner(dentro / largo if largo else 0)
-        self.et_xp.setText(f"{dentro} / {largo} XP para el nivel {n + 1}   ·   {pr.xp} XP en total")
+        if n >= MG.NIVEL_MAXIMO:
+            self.et_xp.setText(f"¡Nivel máximo alcanzado!   ·   {pr.xp} XP en total")
+        else:
+            self.et_xp.setText(f"{dentro} / {largo} XP para el nivel {n + 1}   ·   {pr.xp} XP en total")
         racha = pr.racha()
         self.et_racha.setText(f"Racha: {racha} día{'s' if racha != 1 else ''}"
                               + (f"  ·  récord {pr.d['mejor_racha']}" if pr.d["mejor_racha"] > racha else ""))

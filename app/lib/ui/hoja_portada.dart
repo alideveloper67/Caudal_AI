@@ -93,7 +93,8 @@ class _HojaPortadaState extends State<HojaPortada> {
                       boxShadow: const [BoxShadow(color: Color(0x66000000), blurRadius: 18, offset: Offset(0, 6))],
                     ),
                     child: nueva != null
-                        ? Image.memory(nueva, fit: BoxFit.cover, gaplessPlayback: true)
+                        ? Image.memory(nueva, fit: BoxFit.cover, gaplessPlayback: true,
+                            cacheWidth: (lado * MediaQuery.devicePixelRatioOf(context)).round())
                         : Portada(url: widget.actual, lado: lado, radio: 16, icono: Icons.queue_music_rounded),
                   );
                 }),

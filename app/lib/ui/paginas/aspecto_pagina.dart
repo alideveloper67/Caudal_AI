@@ -5,6 +5,7 @@ import '../../nucleo/mascota_app.dart';
 import '../../nucleo/premium.dart';
 import 'perfil_comun.dart' show socialDe;
 import '../servicios.dart';
+import '../escenarios/catalogo.dart';
 import '../tema.dart';
 
 /// Ajustes → Aspecto: el color de la app y su fondo (se ven al momento).
@@ -34,6 +35,15 @@ class _AspectoPaginaState extends State<AspectoPagina> {
     if (mounted) setState(() {});
   }
 
+  /// Un escenario del reproductor: solo con beneficios; si no, avisa igual que el resto de lo exclusivo.
+  Future<void> _elegirEscenario(String clave) async {
+    if (!Premium.i.activo) {
+      Caudal.leer(context).avisar('Es exclusivo de donadores: dona o canjea un código de prueba para usarlo.');
+      return;
+    }
+    await _poner('escenario_reproductor', clave);
+  }
+
   Future<void> _propio({required bool fondo}) async {
     final a = Caudal.leer(context).ajustes;
     final actual = fondo
@@ -59,6 +69,8 @@ class _AspectoPaginaState extends State<AspectoPagina> {
     final fondo = a.texto('fondo');
     final acentoPropio = Aspecto.esPropio(acento);
     final fondoPropio = Aspecto.esPropio(fondo);
+    // sin beneficios el ajuste se ignora: se ve «Ninguno» como elegido
+    final escenarioActual = Premium.i.activo ? a.texto('escenario_reproductor') : '';
     return Scaffold(
       appBar: AppBar(title: const Text('Aspecto')),
       body: ListView(padding: const EdgeInsets.all(Esp.lado), children: [
@@ -168,6 +180,34 @@ class _AspectoPaginaState extends State<AspectoPagina> {
           ),
         ],
         const SizedBox(height: Esp.xl),
+        const Text('Escenarios del reproductor', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w800)),
+        const SizedBox(height: 4),
+        const Text('Un fondo animado en la pantalla grande del reproductor. Es exclusivo de donadores.',
+            style: estiloSecundario),
+        const SizedBox(height: Esp.m),
+        SizedBox(
+          height: 128,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            clipBehavior: Clip.none,
+            children: [
+              _MiniEscenario(
+                nombre: 'Ninguno',
+                elegido: escenarioActual.isEmpty,
+                alPulsar: () => _poner('escenario_reproductor', ''),
+              ),
+              for (final e in escenarios)
+                _MiniEscenario(
+                  nombre: e.nombre,
+                  asset: e.asset,
+                  elegido: escenarioActual == e.clave,
+                  bloqueado: !Premium.i.activo,
+                  alPulsar: () => _elegirEscenario(e.clave),
+                ),
+            ],
+          ),
+        ),
+        const SizedBox(height: Esp.xl),
         Center(
           child: TextButton.icon(
             onPressed: acento == 'cian' && fondo == 'oscuro'
@@ -183,6 +223,77 @@ class _AspectoPaginaState extends State<AspectoPagina> {
       ]),
     );
   }
+}
+
+/// Un escenario para elegir: su miniatura con las esquinas redondeadas y el nombre debajo.
+/// Sin beneficios lleva candado (al tocarla avisa, en _elegirEscenario).
+class _MiniEscenario extends StatelessWidget {
+  const _MiniEscenario({
+    required this.nombre,
+    required this.elegido,
+    required this.alPulsar,
+    this.asset,
+    this.bloqueado = false,
+  });
+  final String nombre;
+  final String? asset;
+  final bool elegido, bloqueado;
+  final VoidCallback alPulsar;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+        padding: const EdgeInsets.only(right: 12),
+        child: Semantics(
+          button: true,
+          selected: elegido,
+          label: nombre,
+          child: GestureDetector(
+            onTap: alPulsar,
+            child: SizedBox(
+              width: 96,
+              child: Column(children: [
+                Expanded(
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    clipBehavior: Clip.antiAlias,
+                    decoration: BoxDecoration(
+                      color: C.superficie,
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: elegido ? C.acento : C.superficie3, width: elegido ? 2.5 : 1),
+                    ),
+                    child: Stack(fit: StackFit.expand, children: [
+                      if (asset != null)
+                        Image.asset(asset!,
+                            fit: BoxFit.cover,
+                            cacheWidth: 320,
+                            filterQuality: FilterQuality.medium,
+                            excludeFromSemantics: true,
+                            errorBuilder: (_, _, _) => const SizedBox.shrink())
+                      else
+                        const Center(child: Icon(Icons.block_rounded, color: C.texto2, size: 28)),
+                      if (bloqueado)
+                        Container(
+                          color: Colors.black.withValues(alpha: 0.45),
+                          alignment: Alignment.center,
+                          child: const Icon(Icons.lock_rounded, color: Colors.white, size: 24),
+                        ),
+                    ]),
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(nombre,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: elegido ? C.texto : C.texto2,
+                        fontWeight: elegido ? FontWeight.w800 : FontWeight.w500)),
+              ]),
+            ),
+          ),
+        ),
+      );
 }
 
 /// Elegir un color propio con el dedo: tono, intensidad y brillo, con una

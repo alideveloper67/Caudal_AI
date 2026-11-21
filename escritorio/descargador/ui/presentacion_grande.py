@@ -94,8 +94,9 @@ class _Boton(QPushButton):
         if not self.isEnabled():
             fondo, texto = QColor(255, 255, 255, 34), QColor(255, 255, 255, 130)
         elif self.principal:
-            fondo = QColor(C["acento_bajo"] if self.isDown() else C["acento_alto"] if self._encima else C["acento"])
-            texto = QColor(C["acento_texto"])
+            cs = getattr(self, "colores", None) or C        # una presentación puede traer su propia paleta
+            fondo = QColor(cs["acento_bajo"] if self.isDown() else cs["acento_alto"] if self._encima else cs["acento"])
+            texto = QColor(cs["acento_texto"])
         else:
             fondo = QColor(255, 255, 255, 56 if self._encima else 26)
             texto = QColor(255, 255, 255, 240)

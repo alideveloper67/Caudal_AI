@@ -8,7 +8,7 @@ Future<void> _montar(WidgetTester t, Size tam) async {
   t.view.physicalSize = tam;
   t.view.devicePixelRatio = 2.75;
   addTearDown(t.view.reset);
-  await t.pumpWidget(MaterialApp(theme: temaCaudal(), home: AccesoPagina(alEntrar: (_, __) async {})));
+  await t.pumpWidget(MaterialApp(theme: temaCaudal(), home: AccesoPagina(alEntrar: (_, _) async {})));
   await t.pump(const Duration(milliseconds: 400));
 }
 
