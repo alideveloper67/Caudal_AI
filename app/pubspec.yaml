@@ -1,7 +1,7 @@
 name: caudal
 description: "Descarga musica y videos desde su propio navegador"
 publish_to: 'none'
-version: 2.7.5+3050
+version: 2.7.6+3060
 
 environment:
   sdk: ^3.13.0
@@ -37,6 +37,9 @@ dependencies:
   media_kit_video: ^2.0.1
   media_kit_libs_video: ^1.0.7
   audio_service: ^0.18.19
+  # motor de respaldo en Android (ExoPlayer): si mpv tumba la app en un teléfono, la música sigue
+  # con el reproductor del sistema (reproduccion/jugador_exo.dart, motor_eleccion.dart)
+  just_audio: ^0.10.6
   http: ^1.6.0
   http_parser: ^4.1.2
   url_launcher: ^6.3.1

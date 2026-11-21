@@ -34,6 +34,7 @@ import 'nucleo/sonidos_interfaz.dart';
 import 'nucleo/streams.dart';
 import 'nucleo/version.dart';
 import 'nucleo/vida_app.dart';
+import 'reproduccion/motor_eleccion.dart';
 import 'reproduccion/pip.dart';
 import 'reproduccion/reproductor.dart';
 import 'reproduccion/servicio_audio.dart';
@@ -281,6 +282,11 @@ class _CaudalAppState extends State<CaudalApp> {
       leer: () => coleccion.estado('portadas_genero'),
       guardar: (m) => coleccion.guardarEstado('portadas_genero', m),
     );
+    Diagnostico.marcar('motor');
+    // qué motor de sonido usa este teléfono: el de Caudal, o el de Android si el de Caudal
+    // tumbó la app aquí hace poco (reproduccion/motor_eleccion.dart)
+    await EleccionMotor.preparar(ajuste: ajustes.texto(EleccionMotor.claveAjuste), version: versionApp)
+        .timeout(const Duration(seconds: 3), onTimeout: () {});
     Diagnostico.marcar('reproductor');
     final streams = Streams(MotorLocal());
     final reproductor = Reproductor(ajustes, coleccion, streams);

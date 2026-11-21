@@ -2,11 +2,17 @@ import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
 import '../nucleo/streams.dart';
+import 'dart:io' show Platform;
+
 import 'jugador.dart';
+import 'jugador_exo.dart';
+import 'motor_eleccion.dart';
 
 bool get esJugadorWeb => false;
 
-Jugador crearJugador() => _JugadorMpv();
+/// El motor de este teléfono: mpv, o ExoPlayer si mpv falló aquí (ver motor_eleccion.dart).
+Jugador crearJugador() =>
+    Platform.isAndroid && EleccionMotor.actual == MotorSonido.android ? JugadorExo() : _JugadorMpv();
 
 void mostrarVideoGrande(bool grande) {}
 void ocultarVideo(bool oculto) {}

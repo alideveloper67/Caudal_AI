@@ -29,6 +29,7 @@ import 'aspecto_pagina.dart';
 import 'fondo_pagina.dart';
 import 'gustos_pagina.dart';
 import 'letra_ajuste_pagina.dart';
+import 'motor_sonido_ajuste.dart';
 import '../reproductor/letra_aspecto.dart';
 import 'bateria_ajuste.dart';
 import 'copia_seguridad_pagina.dart';
@@ -304,6 +305,9 @@ class _AjustesPaginaState extends State<AjustesPagina> {
             onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LetraAjustePagina())),
           ),
         ),
+
+        // el motor de este teléfono: el de Caudal o el de Android (motor_eleccion.dart)
+        if (Plataforma.esAndroid) const MotorSonidoAjuste(),
 
         ListTile(
           leading: Icon(Icons.favorite_border_rounded, color: C.acento),

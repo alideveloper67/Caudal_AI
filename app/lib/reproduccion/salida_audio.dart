@@ -32,6 +32,14 @@ class SalidaAudio {
     }
   }
 
+  /// Libera el limitador de una sesión que ya no se usa (al cambiar un motor por otro nuevo).
+  static Future<void> soltar(int sesion) async {
+    if (!_android) return;
+    try {
+      await _canal.invokeMethod<Object?>('soltar', {'sesion': sesion});
+    } catch (_) {}
+  }
+
   /// Pone la ganancia (dB) de la sesión. Devuelve 'dp' (toda, con limitador), 'realce' (solo la
   /// parte positiva) o 'ninguno'.
   static Future<String> ganancia(int sesion, double db) async {

@@ -27,6 +27,9 @@ class Ajustes extends ChangeNotifier {
     'calidad_audio_datos': 'normal', // con datos moviles
     'calidad_video': 'maxima', // maxima | 2160 | 1440 | 1080 | 720 | 480 | 360
     'codec_video': 'auto', // auto | sin_av1 | compatible
+    // motor de sonido de ESTE teléfono (no viaja a la nube): automatico | caudal | android
+    // (reproduccion/motor_eleccion.dart)
+    'motor_sonido': 'automatico',
     'crossfade': 0,
     'normalizar': true,
     'traducir_letra': true, // la traduccion bajo cada linea de la letra

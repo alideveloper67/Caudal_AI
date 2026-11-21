@@ -48,6 +48,10 @@ object Sonido {
                         resultado.success(ganancia(sesion, db))
                     }
                     "salida" -> resultado.success(tipoSalida(app))
+                    "soltar" -> {
+                        soltar((llamada.argument<Number>("sesion") ?: 0).toInt())
+                        resultado.success(null)
+                    }
                     else -> resultado.notImplemented()
                 }
             } catch (_: Throwable) {
@@ -94,6 +98,14 @@ object Sonido {
         if (e.dp == null && e.realce == null) return null
         efectos[sesion] = e
         return sesion
+    }
+
+    /** Libera los efectos de una sesión que ya no usa ningún motor (si no, quedaban vivos). */
+    @Synchronized
+    private fun soltar(sesion: Int) {
+        val e = efectos.remove(sesion) ?: return
+        try { e.dp?.setEnabled(false); e.dp?.release() } catch (_: Throwable) {}
+        try { e.realce?.setEnabled(false); e.realce?.release() } catch (_: Throwable) {}
     }
 
     /**

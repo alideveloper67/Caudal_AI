@@ -86,22 +86,115 @@ object Salidas {
         else -> "ninguna"
     }
 
-    /** La traza del ANR o del fallo nativo (tombstone en Android 12+), recortada. */
+    /** Librerías y nombres que dicen QUÉ cayó (lo demás de un tombstone son hilos esperando). */
+    private val CLAVES = Regex(
+        "libmpv|libav(codec|format|util|filter|device)|libsw(resample|scale)|libffmpegkit|libmediakit|" +
+            "libflutter|libapp\\.so|libc\\+\\+_shared|CodecLooper|MediaCodec|AudioTrack|Abort message|Scudo|abort"
+    )
+
+    /**
+     * Lo útil de un tombstone (Android 12+ lo da en protobuf): la cabecera (señal, mensaje de aborto,
+     * hilo que cayó) y los trozos donde aparecen nuestras librerías, sin los cientos de hilos que
+     * solo esperaban (antes se cortaba a 7000 caracteres y la causa quedaba fuera).
+     */
+    private fun resumenNativo(crudo: String): String {
+        val t = crudo.replace(Regex("[^\\x20-\\x7E\\n]+"), " ").replace(Regex("[ \\n]{2,}"), " ")
+        val cabecera = t.take(900)
+        val trozos = LinkedHashSet<String>()
+        for (m in CLAVES.findAll(t)) {
+            if (m.range.first < 900) continue
+            val ini = (m.range.first - 160).coerceAtLeast(0)
+            val fin = (m.range.last + 60).coerceAtMost(t.length)
+            trozos.add(t.substring(ini, fin).trim())
+            if (trozos.size >= 30) break
+        }
+        return (cabecera + if (trozos.isEmpty()) "" else "\n--- marcos con librerías ---\n" + trozos.joinToString("\n…\n"))
+            .take(7000)
+    }
+
+    /** La traza del ANR o del fallo nativo (tombstone en Android 12+), recortada a lo útil. */
     private fun traza(info: ApplicationExitInfo): String {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return ""
         return try {
             info.traceInputStream?.use { s ->
-                val bytes = ByteArray(64 * 1024)
-                val n = s.read(bytes).coerceAtLeast(0)
-                val t = String(bytes, 0, n, Charsets.UTF_8)
-                // el tombstone en Android 12+ es protobuf: nos quedamos con lo legible
-                if (info.reason == ApplicationExitInfo.REASON_CRASH_NATIVE)
-                    t.replace(Regex("[^\\x20-\\x7E\\n]+"), " ").replace(Regex(" {2,}"), " ")
-                else t
+                // el tombstone entero (hasta 1 MB): la causa puede estar lejos del principio
+                val t = String(s.readBytes().let { if (it.size > 1_048_576) it.copyOf(1_048_576) else it }, Charsets.UTF_8)
+                if (info.reason == ApplicationExitInfo.REASON_CRASH_NATIVE) resumenNativo(t) else t.take(7000)
             } ?: ""
-        } catch (_: Exception) {
+        } catch (_: Throwable) {
             ""
-        }.take(7000)
+        }
+    }
+
+    /**
+     * Los fallos nativos del proceso principal desde que se instaló esta versión (no se marcan
+     * como vistos: es para elegir el motor al abrir, ver motor_eleccion.dart). Los de antes de
+     * actualizar no cuentan: son de otra versión, que puede ser justo la que fallaba.
+     */
+    fun fallosNativos(c: Context): List<Map<String, Any?>> {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return emptyList()
+        val app = c.applicationContext
+        val desde = try {
+            app.packageManager.getPackageInfo(app.packageName, 0).lastUpdateTime
+        } catch (_: Exception) {
+            0L
+        }
+        val am = app.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        val lista = try {
+            am.getHistoricalProcessExitReasons(app.packageName, 0, 16)
+        } catch (_: Exception) {
+            emptyList()
+        }
+        return lista.filter {
+            it.processName == app.packageName && it.reason == ApplicationExitInfo.REASON_CRASH_NATIVE &&
+                it.timestamp > desde
+        }.map { mapOf("cuando" to it.timestamp, "texto" to traza(it)) }
+    }
+
+    /**
+     * Cómo terminó la vez anterior el proceso principal (sin marcarla como vista): lo usa el
+     * diagnóstico del arranque para no llamar «traba» a lo que fue un cierre del motor o a la
+     * persona cerrando la app antes de que terminara de abrir.
+     */
+    fun ultimaSalida(c: Context): Map<String, Any?>? {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) return null
+        val app = c.applicationContext
+        val am = app.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        val info = try {
+            am.getHistoricalProcessExitReasons(app.packageName, 0, 8)
+                .filter { it.processName == app.packageName }.maxByOrNull { it.timestamp }
+        } catch (_: Exception) {
+            null
+        } ?: return null
+        return mapOf(
+            "motivo" to motivo(info.reason),
+            "importancia" to importancia(info.importance),
+            "cuando" to info.timestamp,
+            "texto" to if (info.reason == ApplicationExitInfo.REASON_CRASH_NATIVE) traza(info) else "",
+        )
+    }
+
+    /** Cómo va el proceso: mapas de memoria, hilos y memoria residente (lo mira vigia_proceso.dart). */
+    fun proceso(): Map<String, Any?> {
+        var hilos = -1
+        var rssKb = -1L
+        try {
+            File("/proc/self/status").forEachLine { l ->
+                when {
+                    l.startsWith("Threads:") -> hilos = l.substringAfter(':').trim().toIntOrNull() ?: -1
+                    l.startsWith("VmRSS:") -> rssKb = l.substringAfter(':').trim().substringBefore(' ').toLongOrNull() ?: -1L
+                }
+            }
+        } catch (_: Exception) {
+        }
+        var mapas = -1
+        try {
+            var n = 0
+            File("/proc/self/maps").bufferedReader().use { r -> while (r.readLine() != null) n++ }
+            mapas = n
+        } catch (_: Exception) {
+        }
+        return mapOf("mapas" to mapas, "hilos" to hilos, "rss_kb" to rssKb)
     }
 
     /**
@@ -181,6 +274,19 @@ object Salidas {
                 } catch (e: Exception) {
                     resultado.success(emptyList<Map<String, Any?>>())
                 }
+                // fuera del hilo principal: leer tombstones y /proc puede tardar
+                "fallosNativos" -> Thread {
+                    val r = try { fallosNativos(app) } catch (_: Throwable) { emptyList() }
+                    android.os.Handler(android.os.Looper.getMainLooper()).post { resultado.success(r) }
+                }.start()
+                "ultimaSalida" -> Thread {
+                    val r = try { ultimaSalida(app) } catch (_: Throwable) { null }
+                    android.os.Handler(android.os.Looper.getMainLooper()).post { resultado.success(r) }
+                }.start()
+                "proceso" -> Thread {
+                    val r = try { proceso() } catch (_: Throwable) { null }
+                    android.os.Handler(android.os.Looper.getMainLooper()).post { resultado.success(r) }
+                }.start()
                 "memoria" -> try {
                     val am = app.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
                     val mi = ActivityManager.MemoryInfo()

@@ -9,6 +9,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
+import '../reproduccion/motor_eleccion.dart';
 import 'aviso_errores.dart';
 import 'plataforma.dart';
 
@@ -47,6 +48,7 @@ class SalidasAndroid {
     final partes = <String>[
       'motivo=$motivo',
       'estado=$importancia',
+      'motor=${EleccionMotor.actual.name}',
       if (sonaba) 'sonaba=si (${s['minutos_sonando'] ?? 0} min)',
       if (pssMb > 0) 'memoria=${pssMb}MB',
       if (rssMb > 0) 'rss=${rssMb}MB',

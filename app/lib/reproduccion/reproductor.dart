@@ -3,6 +3,7 @@ import 'dart:collection';
 import 'dart:math';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart' show MethodChannel;
 import 'package:media_kit_video/media_kit_video.dart';
 
 import '../nucleo/ajustes.dart';
@@ -17,9 +18,14 @@ import '../nucleo/red.dart';
 import '../nucleo/sonoridad.dart';
 import '../nucleo/streams.dart';
 import '../nucleo/transiciones.dart';
+import '../nucleo/version.dart' show versionApp;
 import '../nucleo/vida_app.dart';
 import 'cola_ops.dart' as cola;
 import 'frenos.dart';
+import 'guarda_recargas.dart';
+import 'jugador_exo.dart';
+import 'motor_eleccion.dart';
+import 'vigia_proceso.dart';
 import 'jugador.dart';
 import 'pausa_suave.dart';
 import 'retomar.dart';
@@ -70,15 +76,47 @@ enum EstadoRepro { parado, cargando, sonando, pausa }
 class _Motor {
   _Motor() {
     // lo que dice el motor por dentro (403, certificados, red...) al registro del sistema
-    player.stream.log.listen((l) {
+    subs.add(player.stream.log.listen((l) {
       if (l.level == 'error' || l.level == 'fatal' || l.level == 'warn') {
         debugPrint('mpvlog ${l.prefix}: ${l.text.trim()}');
       }
-    });
-    _afinar();
+    }));
+    // el de respaldo (ExoPlayer) no tiene propiedades de mpv ni limitador por sesión
+    if (!respaldo) _afinar();
   }
 
   final Jugador player = Jugador.crear();
+
+  /// ¿Es el motor de respaldo de Android (ExoPlayer)? Sin filtros ni video.
+  bool get respaldo => player is JugadorExo;
+
+  /// Lo que escucha el reproductor de este motor: se cancela al cerrarlo.
+  final List<StreamSubscription<dynamic>> subs = [];
+
+  bool _cerrado = false;
+
+  /// Lo apaga del todo (motor, escuchas y el efecto de su sesión de audio). Para cambiarlo por
+  /// uno nuevo (vigia_proceso.dart); nunca lanza.
+  Future<void> cerrar() async {
+    if (_cerrado) return;
+    _cerrado = true;
+    for (final s in subs) {
+      try {
+        await s.cancel();
+      } catch (_) {}
+    }
+    subs.clear();
+    fuente = null;
+    try {
+      await player.stop().timeout(const Duration(seconds: 3));
+    } catch (_) {}
+    try {
+      await player.dispose().timeout(const Duration(seconds: 5));
+    } catch (_) {}
+    final s = sesion;
+    sesion = null;
+    if (s != null) await SalidaAudio.soltar(s);
+  }
 
   /// La pantalla del video de mpv: se crea la primera vez que hace falta (no al
   /// abrir la app). En la web es null: el video es el recuadro de YouTube.
@@ -88,6 +126,9 @@ class _Motor {
   Future<void> _afinar() async {
     final opciones = {
       'cache': 'yes',
+      // la caché va en memoria: en Android mpv no tiene carpeta para la de disco y en cada canción
+      // intentaba crearla, fallaba («mkv: Failed to create file cache») y volvía a la memoria
+      'cache-on-disk': 'no',
       'cache-secs': '60',
       'demuxer-readahead-secs': '30',
       // demuxer-max-bytes va segun lo que se abra (ver [_ajustarLectura])
@@ -95,10 +136,10 @@ class _Motor {
       'demuxer-max-back-bytes': _filtrosMinimos ? '6MiB' : '16MiB',
       'cache-pause-initial': 'no',
       'cache-pause-wait': '1',
-      // si la conexión se cae (red dormida en segundo plano, cambio de wifi a datos, YouTube que
-      // corta), ffmpeg vuelve a conectar y sigue donde iba en vez de dar la canción por terminada
-      'stream-lavf-o': 'reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=8',
-      'network-timeout': '25',
+      // Sin `stream-lavf-o reconnect…` ni `network-timeout` (los trajo la 2.7.5): con ellos ffmpeg
+      // reabría la conexión por su cuenta, a espaldas del reproductor, y en la 2.7.5 hubo cierres
+      // nativos del motor (Honor, Android 14: «Scudo… NO MEMORY» en CodecLooper). Las caídas de red
+      // las resuelve el reproductor, con tope (ver guarda_recargas.dart).
       'ytdl': 'no',
       'audio-buffer': '0.3',
       // donde no hay limitador (iPhone) la subida de Volumen maximo va por el volumen de mpv
@@ -151,6 +192,11 @@ class _Motor {
       double volumen = 100, double velocidad = 1, bool video = true}) async {
     fuente = f;
     await _ajustarLectura(video || f.alto > 0 || f.audioUrl != null);
+    // En modo audio mpv no decodifica imagen: sin esto, un archivo descargado con video (o un
+    // enlace que lo traiga) levantaba el decodificador de video del teléfono para nadie.
+    try {
+      await player.setProperty('vid', video ? 'auto' : 'no');
+    } catch (_) {}
     await player.setVolume(volumen * factorMpv);
     await player.setRate(velocidad);
     await player.open(f, inicio: inicio > const Duration(seconds: 1) ? inicio : null, play: !pausado);
@@ -171,18 +217,9 @@ class _Motor {
 /// El reproductor de Caudal: la cola como Spotify y el motor como el escritorio.
 class Reproductor extends ChangeNotifier {
   Reproductor(this.ajustes, this.coleccion, this.streams) {
-    _a = _Motor();
-    _b = _Motor();
-    for (final m in [_a, _b]) {
-      m.player.stream.position.listen((p) => _alPosicion(m, p));
-      m.player.stream.duration.listen((d) => _alDuracion(m, d));
-      m.player.stream.playing.listen((s) => _alSonar(m, s));
-      m.player.stream.buffering.listen((b) => _alEsperar(m, b));
-      m.player.stream.completed.listen((c) {
-        if (c) _alTerminar(m);
-      });
-      m.player.stream.error.listen((e) => _alError(m, e));
-    }
+    _a = _nuevoMotor();
+    _b = _nuevoMotor();
+    _iniciarVigia();
     volumen = ajustes.entero('volumen').toDouble();
     velocidad = ajustes.decimal('velocidad');
     aleatorio = ajustes.sino('aleatorio');
@@ -202,8 +239,112 @@ class Reproductor extends ChangeNotifier {
   final Ajustes ajustes;
   final Coleccion coleccion;
   final Streams streams;
-  late final _Motor _a;
-  late final _Motor _b;
+  late _Motor _a;
+  late _Motor _b;
+
+  /// Un motor con todo lo que el reproductor escucha de él (se suelta al cerrarlo).
+  _Motor _nuevoMotor() {
+    final m = _Motor();
+    m.subs.addAll([
+      m.player.stream.position.listen((p) => _alPosicion(m, p)),
+      m.player.stream.duration.listen((d) => _alDuracion(m, d)),
+      m.player.stream.playing.listen((s) => _alSonar(m, s)),
+      m.player.stream.buffering.listen((b) => _alEsperar(m, b)),
+      m.player.stream.completed.listen((c) {
+        if (c) _alTerminar(m);
+      }),
+      m.player.stream.error.listen((e) => _alError(m, e)),
+    ]);
+    return m;
+  }
+
+  /// ¿Suena con el motor de respaldo de Android? (sin ecualizador, filtros ni video)
+  bool get motorRespaldo => _a.respaldo;
+
+  bool _renovando = false;
+
+  /// Cambia los dos motores por unos nuevos y sigue la canción donde iba. Lo pide el vigía del
+  /// proceso cuando mpv se come la memoria, o al pasar al motor de Android. Nunca lanza.
+  Future<void> renovarMotores(String por) async {
+    if (_renovando || kIsWeb) return;
+    _renovando = true;
+    try {
+      debugPrint('Caudal: motores nuevos ($por)');
+      final pista = actual;
+      final donde = posicion.value;
+      final seguia = estado == EstadoRepro.sonando || estado == EstadoRepro.cargando;
+      _suave.cancelar();
+      _cortarFundido();
+      _traspaso = null;
+      _atasco?.cancel();
+      _atasco = null;
+      _gen++;
+      final viejos = [_a, _b];
+      _a = _nuevoMotor();
+      _b = _nuevoMotor();
+      _usaA = true;
+      _eq3.clear();
+      _midiendo.clear();
+      // el de respaldo no tiene imagen: se sigue oyendo lo que se veía
+      if (_a.respaldo && modo == 'video') modo = 'audio';
+      notifyListeners();
+      for (final v in viejos) {
+        await v.cerrar();
+      }
+      await aplicarSonido();
+      if (pista != null && identical(pista, actual)) {
+        await _cargar(pista, inicio: donde, mismo: true, pausado: !seguia, intento: 1);
+      }
+    } catch (e) {
+      debugPrint('Caudal: no se pudieron renovar los motores ($e)');
+    } finally {
+      _renovando = false;
+    }
+  }
+
+  // ------------------------------------------------------------ vigía del proceso
+
+  static const _canalSalidas = MethodChannel('caudal/salidas');
+  final VigiaProceso _vigia = VigiaProceso();
+  Timer? _relojVigia;
+  bool _mirando = false;
+
+  /// Tras pasar al de respaldo, si aun así crece, el problema no es el motor: no se insiste.
+  bool _vigiaRendido = false;
+
+  void _iniciarVigia() {
+    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return;
+    _relojVigia = Timer.periodic(const Duration(seconds: 20), (_) => unawaited(_mirarProceso()));
+  }
+
+  Future<void> _mirarProceso() async {
+    if (_mirando || _vigiaRendido || _renovando) return;
+    if (estado != EstadoRepro.sonando && estado != EstadoRepro.cargando) return;
+    _mirando = true;
+    try {
+      final v = await _canalSalidas.invokeMethod<Object?>('proceso').timeout(const Duration(seconds: 5));
+      final m = MuestraProceso.de(v);
+      if (m == null) return;
+      final (accion, por) = _vigia.mirar(m);
+      if (accion == AccionVigia.nada) return;
+      debugPrint('Caudal: vigía → ${accion.name} ($por; $m)');
+      final automatico = ajustes.texto(EleccionMotor.claveAjuste) != 'caudal';
+      if (accion == AccionVigia.respaldo && !motorRespaldo && automatico) {
+        await EleccionMotor.pasarARespaldo(version: versionApp, por: 'El motor de Caudal gastaba demasiada memoria');
+        _aviso('El motor de sonido se estaba atascando: sigue con el de Android, sin cortar la música.');
+        await renovarMotores('respaldo: $por');
+      } else if (accion == AccionVigia.respaldo) {
+        // ya con el de respaldo (o elegido a mano el de Caudal): renovar de nuevo no arregla nada
+        _vigiaRendido = true;
+      } else {
+        await renovarMotores(por);
+      }
+    } catch (_) {
+    } finally {
+      _mirando = false;
+    }
+  }
+
   _Motor get _activo => _usaA ? _a : _b;
   _Motor get _otro => _usaA ? _b : _a;
   bool _usaA = true;
@@ -1075,6 +1216,11 @@ class Reproductor extends ChangeNotifier {
   /// Cancion <-> video sin perder el punto ni dejar silencio: lo que suena
   /// sigue hasta que el video tiene imagen en el mismo punto.
   Future<void> cambiarModo(String nuevo) async {
+    // el motor de respaldo de Android solo suena (sin imagen)
+    if (nuevo == 'video' && motorRespaldo) {
+      _aviso('En este teléfono el video está apagado: suena con el motor de respaldo (Ajustes › Motor de sonido).');
+      return;
+    }
     if (nuevo == modo || actual == null) {
       modo = nuevo;
       notifyListeners();
@@ -1109,8 +1255,13 @@ class Reproductor extends ChangeNotifier {
   // ------------------------------------------------------------ carga
 
   /// Cuantas veces se pidio un enlace nuevo para la pista actual (ver [_alError]).
-  int _reintentos = 0;
-  Duration _reintentoEn = Duration.zero;
+  /// El freno de las recargas (enlace vencido, red caída, atasco, corte): ver guarda_recargas.dart.
+  final GuardaRecargas _guarda = GuardaRecargas();
+
+  /// Para las pruebas y el informe: cuántas veces se recargó la canción que suena.
+  int get recargasCancion => _guarda.recargasCancion;
+
+  String _claveGuarda(Json p) => '${p['clave'] ?? p['video_id'] ?? ''}';
 
   Future<void> _cargar(Json pista, {Duration inicio = Duration.zero, bool pausado = false,
       bool mismo = false, bool forzarStream = false, int intento = 0}) async {
@@ -1138,7 +1289,8 @@ class Reproductor extends ChangeNotifier {
     }
     final cambio = !identical(pista, actual) || !mismo;
     actual = pista;
-    if (intento == 0) _reintentos = 0;
+    // otra canción, o la misma elegida otra vez: su freno de recargas empieza de cero
+    if (intento == 0 && !mismo) _guarda.nuevaCancion(_claveGuarda(pista), forzar: true);
     if (cambio) {
       _escuchaContada = false;
       _segmentos = [];
@@ -1400,6 +1552,8 @@ class Reproductor extends ChangeNotifier {
     // la logica (saltos, fundidos, escucha contada) mira cada aviso; la
     // pantalla solo se entera cada ~200 ms (1 s en segundo plano)
     _ponerPosicion(p);
+    // si tras una recarga suena bien un rato, el freno da otra tanda de margen
+    if (estado == EstadoRepro.sonando) _guarda.sonando(p);
     final seg = p.inMilliseconds / 1000.0;
     for (final s in _segmentos) {
       if (seg >= s.$1 && seg < s.$2 - 0.5) {
@@ -1575,44 +1729,56 @@ class Reproductor extends ChangeNotifier {
         }
         if (pista != null && identical(pista, actual)) {
           await _cargar(pista, inicio: posicion.value, mismo: true,
-              pausado: estado == EstadoRepro.pausa, intento: _reintentos);
+              pausado: estado == EstadoRepro.pausa, intento: max(1, _guarda.tanda));
         }
       }());
       return;
     }
     if (e.toLowerCase().contains('filter')) return;
-    if (pista == null || m.fuente!.local) return;
-    // YouTube a veces da un enlace que luego no abre: se pide otro, con otro
-    // cliente, sin perder el punto. Si tampoco abre, se avisa y se sigue.
+    // Antes un archivo descargado que fallaba se quedaba «cargando» para siempre: ahora pasa
+    // por el mismo freno y se reintenta por internet (la recarga va con forzarStream).
+    if (pista == null) return;
+    _recargar(pista, motivo: e);
+  }
+
+  /// La única puerta para volver a abrir la canción que falló (error del motor, atasco, corte):
+  /// el freno decide si se reintenta (pidiendo otro enlace, con otro cliente, sin perder el
+  /// punto), si se pasa a la siguiente o si se para todo porque está fallando demasiado.
+  void _recargar(Json pista, {required String motivo}) {
     final vid = '${pista['video_id'] ?? ''}';
-    // si sonó bien un buen rato desde el último reintento, el contador vuelve a cero
-    if (_reintentos > 0 && posicion.value > _reintentoEn + const Duration(seconds: 20)) {
-      _reintentos = 0;
-    }
-    if (vid.isNotEmpty && _reintentos < 3) {
-      _reintentos++;
-      _reintentoEn = posicion.value;
-      streams.olvidar(vid);
-      final gen0 = _gen;
-      final inicio0 = posicion.value;
-      final pausado0 = estado == EstadoRepro.pausa;
-      final n = _reintentos;
-      _fijarEstado(EstadoRepro.cargando);
-      Timer(Duration(milliseconds: 700 * n), () {
-        if (gen0 == _gen && identical(pista, actual)) {
-          unawaited(_cargar(pista, inicio: inicio0, mismo: true, forzarStream: true,
-              pausado: pausado0, intento: n));
+    final d = vid.isEmpty ? const DecisionRecarga(Recarga.saltar) : _guarda.decidir(_claveGuarda(pista));
+    debugPrint('Caudal: fallo «${motivo.length > 80 ? motivo.substring(0, 80) : motivo}» → $d');
+    _atasco?.cancel();
+    _atasco = null;
+    switch (d.accion) {
+      case Recarga.reintentar:
+        streams.olvidar(vid);
+        final gen0 = _gen;
+        final inicio0 = posicion.value;
+        final pausado0 = estado == EstadoRepro.pausa;
+        _fijarEstado(EstadoRepro.cargando);
+        Timer(d.espera, () {
+          if (gen0 == _gen && identical(pista, actual)) {
+            unawaited(_cargar(pista, inicio: inicio0, mismo: true, forzarStream: true,
+                pausado: pausado0, intento: d.intento));
+          }
+        });
+      case Recarga.saltar:
+        unawaited(_apagar(_activo));
+        _fijarEstado(EstadoRepro.parado);
+        _aviso('No se pudo reproducir esta canción. Pasamos a la siguiente.');
+        final gen = _gen;
+        if (proximas.isNotEmpty || pos + 1 < secuencia.length) {
+          Timer(const Duration(milliseconds: 1500), () {
+            if (gen == _gen) siguiente();
+          });
         }
-      });
-      return;
-    }
-    _fijarEstado(EstadoRepro.parado);
-    _aviso('No se pudo reproducir esta canción. Pasamos a la siguiente.');
-    final gen = _gen;
-    if (proximas.isNotEmpty || pos + 1 < secuencia.length) {
-      Timer(const Duration(milliseconds: 1500), () {
-        if (gen == _gen) siguiente();
-      });
+      case Recarga.frenar:
+        // muchas recargas en un minuto: algo va mal con la red o con YouTube. Insistir solo
+        // gastaría batería y memoria; se para y la persona decide cuándo seguir.
+        unawaited(_apagar(_activo));
+        _fijarEstado(EstadoRepro.parado);
+        _aviso('La conexión está fallando mucho. Se detuvo la música; toca reproducir para seguir.');
     }
   }
 
@@ -1948,9 +2114,10 @@ class Reproductor extends ChangeNotifier {
   Future<void> dispose() async {
     _relojApagado?.cancel();
     _revivir?.cancel();
+    _relojVigia?.cancel();
     await guardarSesion();
-    await _a.player.dispose();
-    await _b.player.dispose();
+    await _a.cerrar();
+    await _b.cerrar();
     super.dispose();
   }
 }
