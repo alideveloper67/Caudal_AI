@@ -14,6 +14,7 @@ import '../../nucleo/ritmo_fondo.dart';
 import '../../reproduccion/frenos.dart';
 import '../../reproduccion/reproductor.dart';
 import '../reproductor/fondo_ambiente.dart';
+import '../reproductor/letra_aspecto.dart';
 import '../reproductor/linea_karaoke.dart';
 import '../reproductor/mascota_vida.dart';
 import '../reproductor/paleta_portada.dart';
@@ -272,13 +273,13 @@ class _KaraokePaginaState extends State<KaraokePagina> {
             final d = _actual < 0 ? i + 1 : (i - _actual);
             final esta = d == 0;
             final texto = _ls[i].$2.trim().isEmpty ? '♪' : _ls[i].$2;
-            final estilo = TextStyle(
+            final estilo = LetraAspecto.actual.value.conFuente(TextStyle(
               fontSize: esta ? grande : grande * 0.72,
               fontWeight: FontWeight.w900,
               height: 1.2,
               letterSpacing: -0.4,
               color: Colors.white,
-            );
+            ));
             final opacidad = esta ? 1.0 : (d.abs() == 1 ? 0.55 : (d.abs() == 2 ? 0.34 : 0.2));
             Widget linea;
             if (esta && texto != '♪') {

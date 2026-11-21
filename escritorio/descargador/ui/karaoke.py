@@ -15,6 +15,7 @@ Gasta poco: los relojes son hijos de la vista (el modo gamer en ahorro los detie
 import math
 import time
 
+import shiboken6
 from PySide6.QtCore import QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QPainter
 from PySide6.QtWidgets import QPushButton, QWidget
@@ -99,7 +100,12 @@ class MascotaCantante(QWidget):
         self.reloj = QTimer(self)
         self.reloj.timeout.connect(self._tic)
         self.reloj.setInterval(MS_MASCOTA)
-        self.ctx.reproductor.estado_cambio.connect(lambda _e: self._actualizar_estado())
+        # método ligado (no lambda): Qt lo desconecta solo cuando la mascota se destruye
+        self.ctx.reproductor.estado_cambio.connect(self._al_estado_reproductor)
+
+    def _al_estado_reproductor(self, _e=None):
+        if shiboken6.isValid(self):
+            self._actualizar_estado()
 
     def calcular_estado(self):
         """canta (hay voz ahora), tararea (tramo sin letra) o descansa (en pausa o sin música)."""
@@ -212,7 +218,15 @@ class PaginaKaraoke(VistaGrande):
         self.bt_efectos.clicked.connect(self._abrir_efectos)
         self.fila_cab.insertWidget(2, self.bt_efectos, 0, Qt.AlignVCenter)
         # el estado de la mascota sigue a la letra (cada línea nueva cambia entre cantar y tararear)
-        self.r.posicion_cambio.connect(lambda _s: self.mascota._actualizar_estado() if self.isVisible() else None)
+        # método ligado (no lambda): al destruirse la página Qt lo desconecta solo y no se llama
+        # sobre un objeto ya borrado («Internal C++ object (PaginaKaraoke) already deleted»)
+        self.r.posicion_cambio.connect(self._al_posicion)
+
+    def _al_posicion(self, _s=None):
+        if not shiboken6.isValid(self) or not shiboken6.isValid(self.mascota):
+            return
+        if self.isVisible():
+            self.mascota._actualizar_estado()
 
     def resizeEvent(self, e):
         super().resizeEvent(e)

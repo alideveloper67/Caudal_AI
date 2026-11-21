@@ -45,6 +45,7 @@ AJUSTES_COMUNES = (
     "preferir_descargado", "aleatorio", "repetir", "formato_audio", "bitrate_mp3", "tipo_descarga",
     "letras_auto", "descarga_inteligente", "descarga_inteligente_gb", "transicion_dj", "mezcla_dj",
     "mezcla_dj_seg", "mezcla_dj_graves", "apagado_suave",
+    "estilo_letra", "fuente_letra",      # cómo se ve la letra (mismas claves en Android)
 )
 # nunca salen del equipo: sesiones, secretos, cookies, rutas y avisos de una sola vez
 AJUSTES_FUERA = {

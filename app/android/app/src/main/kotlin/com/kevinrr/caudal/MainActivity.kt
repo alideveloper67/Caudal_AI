@@ -27,6 +27,8 @@ class MainActivity : AudioServiceActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         // antes que nada: si el arranque se congela, queda anotado donde (Vigilante.kt)
         Vigilante.iniciar(this)
+        // la traza de un fallo de Java/Kotlin queda guardada para el informe (Salidas.kt)
+        Salidas.instalarCapturaJava(this)
         super.onCreate(savedInstanceState)
 
         // permiso de notificaciones (avisos, mensajes, solicitudes): se pide una sola vez
@@ -75,6 +77,22 @@ class MainActivity : AudioServiceActivity() {
 
         // volumen maximo sin distorsion y aviso de cambio de salida (Sonido.kt)
         Sonido.registrar(flutterEngine, applicationContext)
+
+        // Estos canales existían desde la 2.7.0 pero nunca se conectaban (MissingPluginException en
+        // todos los teléfonos): modo coche, despertador y letra en la pantalla bloqueada. Cada uno
+        // por separado, para que si uno falla los demás sigan.
+        for (registrar in listOf<(FlutterEngine) -> Unit>(
+            { CocheBluetooth.registrar(it, applicationContext) },
+            { Despertador.registrar(it, applicationContext) },
+            { LetraPantallaBloqueo.registrar(it, applicationContext) },
+            // por qué se cerró Caudal la vez anterior (Salidas.kt)
+            { Salidas.registrar(it, applicationContext) },
+        )) {
+            try {
+                registrar(flutterEngine)
+            } catch (_: Exception) {
+            }
+        }
 
         // pantalla encendida mientras se ve el modo vinilo (FLAG_KEEP_SCREEN_ON)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "caudal/pantalla")

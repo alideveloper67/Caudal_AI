@@ -33,6 +33,12 @@ android {
         targetSdk = flutter.targetSdkVersion
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+        // un solo APK con los teléfonos de 64 y de 32 bits. Sin x86_64: algunos plugins traen sus
+        // librerías x86 pero el motor de Flutter no va para esa arquitectura en este APK, y un equipo
+        // x86 la elegiría y se cerraría al abrir (los Chromebook usan la de ARM sin problema).
+        ndk {
+            abiFilters += listOf("arm64-v8a", "armeabi-v7a")
+        }
     }
 
     // "directo": el APK que se reparte a mano y desde GitHub (se actualiza solo).
@@ -74,6 +80,14 @@ android {
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
+        }
+        // Un solo APK para todos los Android (arm64 y armv7): las librerías van comprimidas dentro
+        // del APK y Android las descomprime al instalar. Así el APK universal pesa casi lo mismo que
+        // el de una sola arquitectura (~120 MB en vez de ~230 MB).
+        jniLibs {
+            useLegacyPackaging = true
+            // abiFilters no alcanza a las librerías que traen los plugins: se quitan aquí las x86
+            excludes += listOf("lib/x86_64/**", "lib/x86/**")
         }
     }
 }

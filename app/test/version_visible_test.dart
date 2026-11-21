@@ -308,16 +308,12 @@ void main() {
   group('aviso de novedades al abrir', () {
     const titulo = 'ACTUALIZACIÓN GRANDE DE CAUDAL';
 
-    testWidgets('sale una sola vez por version y se guarda la vista', (t) async {
+    // desde la 2.7.5 no hay presentación de novedades al abrir (solo «Somos 100» y «Gracias, donador»)
+    testWidgets('ya no sale: solo se anota la versión como vista', (t) async {
       await _montar(t, const Size(360, 640), version: '2.6.0');
       await t.pump(const Duration(seconds: 3));
-      expect(find.text(titulo), findsOneWidget);
-      expect((await SharedPreferences.getInstance()).getString(claveNovedadesVistas), '2.6.0');
-
-      await t.tap(find.text('Saltar'));
-      await t.pump();
-      await t.pump(const Duration(seconds: 1));
       expect(find.text(titulo), findsNothing);
+      expect((await SharedPreferences.getInstance()).getString(claveNovedadesVistas), '2.6.0');
       expect(find.text('Inicio 0'), findsOneWidget);
     });
 
@@ -339,14 +335,10 @@ void main() {
       expect(find.text(titulo), findsNothing);
     });
 
-    testWidgets('no interrumpe la musica: sigue sonando debajo', (t) async {
+    testWidgets('la música sigue sonando al abrir una versión nueva', (t) async {
       final s = await _montar(t, const Size(360, 640), version: '2.6.0');
       await t.pump(const Duration(seconds: 3));
-      expect(find.text(titulo), findsOneWidget);
-      expect(s.reproductor.estado, EstadoRepro.sonando);
-      await t.tap(find.text('Saltar'));
-      await t.pump();
-      await t.pump(const Duration(seconds: 1));
+      expect(find.text(titulo), findsNothing);
       expect(s.reproductor.estado, EstadoRepro.sonando);
       expect(s.reproductor.actual, isNotNull);
     });

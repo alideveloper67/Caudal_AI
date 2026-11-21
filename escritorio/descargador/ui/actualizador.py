@@ -3,7 +3,7 @@
 
 from PySide6.QtCore import QThread, Qt, Signal
 from PySide6.QtWidgets import (QComboBox, QDialog, QHBoxLayout, QLabel, QProgressBar,
-                               QPushButton, QTextEdit, QVBoxLayout)
+                               QPushButton, QVBoxLayout)
 
 from .. import version
 from . import iconos
@@ -40,45 +40,34 @@ class Descarga(QThread):
 
 
 def mostrar_aviso(novedad, padre=None):
-    """Avisa de una versión nueva: con el aviso grande si la release lo pide
-    (notas que empiezan con `[grande]`), con el normal si no."""
-    if novedad.get("grande"):
-        from .novedades_grandes import crear_aviso
-        return crear_aviso(padre, novedad).exec()
+    """Avisa de una versión nueva, siempre con la ventanita sencilla: ya no hay «gran
+    actualización» ni presentación de novedades (aunque la release lleve `[grande]`)."""
     return DialogoActualizacion(novedad, padre).exec()
 
 
 class DialogoActualizacion(QDialog):
-    """Cuenta que hay version nueva y la instala si el usuario quiere."""
+    """Ventanita sencilla: hay versión nueva y se instala si la persona quiere (sin notas)."""
 
     def __init__(self, novedad, padre=None):
         super().__init__(padre)
         self.novedad = novedad
         self.descarga = None
 
-        self.setWindowTitle("Hay una version nueva")
+        self.setWindowTitle("Hay una versión nueva")
         self.setMinimumWidth(520)
 
         v = QVBoxLayout(self)
         v.setContentsMargins(24, 22, 24, 18)
         v.setSpacing(13)
 
-        titulo = QLabel(f"Caudal {novedad['version']} ya esta lista")
+        titulo = QLabel(f"Caudal {novedad['version']} ya está lista")
         titulo.setStyleSheet("font-size:19px;font-weight:700;letter-spacing:-0.3px;")
         v.addWidget(titulo)
 
-        sub = QLabel(f"Tienes la {version.VERSION}. La nueva se instala encima "
-                     "y conserva tus descargas y ajustes.")
+        sub = QLabel("Descárgala para tener las últimas mejoras y arreglos.")
         sub.setObjectName("ayuda")
         sub.setWordWrap(True)
         v.addWidget(sub)
-
-        if novedad.get("notas"):
-            notas = QTextEdit()
-            notas.setReadOnly(True)
-            notas.setPlainText(novedad["notas"][:2000])
-            notas.setFixedHeight(150)
-            v.addWidget(notas)
 
         self.barra = QProgressBar()
         self.barra.setRange(0, 100)
@@ -93,7 +82,7 @@ class DialogoActualizacion(QDialog):
 
         fila = QHBoxLayout()
         fila.addStretch(1)
-        self.bt_luego = QPushButton("Mas tarde")
+        self.bt_luego = QPushButton("Más tarde")
         self.bt_luego.clicked.connect(self.reject)
         fila.addWidget(self.bt_luego)
 

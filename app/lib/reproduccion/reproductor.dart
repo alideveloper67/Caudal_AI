@@ -91,9 +91,14 @@ class _Motor {
       'cache-secs': '60',
       'demuxer-readahead-secs': '30',
       // demuxer-max-bytes va segun lo que se abra (ver [_ajustarLectura])
-      'demuxer-max-back-bytes': '16MiB',
+      // lo ya oído que se guarda para retroceder: en el teléfono basta con menos (dos motores = el doble)
+      'demuxer-max-back-bytes': _filtrosMinimos ? '6MiB' : '16MiB',
       'cache-pause-initial': 'no',
       'cache-pause-wait': '1',
+      // si la conexión se cae (red dormida en segundo plano, cambio de wifi a datos, YouTube que
+      // corta), ffmpeg vuelve a conectar y sigue donde iba en vez de dar la canción por terminada
+      'stream-lavf-o': 'reconnect=1,reconnect_streamed=1,reconnect_on_network_error=1,reconnect_delay_max=8',
+      'network-timeout': '25',
       'ytdl': 'no',
       'audio-buffer': '0.3',
       // donde no hay limitador (iPhone) la subida de Volumen maximo va por el volumen de mpv
@@ -138,7 +143,7 @@ class _Motor {
     if (_lecturaVideo == video) return;
     _lecturaVideo = video;
     try {
-      await player.setProperty('demuxer-max-bytes', video ? '64MiB' : '16MiB');
+      await player.setProperty('demuxer-max-bytes', video ? (_filtrosMinimos ? '40MiB' : '64MiB') : '16MiB');
     } catch (_) {}
   }
 
@@ -1496,9 +1501,31 @@ class Reproductor extends ChangeNotifier {
     if (!_esActual(m)) return;
     if (esperando && estado == EstadoRepro.sonando) {
       _fijarEstado(EstadoRepro.cargando);
+      _vigilarAtasco(m);
     } else if (!esperando && estado == EstadoRepro.cargando) {
+      _atasco?.cancel();
+      _atasco = null;
       _fijarEstado(m.player.state.playing ? EstadoRepro.sonando : EstadoRepro.pausa);
     }
+  }
+
+  /// Si a mitad de una canción por internet se queda esperando datos demasiado tiempo (la
+  /// conexión murió sin avisar), se pide un enlace nuevo y se sigue en el mismo punto.
+  Timer? _atasco;
+  static const esperaAtasco = Duration(seconds: 18);
+
+  void _vigilarAtasco(_Motor m) {
+    _atasco?.cancel();
+    final f = m.fuente;
+    if (f == null || f.local) return;
+    final gen = _gen;
+    final pista = actual;
+    _atasco = Timer(esperaAtasco, () {
+      _atasco = null;
+      if (gen != _gen || !identical(pista, actual) || !_esActual(m) || estado != EstadoRepro.cargando) return;
+      debugPrint('Caudal: atascada ${esperaAtasco.inSeconds} s esperando datos; se pide otro enlace');
+      _alError(m, 'atasco de red');
+    });
   }
 
   void _alTerminar(_Motor m) {
@@ -1509,6 +1536,13 @@ class Reproductor extends ChangeNotifier {
     }
     if (_fundido != null && identical(m, _fundido!['saliente'])) return;
     if (!_esActual(m) || m.fuente == null) return;
+    // Una canción por internet que «termina» mucho antes de su duración no terminó: se cortó la
+    // conexión. Se retoma en el mismo punto con un enlace nuevo en vez de saltar a la siguiente.
+    if (esCorteDeRed(local: m.fuente!.local, posicion: posicion.value, duracion: duracion.value)) {
+      debugPrint('Caudal: la canción se cortó en ${posicion.value} de ${duracion.value}; se retoma');
+      _alError(m, 'corte de red antes del final');
+      return;
+    }
     if (actual != null) unawaited(_retomar.olvidar(_claveRetomar(actual!)).catchError((_) {}));
     if (_apagarAlFinal) {
       _apagarAlFinal = false;
@@ -1919,4 +1953,13 @@ class Reproductor extends ChangeNotifier {
     await _b.player.dispose();
     super.dispose();
   }
+}
+
+/// Si una canción que suena por internet acabó antes de tiempo (corte de conexión, no un final de
+/// verdad): le faltaban más de 8 s y más del 3 % de su duración.
+@visibleForTesting
+bool esCorteDeRed({required bool local, required Duration posicion, required Duration duracion}) {
+  if (local || duracion < const Duration(seconds: 30) || posicion <= Duration.zero) return false;
+  final falta = duracion - posicion;
+  return falta > const Duration(seconds: 8) && falta.inMilliseconds > duracion.inMilliseconds * 0.03;
 }

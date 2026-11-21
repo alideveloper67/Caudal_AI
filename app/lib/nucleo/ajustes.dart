@@ -30,6 +30,9 @@ class Ajustes extends ChangeNotifier {
     'crossfade': 0,
     'normalizar': true,
     'traducir_letra': true, // la traduccion bajo cada linea de la letra
+    // cómo se ve la letra (ui/reproductor/letra_aspecto.dart): clasica | nitida | neon | simple
+    'estilo_letra': 'clasica',
+    'fuente_letra': 'predeterminada', // la tipografía de la letra (LetraAspecto.fuentes)
     'acento': 'cian', // color de la app (ver Aspecto.acentos)
     'fondo': 'oscuro', // fondo de la app (ver Aspecto.fondos)
     // escenario animado de fondo del reproductor (ui/escenarios; '' = ninguno; solo con beneficios)

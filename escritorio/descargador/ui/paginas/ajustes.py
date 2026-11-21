@@ -5,6 +5,7 @@ import subprocess
 import sys
 
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel,
                                QLineEdit, QMessageBox, QPushButton, QSlider, QSpinBox, QVBoxLayout,
                                QWidget)
@@ -13,7 +14,7 @@ from ... import catalogo, mpv_carga, version
 from ...config import DEFECTOS, carpeta_datos, ruta_ffmpeg
 from ...hilos import en_segundo_plano
 from ...motor import formato_bytes
-from .. import iconos, imagenes
+from .. import iconos, imagenes, tipografia_letra
 from ..ajuste_aviso_errores import fila_aviso_errores, fila_logros
 from ..componentes import Pagina
 from ..donar import abrir_donar
@@ -22,6 +23,10 @@ from ..estilos import C
 NAVEGADORES = [("No usar cookies", "ninguno"), ("Chrome", "chrome"), ("Edge", "edge"),
                ("Firefox", "firefox"), ("Brave", "brave"), ("Opera", "opera"),
                ("Vivaldi", "vivaldi"), ("Chromium", "chromium")]
+ESTILOS_LETRA = [("Clásica — la de siempre", "clasica"),
+                 ("Nítida — con borde y sombra, se lee sobre cualquier fondo", "nitida"),
+                 ("Neón — brilla con el color de la app", "neon"),
+                 ("Simple — limpia y ligera", "simple")]
 REGIONES = [("Perú", "PE"), ("México", "MX"), ("Argentina", "AR"), ("Colombia", "CO"),
             ("Chile", "CL"), ("España", "ES"), ("Estados Unidos", "US"), ("Venezuela", "VE"),
             ("Ecuador", "EC"), ("Bolivia", "BO"), ("Uruguay", "UY"), ("Paraguay", "PY"),
@@ -346,6 +351,9 @@ class PaginaAjustes(Pagina):
                "(gasta menos internet y procesador).", self.escena_video)
         self.cuerpo.addWidget(s)
 
+        # ---------------- letra de las canciones
+        self._seccion_letra()
+
         # ---------------- ventana
         s = Seccion("Ventana y segundo plano")
         self.bandeja = _combo([("Preguntarme", "preguntar"),
@@ -596,6 +604,56 @@ class PaginaAjustes(Pagina):
         tarjeta = getattr(sec, "tarjeta_regalo", None)
         if tarjeta is not None and tarjeta.isVisible():
             self.ensureWidgetVisible(tarjeta, 0, 40)
+
+    def _seccion_letra(self):
+        """Estilo y tipo de letra de la letra de las canciones; se ven al momento."""
+        a = self.a
+        s = Seccion("Letra de las canciones")
+        self.estilo_letra = _combo(ESTILOS_LETRA, a["estilo_letra"], 420)
+        self._conectar(self.estilo_letra, "estilo_letra", self._aplicar_estilo_letra)
+        s.fila("Estilo de la letra", "Cómo se dibuja la letra en la escena de escritorio. "
+               "El cambio se ve al momento.", self.estilo_letra)
+        self.fuente_letra = QComboBox()
+        self.fuente_letra.setFixedWidth(260)
+        for i, (clave, (nombre, _archivos, _peso)) in enumerate(tipografia_letra.FUENTES.items()):
+            self.fuente_letra.addItem(nombre, clave)
+            fam = tipografia_letra.familia(clave)
+            # cada nombre escrito en su propia fuente (la predeterminada, en la de la app)
+            self.fuente_letra.setItemData(i, QFont(fam or "Segoe UI", 15), Qt.FontRole)
+        i = self.fuente_letra.findData(tipografia_letra.normalizar(a["fuente_letra"]))
+        self.fuente_letra.setCurrentIndex(i if i >= 0 else 0)
+        self._conectar(self.fuente_letra, "fuente_letra", self._aplicar_fuente_letra)
+        s.fila("Tipo de letra", "La tipografía de la letra en la escena, la letra en grande "
+               "y el karaoke.", self.fuente_letra)
+        self.vista_letra = QLabel("Así se ve tu letra")
+        self.vista_letra.setAlignment(Qt.AlignCenter)
+        self.vista_letra.setMinimumHeight(70)
+        s.v.addWidget(self.vista_letra)
+        self._pintar_vista_letra()
+        self.cuerpo.addWidget(s)
+
+    def _aplicar_estilo_letra(self):
+        from ..escena.letra import fijar_estilo_letra
+        fijar_estilo_letra(self.a["estilo_letra"])
+
+    def _aplicar_fuente_letra(self):
+        tipografia_letra.fijar(self.a["fuente_letra"])
+        self._pintar_vista_letra()
+
+    def _pintar_vista_letra(self):
+        """La vista previa «Así se ve tu letra», en la tipografía elegida."""
+        clave = tipografia_letra.normalizar(self.a["fuente_letra"])
+        fam = tipografia_letra.familia(clave)
+        if fam:
+            peso = tipografia_letra.FUENTES[clave][2]
+            grosor = 800 if peso == QFont.ExtraBold else 400
+            familia_css = f"'{fam}'"
+        else:
+            grosor = 800
+            familia_css = "'Segoe UI'"
+        # la hoja de estilo propia gana a la de la app (que fija la fuente de todo)
+        self.vista_letra.setStyleSheet(f"font-family:{familia_css};font-size:30px;"
+                                       f"font-weight:{grosor};font-style:normal;padding:8px 0 14px 0;")
 
     def _poner(self, clave, valor):
         self.a[clave] = valor

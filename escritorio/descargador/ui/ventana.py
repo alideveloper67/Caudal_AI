@@ -1321,33 +1321,21 @@ class Ventana(QWidget):
             self._avisar_novedades()
 
     def _avisar_novedades(self):
-        """Una sola vez por versión, y sin tocar la música."""
+        """Al abrir una versión nueva ya NO sale ninguna presentación de novedades (ni la grande
+        ni la de las mascotas): solo quedan «Somos 100» y «Gracias, donador». La versión se marca
+        como vista para que una presentación vieja no salga de golpe si algún día se reactiva."""
         if self.en_completa or self._saliendo:
             QTimer.singleShot(20000, self._avisar_novedades)
             return
-        from .novedades_grandes import mostrar_si_toca
+        self._aviso_grande = None
+        self._aviso_mascotas = None
         try:
-            self._aviso_grande = mostrar_si_toca(self)
+            from . import novedades_grandes, presentacion_mascotas
+            novedades_grandes.marcar_vista(self.ajustes)
+            presentacion_mascotas.marcar_vista(self.ajustes)
         except Exception:  # noqa: BLE001 - un aviso nunca debe romper la app
-            self._aviso_grande = None
-            return
-        if self._aviso_grande is not None:
-            self._grande_en_sesion = True
-            self._aviso_grande.finished.connect(self._tras_novedades)
-            return
-        # la presentación de la 2.4.2 (mascotitas y fondos): si en este arranque ya salió la
-        # de la edición grande, espera al siguiente para que no se encimen
-        from . import presentacion_mascotas
-        try:
-            otra = True if getattr(self, "_grande_en_sesion", False) else None
-            self._aviso_mascotas = presentacion_mascotas.mostrar_si_toca(self, otra)
-        except Exception:  # noqa: BLE001
-            self._aviso_mascotas = None
-            return
-        if self._aviso_mascotas is not None:
-            self._aviso_mascotas.finished.connect(self._tras_novedades)
-        else:
-            self._donador_al_final()        # no sale ningún aviso: ya no queda nada abierto
+            pass
+        self._donador_al_final()            # no sale ningún aviso: ya no queda nada abierto
 
     def _avisar_regalo(self):
         """El aviso único de los códigos de regalo: espera a que no haya otro aviso abierto."""

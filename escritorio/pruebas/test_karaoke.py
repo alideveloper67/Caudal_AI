@@ -341,3 +341,20 @@ def test_la_mascota_no_arrastra_estela(app, pagina):
     w = pagina
     abrir(app, w, 13.0)
     assert not w.mascota.datos.get("estela") and not w.mascota.datos.get("arcoiris")
+
+
+def test_senales_tras_destruir_la_pagina_no_fallan(app, monkeypatch):
+    """Informe real: una señal del reproductor llegaba a la PaginaKaraoke ya destruida
+    («Internal C++ object (PaginaKaraoke) already deleted»)."""
+    import shiboken6
+    from descargador.ui import karaoke as K
+    errores = []
+    monkeypatch.setattr(sys, "excepthook", lambda *a: errores.append(a))
+    ctx = _Ctx()
+    w = K.PaginaKaraoke(ctx)
+    w.resize(800, 500)
+    shiboken6.delete(w)
+    ctx.reproductor.mover(18.0)
+    ctx.reproductor.fijar("pausado")
+    app.processEvents()
+    assert errores == []

@@ -26,6 +26,8 @@ object Energia {
     @Synchronized
     fun mantener(contexto: Context, si: Boolean) {
         val app = contexto.applicationContext
+        // si la app muere mientras suena, el informe lo dirá (Salidas.kt)
+        Salidas.anotarSonando(app, si)
         if (si) {
             try {
                 if (cpu == null) {
@@ -86,6 +88,31 @@ object Energia {
         }
     }
 
+    /**
+     * La pregunta directa del sistema («¿Permitir que Caudal se ejecute siempre en segundo plano?»).
+     * Solo la versión directa lleva el permiso; sin él (o si el teléfono no la tiene) se abre el ajuste.
+     */
+    private fun pedirSinRestriccion(contexto: Context) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M && !sinRestriccion(contexto)) {
+            try {
+                val permiso = contexto.packageManager.checkPermission(
+                    android.Manifest.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS, contexto.packageName)
+                if (permiso == android.content.pm.PackageManager.PERMISSION_GRANTED) {
+                    val i = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS,
+                        Uri.parse("package:${contexto.packageName}"))
+                    i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                    contexto.startActivity(i)
+                    return
+                }
+            } catch (_: Exception) {
+            }
+        }
+        abrirAjusteBateria(contexto)
+    }
+
+    /** El fabricante, para dar los pasos de su menú (Samsung tiene además «Apps en suspensión»). */
+    private fun fabricante(): String = (Build.MANUFACTURER ?: "").lowercase()
+
     fun registrar(motor: FlutterEngine, contexto: Context) {
         val app = contexto.applicationContext
         MethodChannel(motor.dartExecutor.binaryMessenger, "caudal/energia").setMethodCallHandler { llamada, resultado ->
@@ -95,6 +122,11 @@ object Energia {
                     resultado.success(null)
                 }
                 "sinRestriccion" -> resultado.success(sinRestriccion(app))
+                "pedirSinRestriccion" -> {
+                    pedirSinRestriccion(app)
+                    resultado.success(null)
+                }
+                "fabricante" -> resultado.success(fabricante())
                 "abrirAjusteBateria" -> {
                     abrirAjusteBateria(app)
                     resultado.success(null)

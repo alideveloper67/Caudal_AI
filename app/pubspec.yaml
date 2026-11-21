@@ -1,7 +1,7 @@
 name: caudal
 description: "Descarga musica y videos desde su propio navegador"
 publish_to: 'none'
-version: 2.7.4+49
+version: 2.7.5+50
 
 environment:
   sdk: ^3.13.0
@@ -75,3 +75,33 @@ flutter:
     - assets/sonidos/
     # el sonido suave del despertador (si no hay musica ni internet al sonar)
     - assets/despertador/
+
+  # tipografías para la letra de las canciones (Ajustes › Letra; licencia OFL en assets/fuentes/OFL.txt)
+  fonts:
+    - family: Poppins
+      fonts:
+        - asset: assets/fuentes/Poppins-Bold.ttf
+          weight: 700
+        - asset: assets/fuentes/Poppins-ExtraBold.ttf
+          weight: 800
+    - family: BebasNeue
+      fonts:
+        - asset: assets/fuentes/BebasNeue-Regular.ttf
+    - family: Anton
+      fonts:
+        - asset: assets/fuentes/Anton-Regular.ttf
+    - family: Righteous
+      fonts:
+        - asset: assets/fuentes/Righteous-Regular.ttf
+    - family: DMSerifDisplay
+      fonts:
+        - asset: assets/fuentes/DMSerifDisplay-Regular.ttf
+    - family: Pacifico
+      fonts:
+        - asset: assets/fuentes/Pacifico-Regular.ttf
+    - family: Lobster
+      fonts:
+        - asset: assets/fuentes/Lobster-Regular.ttf
+    - family: Bangers
+      fonts:
+        - asset: assets/fuentes/Bangers-Regular.ttf

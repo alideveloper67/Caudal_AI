@@ -36,7 +36,7 @@ import '../reproductor/fondo_ambiente.dart';
 import '../reproductor/insignia_calidad.dart';
 import '../reproductor/paleta_portada.dart';
 import '../reproductor/personalizar_hoja.dart';
-import '../reproductor/letra_estilo.dart';
+import '../reproductor/letra_aspecto.dart';
 import '../reproductor/portada_deslizable.dart';
 import '../reproductor/tarjetas_compartir.dart';
 import '../reproductor/vinilo.dart';
@@ -1292,12 +1292,17 @@ class _VistaLetraState extends State<_VistaLetra> {
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context) => ValueListenableBuilder<LetraAspecto>(
+        valueListenable: LetraAspecto.actual,
+        builder: (context, aspecto, _) => _construir(context, aspecto),
+      );
+
+  Widget _construir(BuildContext context, LetraAspecto aspecto) {
     if (_ls.isEmpty) {
       final estilo = TextStyle(fontSize: widget.compacta ? 18 : 22, fontWeight: FontWeight.w800, height: 1.5);
       if (_trad.isEmpty) {
         return SingleChildScrollView(
-            child: TextoLetraResaltado(texto: '${widget.letra['texto'] ?? ''}', estilo: estilo, colorReposo: Colors.white));
+            child: TextoLetraPlano(aspecto: aspecto, texto: '${widget.letra['texto'] ?? ''}', estilo: estilo));
       }
       final textos = _textos;
       return SingleChildScrollView(
@@ -1306,7 +1311,7 @@ class _VistaLetraState extends State<_VistaLetra> {
             Padding(
               padding: const EdgeInsets.only(bottom: 4),
               child: _conTraduccion(
-                  TextoLetraResaltado(texto: textos[i], estilo: estilo, colorReposo: Colors.white), i, Colors.white),
+                  TextoLetraPlano(aspecto: aspecto, texto: textos[i], estilo: estilo), i, Colors.white),
             ),
         ]),
       );
@@ -1336,21 +1341,12 @@ class _VistaLetraState extends State<_VistaLetra> {
             final inicio = _ls[i].$1;
             final siguiente = i + 1 < _ls.length ? _ls[i + 1].$1 : inicio + 5000;
             final fin = inicio + (siguiente - inicio).clamp(600, 1500 + texto.length * 85);
-            linea = LineaActivaKaraoke(texto: texto, estilo: estilo, inicio: inicio, fin: fin, r: _r!,
-                acento: widget.acento);
+            linea = LineaLetraActiva(aspecto: aspecto, texto: texto, estilo: estilo, inicio: inicio, fin: fin,
+                r: _r!, porVenir: _porVenir, acento: widget.acento);
           } else {
             // el color de cada estado (cantada / por venir / activa) se anima como antes, 260 ms
-            linea = TweenAnimationBuilder<Color?>(
-              tween: ColorTween(end: estilo.color),
-              duration: const Duration(milliseconds: 260),
-              builder: (_, color, _) => TextoLetraResaltado(
-                texto: texto,
-                estilo: estilo,
-                activo: estado == 0,
-                acento: widget.acento,
-                colorReposo: color,
-              ),
-            );
+            linea = LineaLetra(aspecto: aspecto, texto: texto, estilo: estilo, activa: estado == 0,
+                acento: widget.acento);
           }
           return GestureDetector(
             key: _llaves[i],

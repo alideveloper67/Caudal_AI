@@ -17,7 +17,6 @@ import '../cumpleanos.dart';
 import '../../nucleo/cumpleanos.dart';
 import '../plataforma.dart';
 import '../servicios.dart';
-import '../novedades_grandes.dart';
 import '../tema.dart';
 import '../../nucleo/fondo_app.dart';
 import '../../nucleo/mascota_app.dart';
@@ -29,6 +28,8 @@ import 'ajuste_aviso_errores.dart';
 import 'aspecto_pagina.dart';
 import 'fondo_pagina.dart';
 import 'gustos_pagina.dart';
+import 'letra_ajuste_pagina.dart';
+import '../reproductor/letra_aspecto.dart';
 import 'bateria_ajuste.dart';
 import 'copia_seguridad_pagina.dart';
 import 'despertador_ajuste.dart';
@@ -293,6 +294,17 @@ class _AjustesPaginaState extends State<AjustesPagina> {
           },
         ),
 
+        ValueListenableBuilder<LetraAspecto>(
+          valueListenable: LetraAspecto.actual,
+          builder: (context, la, _) => ListTile(
+            leading: Icon(Icons.lyrics_outlined, color: C.acento),
+            title: const Text('Letra de las canciones'),
+            subtitle: Text('Estilo y tipo de letra · ${LetraAjustePagina.resumen(la)}', style: estiloSecundario),
+            trailing: const Icon(Icons.chevron_right_rounded, color: C.texto3),
+            onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LetraAjustePagina())),
+          ),
+        ),
+
         ListTile(
           leading: Icon(Icons.favorite_border_rounded, color: C.acento),
           title: const Text('Mis artistas favoritos'),
@@ -549,14 +561,14 @@ class _AjustesPaginaState extends State<AjustesPagina> {
 ///
 /// Si la release lleva `[grande]` al inicio de sus notas, en vez de esta hoja
 /// sale la pantalla grande de novedades con «Actualizar ahora».
-Future<void> mostrarActualizacion(BuildContext context, Novedad n) => n.esGrande
-    ? NovedadesGrandes.mostrar(context, actualizacion: n)
-    : showModalBottomSheet<void>(
-        context: context,
-        useRootNavigator: true,
-        isScrollControlled: true,
-        builder: (_) => _HojaVersion(n: n),
-      );
+/// Siempre la hoja sencilla «hay versión nueva · Instalar ahora», sin pantalla de novedades
+/// (decisión del dueño, 21/11/2026: las actualizaciones no se anuncian, solo se descargan).
+Future<void> mostrarActualizacion(BuildContext context, Novedad n) => showModalBottomSheet<void>(
+      context: context,
+      useRootNavigator: true,
+      isScrollControlled: true,
+      builder: (_) => _HojaVersion(n: n),
+    );
 
 class _HojaVersion extends StatefulWidget {
   const _HojaVersion({required this.n});
@@ -630,16 +642,8 @@ class _HojaVersionState extends State<_HojaVersion> {
           const SizedBox(height: 4),
           Text(instalable && n.peso > 0 ? 'Tienes la $versionApp · ${formatoBytes(n.peso)}' : 'Tienes la $versionApp',
               style: estiloSecundario),
-          if (n.notas.isNotEmpty) ...[
-            const SizedBox(height: 14),
-            Container(
-              constraints: const BoxConstraints(maxHeight: 200),
-              width: double.infinity,
-              padding: const EdgeInsets.all(14),
-              decoration: BoxDecoration(color: C.superficie3, borderRadius: BorderRadius.circular(10)),
-              child: SingleChildScrollView(child: Text(n.notas, style: const TextStyle(color: C.texto2, height: 1.5))),
-            ),
-          ],
+          const SizedBox(height: 10),
+          const Text('Descárgala para tener las últimas mejoras y arreglos.', style: TextStyle(color: C.texto2, height: 1.4)),
           if (_bajando) ...[
             const SizedBox(height: 16),
             LinearProgressIndicator(value: _progreso / 100, color: C.acento, backgroundColor: C.superficie3),

@@ -444,19 +444,27 @@ def test_las_tarjetas_aparecen_una_a_una(app):
     d.reject()
 
 
-def test_aviso_de_actualizacion_grande_sustituye_al_normal(app, monkeypatch):
-    from descargador.ui import actualizador, novedades_grandes
+def test_aviso_de_actualizacion_siempre_es_la_ventanita_sencilla(app, monkeypatch):
+    """Ya no hay «gran actualización»: aunque la release lleve [grande], sale la ventanita normal,
+    sin notas: «Caudal X ya está lista · Descárgala…» con «Instalar ahora» / «Más tarde»."""
+    from PySide6.QtWidgets import QLabel, QPushButton, QTextEdit
+    from descargador.ui import actualizador
     llamados = []
-    from descargador.ui import presentacion_grande
-    for clase in (novedades_grandes.NovedadesGrandes, presentacion_grande.PresentacionGrande):
-        monkeypatch.setattr(clase, "exec", lambda self: llamados.append("grande") or 0)
     monkeypatch.setattr(actualizador.DialogoActualizacion, "exec",
                         lambda self: llamados.append("normal") or 0)
     base = {"version": "9.9.9", "notas": "x", "instalador": "u", "apk": "", "pagina": ""}
     actualizador.mostrar_aviso({**base, "grande": True})
     actualizador.mostrar_aviso({**base, "grande": False})
     actualizador.mostrar_aviso(base)
-    assert llamados == ["grande", "normal", "normal"]
+    assert llamados == ["normal", "normal", "normal"]
+    d = actualizador.DialogoActualizacion({**base, "notas": "Arreglos varios"})
+    textos = [e.text() for e in d.findChildren(QLabel)]
+    assert "Caudal 9.9.9 ya está lista" in textos
+    assert "Descárgala para tener las últimas mejoras y arreglos." in textos
+    assert not d.findChildren(QTextEdit)                       # sin listar las notas
+    botones = [b.text().strip() for b in d.findChildren(QPushButton)]
+    assert "Instalar ahora" in botones and "Más tarde" in botones
+    d.deleteLater()
 
 
 # ================================================================ ventana: versión y Mezclador
@@ -488,16 +496,13 @@ def test_version_a_la_vista_y_aviso_sin_cortar_la_musica(app, datos_aislados, mo
     pausas = []
     monkeypatch.setattr(ctx.reproductor, "pausar", lambda: pausas.append(1))
     monkeypatch.setattr(ctx.reproductor, "detener", lambda: pausas.append(2))
+    # al abrir una versión nueva ya no sale ninguna presentación de novedades; queda marcada como vista
     v._avisar_novedades()
-    from descargador.ui import presentacion_grande
-    assert isinstance(v._aviso_grande, (novedades_grandes.NovedadesGrandes,
-                                        presentacion_grande.PresentacionGrande))
+    assert v._aviso_grande is None and v._aviso_mascotas is None
     assert ctx.ajustes["version_novedades_vista"] == version.VERSION
-    v._aviso_grande.reject()
-    app.processEvents()
-    assert v._aviso_grande is None
+    assert not novedades_grandes.debe_mostrarse(ctx.ajustes)
     v._avisar_novedades()
-    assert v._aviso_grande is None                                  # ya no sale
+    assert v._aviso_grande is None                                  # ni la segunda vez
     assert pausas == []
     v.close()
 

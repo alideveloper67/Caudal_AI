@@ -13,6 +13,7 @@ import 'package:share_plus/share_plus.dart';
 
 import 'nucleo/ajustes.dart';
 import 'nucleo/aviso_errores.dart';
+import 'nucleo/salidas_android.dart';
 import 'nucleo/avisos_dispositivo.dart';
 import 'nucleo/cumpleanos.dart';
 import 'nucleo/avisos.dart';
@@ -46,8 +47,10 @@ import 'nucleo/mascota_app.dart';
 import 'nucleo/gamer_control.dart';
 import 'nucleo/social.dart';
 import 'ui/despertador_enganche.dart';
+import 'ui/aviso_bateria.dart';
 import 'ui/fondo_capa.dart';
 import 'ui/logros_aviso.dart';
+import 'ui/reproductor/letra_aspecto.dart';
 import 'ui/novedades/presentacion_100.dart';
 import 'ui/novedades/presentacion_donadores.dart';
 import 'ui/paginas/acceso.dart';
@@ -71,6 +74,8 @@ Future<void> main() => AvisoErrores.enZona(() async {
   };
   // el aviso de errores encadena los ganchos de arriba (no los quita)
   AvisoErrores.instalar();
+  // por qué se cerró Caudal la vez anterior (fallo nativo, memoria, ahorro de batería...): al informe
+  unawaited(Future.delayed(const Duration(seconds: 12), SalidasAndroid.revisar));
   MediaKit.ensureInitialized();
   // primer plano / segundo plano: los sondeos y la posicion se frenan al salir
   VidaApp.iniciar();
@@ -260,6 +265,8 @@ class _CaudalAppState extends State<CaudalApp> {
 
     var ligeroAntes = ajustes.sino('modo_ligero');
     aplicarLigero();
+    // el estilo y el tipo de letra de la letra de las canciones (Ajustes › Letra)
+    LetraAspecto.escuchar(ajustes);
     ajustes.addListener(() {
       final ahora = ajustes.sino('modo_ligero');
       if (ahora == ligeroAntes) return;
@@ -370,6 +377,8 @@ class _CaudalAppState extends State<CaudalApp> {
     unawaited(_buscarVersion()); // «Somos 100» (si toca) y luego las novedades de la versión
     unawaited(_buscarAvisos());
     unawaited(_pedirNotificaciones());
+    // la primera vez que suena un rato: que el ahorro de batería no corte la música (Android)
+    AvisoBateria.enganchar(s.reproductor, () => _navegador.currentContext);
     // aviso con la app cerrada: se registra el token de este teléfono en el servidor
     if (c.sesion != null) unawaited(AvisosDispositivo.registrar(c.sesion!));
     // logros: el vigía cuenta lo que suena y avisa al conseguir uno (uno por cuenta)

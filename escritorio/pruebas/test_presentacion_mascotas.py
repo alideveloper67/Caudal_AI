@@ -110,50 +110,36 @@ def test_si_ya_sale_la_grande_espera_al_siguiente_arranque(app, monkeypatch, pad
     d.reject()
 
 
-def test_ventana_no_encima_las_dos_presentaciones(app, monkeypatch, padre):
-    """La ventana real: con la grande pendiente sale solo la grande; en el arranque siguiente, la nuestra."""
+def test_ventana_ya_no_presenta_novedades_al_abrir(app, monkeypatch, padre):
+    """Al abrir una versión nueva no sale ni la presentación grande ni la de las mascotas (solo quedan
+    «Somos 100» y «Gracias, donador»): las dos se marcan como vistas para que no salgan de golpe."""
     from descargador import version
     from descargador.ui import novedades_grandes as ng
     from descargador.ui import presentacion_mascotas as pm
-    from descargador.ui.presentacion_grande import PresentacionGrande
     from descargador.ui.ventana import Ventana
     monkeypatch.setattr(version, "VERSION", "2.4.2")
 
     class Falsa(QWidget):                                  # lo mínimo de Ventana que usa _avisar_novedades
         def __init__(self, w):
             super().__init__()
-            self.resize(1360, 760)
             self.en_completa = False
             self._saliendo = False
             self._aviso_grande = None
             self._aviso_mascotas = None
-            self._grande_en_sesion = False
-            self._novedad_pendiente = None
             self.ajustes = w.ajustes
-            self.navegar = w.navegar
+            self.donador = 0
 
-    for nombre in ("_avisar_novedades", "_tras_novedades"):
-        setattr(Falsa, nombre, getattr(Ventana, nombre))
-    monkeypatch.setattr(ng, "crear_aviso", lambda v, novedad=None: PresentacionGrande(v))
-    # primer arranque: la grande pendiente (nunca vista)
-    v = Falsa(padre)
-    v._avisar_novedades()
-    assert isinstance(v._aviso_grande, PresentacionGrande) and v._aviso_mascotas is None
-    v._aviso_grande.reject()
-    app.processEvents()
-    v._avisar_novedades()                                  # en la misma sesión tampoco se encima
-    assert v._aviso_mascotas is None and v._aviso_grande is None
-    # siguiente arranque: ahora sí sale la nuestra
-    v2 = Falsa(padre)
-    v2._avisar_novedades()
-    assert v2._aviso_grande is None and isinstance(v2._aviso_mascotas, pm.PresentacionMascotas)
-    v2._aviso_mascotas.reject()
-    app.processEvents()
-    assert v2._aviso_mascotas is None
-    # y ya no vuelve
-    v3 = Falsa(padre)
-    v3._avisar_novedades()
-    assert v3._aviso_grande is None and v3._aviso_mascotas is None
+        def _donador_al_final(self):
+            self.donador += 1
+
+    Falsa._avisar_novedades = Ventana._avisar_novedades
+    for _ in range(2):                                     # ni en el primer arranque ni en los siguientes
+        v = Falsa(padre)
+        v._avisar_novedades()
+        assert v._aviso_grande is None and v._aviso_mascotas is None
+        assert v.donador == 1                              # «Gracias, donador» sigue pudiendo salir
+    assert not ng.debe_mostrarse(padre.ajustes) and not ng.toca_presentacion(padre.ajustes)
+    assert not pm.debe_mostrarse(padre.ajustes)
 
 
 # ================================================================ qué enseña

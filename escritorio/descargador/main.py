@@ -156,6 +156,11 @@ def main():
         revertir_aspecto_si_hace_falta(ajustes)      # un tema de donadores ya vencido vuelve a lo normal
         aplicar_aspecto(ajustes["acento"], ajustes["fondo"])
         catalogo.fijar_region(ajustes["region"])
+        # cómo se ve la letra de las canciones (estilo y tipo de letra elegidos en Ajustes)
+        from descargador.ui import tipografia_letra
+        from descargador.ui.escena.letra import fijar_estilo_letra
+        fijar_estilo_letra(ajustes["estilo_letra"])
+        tipografia_letra.fijar(ajustes["fuente_letra"])
         historial = Historial()
         coleccion = Coleccion()
         # cuenta nueva (o que aún no eligió): «¿Qué artistas te gustan?» antes de la pantalla principal

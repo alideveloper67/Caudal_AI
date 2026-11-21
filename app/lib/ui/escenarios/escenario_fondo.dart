@@ -31,6 +31,10 @@ class EscenarioFondo extends StatefulWidget {
     final codec = await ui.instantiateImageCodec(datos.buffer.asUint8List());
     try {
       final cuadro = await codec.getNextFrame();
+      // solo se guardan las dos últimas: cada imagen decodificada son varios MB
+      while (_listas.length >= 2) {
+        _listas.remove(_listas.keys.first);
+      }
       return _listas[def.asset] = cuadro.image;
     } finally {
       codec.dispose();

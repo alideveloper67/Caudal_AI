@@ -247,18 +247,13 @@ void main() {
   });
 
   group('al abrir la app', () {
-    testWidgets('a quien ya vio las novedades grandes le sale una vez y se anota', (t) async {
+    // desde la 2.7.5 no sale al abrir (las únicas presentaciones son «Somos 100» y «Gracias, donador»)
+    testWidgets('ya no sale al abrir, se anota como vista y la música sigue', (t) async {
       final s = await _montarApp(t, version: '2.3.2', prefs: {claveNovedadesVistas: '2.3.0'});
       await t.pump(const Duration(seconds: 3));
-      expect(find.text(_titulos[0]), findsOneWidget);
+      expect(find.text(_titulos[0]), findsNothing);
       expect(find.text('ACTUALIZACIÓN GRANDE DE CAUDAL'), findsNothing);
       expect((await SharedPreferences.getInstance()).getString(clavePresentacionMascotasVista), '2.3.2');
-      // no pausa la música
-      expect(s.reproductor.estado, EstadoRepro.sonando);
-      await t.tap(find.text('Saltar'));
-      await t.pump();
-      await t.pump(const Duration(seconds: 1));
-      expect(find.text(_titulos[0]), findsNothing);
       expect(find.text('Inicio 0'), findsOneWidget);
       expect(s.reproductor.estado, EstadoRepro.sonando);
     });
@@ -276,19 +271,18 @@ void main() {
       expect(find.text(_titulos[0]), findsNothing);
     });
 
-    testWidgets('si tocan las novedades grandes, sale en el arranque siguiente', (t) async {
+    testWidgets('tampoco salen las novedades grandes, ni en el arranque siguiente', (t) async {
       await _montarApp(t, version: '2.6.2');
       await t.pump(const Duration(seconds: 3));
-      expect(find.text('ACTUALIZACIÓN GRANDE DE CAUDAL'), findsOneWidget);
+      expect(find.text('ACTUALIZACIÓN GRANDE DE CAUDAL'), findsNothing);
       expect(find.text(_titulos[0]), findsNothing);
       final p = await SharedPreferences.getInstance();
-      expect(p.getString(clavePresentacionMascotasVista), isNull);
+      expect(p.getString(claveNovedadesVistas), '2.6.2');
 
-      // el siguiente arranque, con lo que quedó guardado
       await _montarApp(t, version: '2.6.2', prefs: {claveNovedadesVistas: p.getString(claveNovedadesVistas)!});
       await t.pump(const Duration(seconds: 3));
       expect(find.text('ACTUALIZACIÓN GRANDE DE CAUDAL'), findsNothing);
-      expect(find.text(_titulos[0]), findsOneWidget);
+      expect(find.text(_titulos[0]), findsNothing);
     });
   });
 }

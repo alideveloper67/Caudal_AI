@@ -6,12 +6,14 @@ con acento de color. Todo se dibuja con QPainter sobre fondo transparente."""
 import bisect
 import math
 import time
+import weakref
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QTimer
 from PySide6.QtGui import (QBrush, QColor, QFont, QFontMetrics, QFontMetricsF, QLinearGradient, QPainter,
                            QPainterPath, QPen)
 from PySide6.QtWidgets import QWidget
 
+from .. import tipografia_letra
 from ..componentes import a_la_vista
 from .estilo import (BRILLO, DOMINANTE, SEGUNDO, TEXTO, TEXTO_2, TEXTO_3, acento_legible, fuente,
                      fuente_impacto, preparar_transparente)
@@ -37,6 +39,39 @@ GAP_TRADUCCION = 0.30         # separación entre el bloque principal y la tradu
 ALFA_TRADUCCION = 200         # alfa del texto traducido (de 0 a 255)
 DURACION_TRADUCCION = 0.35    # s del fundido de la traducción al cambiar de línea
 ALTO_LINEA_TRADUCCION = 1.4   # alto de la fila de la traducción, en veces su tamaño de letra
+
+# Estilo con que se pinta la letra (ajuste «estilo_letra», mismas claves que en Android):
+#   "clasica": texto relleno, sin borde (la de siempre, por defecto)
+#   "nitida":  sombra suave, borde oscuro, brillo y degradado
+#   "neon":    relleno blanco y resplandor fuerte del acento en la palabra que suena; las demás tenues
+#   "simple":  texto blanco plano; lo que no suena al 45 % de opacidad
+ESTILOS_LETRA = ("clasica", "nitida", "neon", "simple")
+OPACIDAD_TENUE_NEON = 0.5     # palabras que no suenan en el estilo neón
+OPACIDAD_TENUE_SIMPLE = 0.45  # palabras que no suenan en el estilo simple
+ESTILO_POR_DEFECTO = "clasica"
+_estilo_actual = ESTILO_POR_DEFECTO
+_vivas = weakref.WeakSet()    # letras creadas: se repintan al cambiar el estilo
+
+
+def normalizar_estilo(estilo):
+    """El estilo pedido si es válido; si no, el clásico."""
+    return estilo if estilo in ESTILOS_LETRA else ESTILO_POR_DEFECTO
+
+
+def estilo_letra():
+    """Estilo con que se pintan ahora las letras."""
+    return _estilo_actual
+
+
+def fijar_estilo_letra(estilo):
+    """Cambia el estilo de todas las letras (las visibles se repintan al momento)."""
+    global _estilo_actual
+    _estilo_actual = normalizar_estilo(estilo)
+    for w in list(_vivas):
+        try:
+            w.poner_estilo(_estilo_actual)
+        except RuntimeError:          # el widget ya se destruyó
+            pass
 
 
 # --------------------------------------------------------------------------- funciones puras
@@ -145,6 +180,22 @@ def _texto_legible(p, rect, flags, texto, color, tam):
     p.drawText(rect, flags, texto)
 
 
+def _pintar_palabra_neon(p, it, tam, color_acento, sonando):
+    """Neón: sin borde oscuro; la palabra que suena con un resplandor fuerte del acento."""
+    k = max(0.5, tam / 60.0)
+    trazo = it.trazo
+    if sonando:
+        col = QColor(color_acento)
+        p.setBrush(Qt.NoBrush)
+        for ancho, a in ((26, 40), (15, 75), (7, 130)):
+            col.setAlpha(a)
+            p.setPen(QPen(col, ancho * k, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+            p.drawPath(trazo)
+    p.setPen(Qt.NoPen)
+    p.setBrush(QColor(255, 255, 255))
+    p.drawPath(trazo)
+
+
 def _ease_out_back(t):
     t = min(1.0, max(0.0, t))
     c1 = 1.70158
@@ -206,6 +257,9 @@ class LetraCinetica(QWidget):
         self._timer = QTimer(self)
         self._timer.setInterval(33)     # 30 fps: de sobra para la entrada de las palabras
         self._timer.timeout.connect(self._tic)
+        self._estilo = _estilo_actual
+        _vivas.add(self)
+        tipografia_letra.suscribir(self)
 
     def sizeHint(self):
         return QSize(620, 420)
@@ -256,6 +310,41 @@ class LetraCinetica(QWidget):
             self._trad = [None if t is None or not str(t).strip() else str(t).strip()
                           for t in traducciones]
         self._cache.clear()           # el tamaño de la línea cambia si ahora lleva traducción
+        self._arrancar()
+        self.update()
+
+    def poner_estilo(self, estilo):
+        """«clasica», «nitida», «neon» o «simple». Se aplica en vivo: la disposición se rehace
+        (el trazo cambia: nítida y neón lo simplifican)."""
+        estilo = normalizar_estilo(estilo)
+        if estilo == self._estilo:
+            return
+        self._estilo = estilo
+        self._cache.clear()
+        self._prev = None
+        self.update()
+
+    def estilo(self):
+        return self._estilo
+
+    def al_cambiar_tipografia(self):
+        """Otra tipografía mide distinto: se rehace la disposición (y los trozos si cambian)."""
+        self._cache.clear()
+        self._prev = None
+        if self._sincronizada:
+            antes = self._ef
+            self._ef = None
+            ef = self._efectivas()
+            if antes is None or _firma(antes) != _firma(ef):
+                self._indice = -1
+                self._entradas = {}
+                ahora = time.monotonic()
+                self._avanzar(ahora)
+                # lo que ya se había cantado se queda puesto: cambiar la fuente no lo vuelve a animar
+                self._entradas = {k: ahora - 10.0 for k in self._entradas}
+                self._prev = None
+        else:
+            self._ef = None
         self._arrancar()
         self.update()
 
@@ -432,7 +521,8 @@ class LetraCinetica(QWidget):
         medidas = []
         for k, palabra in enumerate(palabras):
             es = (k == fuerte)
-            f = fuente_impacto(int(round(tam * FACTOR_FUERTE)) if es else int(round(tam)))
+            f = tipografia_letra.adaptar(
+                fuente_impacto(int(round(tam * FACTOR_FUERTE)) if es else int(round(tam))))
             m = QFontMetricsF(f)
             texto = palabra.upper() if es else palabra
             medidas.append((texto, es, f, m.ascent(), m.descent(), m.horizontalAdvance(texto)))
@@ -527,7 +617,8 @@ class LetraCinetica(QWidget):
                 texto, es, f, _, _, ancho = medidas[k]
                 trazo = QPainterPath()
                 trazo.addText(QPointF(x, y + asc), f, texto)
-                trazo = trazo.simplified()        # sin contornos solapados: el borde no raya el interior
+                if self._estilo in ("nitida", "neon"):
+                    trazo = trazo.simplified()    # sin contornos solapados: el borde no raya el interior
                 rect = QRectF(x, y, ancho, asc + desc)
                 items.append(_Item(k, trazo, rect, es, contorno_linea and not es))
                 x += ancho + separacion
@@ -551,6 +642,14 @@ class LetraCinetica(QWidget):
 
     def _pintar_items(self, p, disp, entradas, ahora, dy, opacidad, color_fuerte):
         """Dibuja las palabras de una línea. entradas=None significa línea ya completa."""
+        estilo = self._estilo
+        # la palabra que suena: la última que ha entrado de la línea actual (neón y simple)
+        sonando = None
+        if entradas is not None and estilo in ("neon", "simple"):
+            llegadas = [(entradas[it.indice], it.indice) for it in disp.items
+                        if entradas.get(it.indice) is not None]
+            if llegadas:
+                sonando = max(llegadas)[1]
         for it in disp.items:
             escala = 1.0
             dx = 0.0
@@ -567,19 +666,40 @@ class LetraCinetica(QWidget):
                     alfa = 1.0 - (1.0 - max(0.0, t)) ** 2
             if alfa <= 0.0:
                 continue
-            # destello al entrar: la palabra nace con un brillo que se apaga en la transición
+            # destello al entrar (nítida): la palabra nace con un brillo que se apaga en la transición
             destello = 0.0
-            if entradas is not None:
+            if estilo == "nitida" and entradas is not None:
                 t0 = entradas.get(it.indice)
                 if t0 is not None:
                     destello = max(0.0, 1.0 - (ahora - t0) / (DURACION_ENTRADA * 1.6))
+            es_sonando = it.indice == sonando
+            tenue = 1.0
+            if estilo == "neon" and not es_sonando:
+                tenue = OPACIDAD_TENUE_NEON
+            elif estilo == "simple" and not es_sonando:
+                tenue = OPACIDAD_TENUE_SIMPLE
             p.save()
-            p.setOpacity(opacidad * alfa)
+            p.setOpacity(opacidad * alfa * tenue)
             c = it.rect.center()
             p.translate(c.x() + dx, c.y() + dy)
             p.scale(escala, escala)
             p.translate(-c.x(), -c.y())
-            _pintar_palabra(p, it, disp.tam, color_fuerte, destello)
+            if estilo == "nitida":
+                _pintar_palabra(p, it, disp.tam, color_fuerte, destello)
+            elif estilo == "neon":
+                _pintar_palabra_neon(p, it, disp.tam, color_fuerte, es_sonando)
+            elif estilo == "simple":
+                p.setPen(Qt.NoPen)
+                p.setBrush(QColor(255, 255, 255))
+                p.drawPath(it.trazo)
+            elif it.contorno:
+                p.setPen(QPen(QColor(255, 255, 255), 1.6))
+                p.setBrush(Qt.NoBrush)
+                p.drawPath(it.trazo)
+            else:
+                p.setPen(Qt.NoPen)
+                p.setBrush(color_fuerte if it.fuerte else TEXTO)
+                p.drawPath(it.trazo)
             p.restore()
 
     def _pintar_pausa(self, p, disp, ahora, dy, opacidad, color):
@@ -637,8 +757,13 @@ class LetraCinetica(QWidget):
             return
         p.save()
         p.setFont(f)
-        p.setOpacity(alfa / 255.0)
-        _texto_legible(p, rect, Qt.AlignLeft | Qt.AlignVCenter, texto, QColor(255, 236, 200), f.pixelSize() or 18)
+        if self._estilo == "nitida":
+            p.setOpacity(alfa / 255.0)
+            _texto_legible(p, rect, Qt.AlignLeft | Qt.AlignVCenter, texto, QColor(255, 236, 200),
+                           f.pixelSize() or 18)
+        else:
+            p.setPen(QColor(255, 255, 255, alfa))
+            p.drawText(rect, Qt.AlignLeft | Qt.AlignVCenter, texto)
         p.restore()
 
     def _pintar_mensaje(self, p):
@@ -681,12 +806,19 @@ class LetraCinetica(QWidget):
             # línea siguiente, en pequeño; si es pausa o vacía, no se muestra nada
             sig = self._indice + 1
             if 0 <= sig < len(ef) and not ef[sig]["pausa"] and ef[sig]["texto"].strip():
-                f = fuente(16, QFont.DemiBold)
+                nitida = self._estilo == "nitida"
+                f = fuente(16, QFont.DemiBold) if nitida else fuente(15)
                 p.setFont(f)
+                if not nitida:
+                    p.setPen(TEXTO_3)
                 ancho = max(1, int(self.width() - 2 * PAD))
                 texto = QFontMetrics(f).elidedText(ef[sig]["texto"], Qt.ElideRight, ancho)
-                _texto_legible(p, QRectF(PAD, self.height() - PAD - 24, ancho, 24),
-                               Qt.AlignLeft | Qt.AlignVCenter, texto, QColor(255, 255, 255, 175), 16)
+                rect_sig = QRectF(PAD, self.height() - PAD - 24, ancho, 24)
+                if nitida:
+                    _texto_legible(p, rect_sig, Qt.AlignLeft | Qt.AlignVCenter, texto,
+                                   QColor(255, 255, 255, 175), 16)
+                else:
+                    p.drawText(rect_sig, Qt.AlignLeft | Qt.AlignVCenter, texto)
 
             # bloque anterior que sube y se desvanece
             if self._prev is not None:

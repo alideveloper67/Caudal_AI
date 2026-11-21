@@ -367,6 +367,35 @@ def capturar(tipo, valor, tb, origen="interfaz"):
         pass
 
 
+# Excepciones SEH que una librería nativa lanza y atrapa ella misma: faulthandler las escribe
+# («Windows fatal exception: code 0x...») aunque la app siga viva. 0xe24c4a02 es el error de LuaJIT
+# (dentro de libmpv), que mpv atrapa solo. No son cierres: se quitan del informe.
+EXCEPCIONES_INOFENSIVAS = ("0xe24c4a02",)
+_CABECERA_FALLO = re.compile(r"^(Windows fatal exception:|Fatal Python error:)", re.IGNORECASE)
+
+
+def limpiar_cierre(texto):
+    """Quita del texto de faulthandler los bloques de excepciones inofensivas (ver arriba).
+    Cada bloque empieza en «Windows fatal exception:» o «Fatal Python error:» y llega hasta el
+    siguiente. Devuelve el texto que queda, sin espacios sobrantes ("" si no queda nada)."""
+    bloques, actual = [], []
+    for linea in (texto or "").splitlines():
+        if _CABECERA_FALLO.match(linea.strip()) and actual:
+            bloques.append(actual)
+            actual = []
+        actual.append(linea)
+    if actual:
+        bloques.append(actual)
+    quedan = []
+    for bloque in bloques:
+        cabecera = bloque[0].strip().lower()
+        if cabecera.startswith("windows fatal exception:") and \
+                any(c in cabecera for c in EXCEPCIONES_INOFENSIVAS):
+            continue
+        quedan.append("\n".join(bloque))
+    return "\n".join(quedan).strip()
+
+
 def _revisar_cierre_anterior():
     """Si la vez anterior Python se cayó del todo (faulthandler escribió algo), se manda."""
     ruta = _ruta("cierre_nativo.txt")
@@ -377,6 +406,7 @@ def _revisar_cierre_anterior():
             texto = f.read().strip()
     except OSError:
         return
+    texto = limpiar_cierre(texto)      # sin las excepciones que la librería atrapa sola
     # si la sesión anterior terminó bien, lo escrito fue un aviso que no la tumbó: no se manda
     if texto and not _leer("aviso_errores_sesion.json", {}).get("limpio", True):
         primera = texto.splitlines()[0][:150]

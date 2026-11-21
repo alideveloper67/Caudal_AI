@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('bin', 'bin'), ('descargador/legal', 'descargador/legal'), ('descargador/mascotas', 'descargador/mascotas'), ('descargador/fondos', 'descargador/fondos'), ('descargador/donar', 'descargador/donar'), ('descargador/escenarios_img', 'descargador/escenarios_img')]
+datas = [('bin', 'bin'), ('descargador/legal', 'descargador/legal'), ('descargador/mascotas', 'descargador/mascotas'), ('descargador/fondos', 'descargador/fondos'), ('descargador/donar', 'descargador/donar'), ('descargador/escenarios_img', 'descargador/escenarios_img'), ('descargador/fuentes_letra', 'descargador/fuentes_letra')]
 binaries = []
 hiddenimports = ['descargador.juntos', 'descargador.ui.letra_viva', 'descargador.registro_fallos', 'descargador.ui.paginas.juntos', 'descargador.mixes', 'descargador.ui.paginas.resumen', 'descargador.descarga_inteligente', 'websocket', 'descargador.ui.actualizador', 'descargador.ui.dialogo_listas', 'descargador.conversion', 'descargador.listas',
                  'descargador.ui.paginas.inicio', 'descargador.ui.paginas.buscar', 'descargador.ui.paginas.explorar',

@@ -4,4 +4,7 @@
      La de Google Play no lo lleva: alli se usa SCHEDULE_EXACT_ALARM y la app guia al permiso. -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
     <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>
+    <!-- la música en segundo plano: Android pregunta con un solo «Permitir» si Caudal puede
+         saltarse el ahorro de batería (Samsung, Xiaomi y Huawei cortan la música si no) -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
 </manifest>

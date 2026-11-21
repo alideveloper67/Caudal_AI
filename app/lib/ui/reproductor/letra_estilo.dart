@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart' show listEquals;
 import 'package:flutter/material.dart';
 
 import '../../reproduccion/reproductor.dart';
+import 'letra_aspecto.dart';
 import 'linea_karaoke.dart' show rellenoPorFila;
 
 const _blancoReposo = Color(0x9EFFFFFF); // blanco al 62%
@@ -60,7 +61,13 @@ class ContornoLetra extends StatelessWidget {
   final TextOverflow? overflow;
 
   @override
-  Widget build(BuildContext context) => ExcludeSemantics(
+  Widget build(BuildContext context) => ValueListenableBuilder<LetraAspecto>(
+        valueListenable: LetraAspecto.actual,
+        // el borde solo va con el estilo Nítida (Ajustes › Letra)
+        builder: (_, a, _) => a.nitida ? _borde() : const SizedBox.shrink(),
+      );
+
+  Widget _borde() => ExcludeSemantics(
         child: Text(
           texto,
           textAlign: alinear,

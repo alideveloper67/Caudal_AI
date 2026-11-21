@@ -218,9 +218,9 @@
       <h2>Descárgala gratis.</h2>
       <p class="sub" id="sugerencia">Una sola cuenta para el teléfono y la computadora. Sin anuncios.</p>
       <div class="plataformas">
-        <a class="plataforma" data-so="android" href="https://github.com/alideveloper67/Caudal_AI/releases/download/movil-v2.7.4/Caudal-2.7.4-arm64-v8a.apk">
+        <a class="plataforma" data-so="android" href="https://github.com/alideveloper67/Caudal_AI/releases/download/movil-v2.7.5/Caudal-2.7.5.apk">
           <span class="so">Android</span>
-          <span class="detalle">Versión 2.7.4 · Android 7 o superior · se descarga directo</span>
+          <span class="detalle">Versión 2.7.5 · Android 7 o superior · una sola versión para todos los teléfonos</span>
           <span class="ir">Descargar →</span>
         </a>
         <a class="plataforma" data-so="windows" href="https://github.com/alideveloper67/Caudal_AI/releases/download/escritorio-v2.8.3/CaudalInstalador.exe">
@@ -239,8 +239,7 @@
           <span class="ir">Ver la versión →</span>
         </a>
       </div>
-      <p class="sub" style="margin-top:18px;font-size:14px">¿Tu teléfono es muy antiguo (32 bits)?
-        <a id="apk-antiguo" href="https://github.com/alideveloper67/Caudal_AI/releases/download/movil-v2.7.4/Caudal-2.7.4-armeabi-v7a.apk">Descarga esta otra versión</a>.</p>
+      <p class="sub" style="margin-top:18px;font-size:14px">El mismo archivo funciona en cualquier Android, nuevo o antiguo.</p>
     </div>
   </section>
 
@@ -401,15 +400,14 @@
       const movil = ultima('movil-v');
       if (movil) {
         const version = movil.tag_name.replace('movil-v', '');
-        const arm = movil.assets.find(a => /arm64-v8a\.apk$/.test(a.name));
-        const viejo = movil.assets.find(a => /armeabi-v7a\.apk$/.test(a.name));
+        // una sola versión para todos: el APK universal (si alguna release vieja trae los partidos, el de 64 bits)
+        const apks = movil.assets.filter(a => /\.apk$/.test(a.name));
+        const apk = apks.find(a => !/(arm64-v8a|armeabi-v7a|x86_64)/.test(a.name)) || apks.find(a => /arm64-v8a/.test(a.name));
         const tarjeta = document.querySelector('.plataforma[data-so="android"]');
-        if (arm && tarjeta) {
-          tarjeta.href = arm.browser_download_url;
-          tarjeta.querySelector('.detalle').textContent = `Versión ${version} · Android 7 o superior · se descarga directo`;
+        if (apk && tarjeta) {
+          tarjeta.href = apk.browser_download_url;
+          tarjeta.querySelector('.detalle').textContent = `Versión ${version} · Android 7 o superior · una sola versión para todos los teléfonos`;
         }
-        const otro = document.getElementById('apk-antiguo');
-        if (viejo && otro) otro.href = viejo.browser_download_url;
       }
       const pc = ultima('escritorio-v');
       if (pc) {

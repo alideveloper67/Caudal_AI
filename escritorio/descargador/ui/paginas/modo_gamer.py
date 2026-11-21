@@ -4,6 +4,7 @@ sonido por juego, bajar la musica al hablar, listas por situacion y «Ahora suen
 
 import os
 
+import shiboken6
 from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QColor, QKeySequence, QPainter
 from PySide6.QtWidgets import (QCheckBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QKeySequenceEdit,
@@ -137,7 +138,8 @@ class PaginaModoGamer(Pagina):
         self.g.cambio.connect(self._refrescar)
         self.g.progreso_cambio.connect(self._refrescar_nivel)
         self.g.atajos_cambio.connect(self._refrescar_atajos)
-        self.g.ahorro_cambio.connect(lambda *_a: self._refrescar_ahorro())
+        # método ligado (no lambda): si la página se destruye, Qt lo desconecta solo
+        self.g.ahorro_cambio.connect(self._al_ahorro_cambio)
         self._cargando = False
         self._refrescar()
         self._refrescar_nivel()
@@ -372,7 +374,14 @@ class PaginaModoGamer(Pagina):
         self.cfg["ignorar"] = [x.strip().lower() for x in self.ed_ignorar.text().split(",") if x.strip()]
         self.cfg.guardar()
 
+    def _al_ahorro_cambio(self, *_a):
+        self._refrescar_ahorro()
+
     def _refrescar_ahorro(self):
+        # la señal del modo gamer puede llegar con la página (o su etiqueta) ya destruida
+        et = getattr(self, "et_ahorro", None)
+        if et is None or not shiboken6.isValid(self) or not shiboken6.isValid(et):
+            return
         if self.g.ahorrando:
             n = f" ({self.g.juego})" if self.g.juego else ""
             self.et_ahorro.setText(f"Ahora: jugando{n}. Caudal está en modo ahorro.")

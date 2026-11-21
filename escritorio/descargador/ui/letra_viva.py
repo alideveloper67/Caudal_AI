@@ -35,7 +35,7 @@ from PySide6.QtWidgets import (QApplication, QHBoxLayout, QLabel, QPushButton, Q
 from .. import catalogo, traductor
 from ..hilos import en_segundo_plano
 from ..memoria import DiccionarioLimitado
-from . import iconos, imagenes
+from . import iconos, imagenes, tipografia_letra
 from .componentes import a_la_vista
 
 # letras ya pedidas (clave de la pista -> datos de catalogo.letras), las 300 últimas
@@ -265,6 +265,7 @@ class LienzoLetra(QWidget):
         r.pista_cambio.connect(self._pista)
         r.posicion_cambio.connect(self._posicion)
         r.estado_cambio.connect(self._al_estado)
+        tipografia_letra.suscribir(self)      # el tipo de letra elegido en Ajustes cambia en vivo
 
         # Ctrl+→ / Ctrl+← mueven la letra 250 ms; Ctrl+0 la vuelve a tiempo. Hace falta haber
         # pinchado la letra (ClickFocus) para que el atajo le llegue.
@@ -319,6 +320,13 @@ class LienzoLetra(QWidget):
             if falta < FPS_REPOSO + 10:
                 return FPS_SONANDO
         return FPS_REPOSO
+
+    def al_cambiar_tipografia(self):
+        """Otra tipografía mide distinto: se vuelve a repartir la letra en filas."""
+        self._ancho_hecho = -1
+        self._rutas = {}
+        self._despertar()
+        self.update()
 
     def _despertar(self):
         """Algo cambió por la persona (rueda, raton, clic): cuadros fluidos ya."""
@@ -428,6 +436,7 @@ class LienzoLetra(QWidget):
         f.setPixelSize(int(tam))
         f.setWeight(QFont.ExtraBold)
         f.setLetterSpacing(QFont.PercentageSpacing, 98)
+        f = tipografia_letra.adaptar(f)       # la tipografía elegida (o Segoe UI, la de siempre)
         ft = QFont("Segoe UI")
         ft.setPixelSize(int(tam * (0.68 if self.compacto else 0.56)))
         ft.setWeight(QFont.DemiBold)
@@ -980,6 +989,7 @@ def crear_tarjeta(pista, lineas, portada, paleta, estilo="clasico"):
     fl = QFont("Segoe UI")
     fl.setPixelSize(70)
     fl.setWeight(QFont.ExtraBold)
+    fl = tipografia_letra.adaptar(fl)
     fml = QFontMetricsF(fl)
     y = y + 200
     p.setFont(fl)

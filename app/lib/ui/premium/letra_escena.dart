@@ -21,6 +21,7 @@ import '../../reproduccion/frenos.dart';
 import '../../reproduccion/reproductor.dart';
 import '../paginas/reproductor_pagina.dart' show desfaseDeLetra, avisoDesfaseLetra, letraDeCancion, lineasDeLetra;
 import '../reproductor/fondo_ambiente.dart';
+import '../reproductor/letra_aspecto.dart';
 import '../reproductor/letra_estilo.dart';
 import '../reproductor/paleta_portada.dart';
 import '../servicios.dart';
@@ -307,7 +308,8 @@ class EscenaLetraVista extends StatelessWidget {
     final anterior = _texto(actual - 1);
     final siguiente = _texto(actual < 0 ? 0 : actual + 1);
     final quieto = MediaQuery.maybeDisableAnimationsOf(context) ?? false;
-    final pequeno = TextStyle(fontSize: grande * 0.42, fontWeight: FontWeight.w800, color: Colors.white, height: 1.25);
+    final pequeno = LetraAspecto.actual.value
+        .conFuente(TextStyle(fontSize: grande * 0.42, fontWeight: FontWeight.w800, color: Colors.white, height: 1.25));
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 22),
       child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
@@ -409,13 +411,14 @@ class _VersoEscenaState extends State<VersoEscena> with SingleTickerProviderStat
       );
 
   Widget _pintar(double t) {
-    final base = TextStyle(
+    // con la tipografía elegida en Ajustes › Letra
+    final base = LetraAspecto.actual.value.conFuente(TextStyle(
       fontSize: widget.tamano,
       fontWeight: FontWeight.w900,
       height: 1.15,
       letterSpacing: -0.5,
       color: Colors.white,
-    );
+    ));
     switch (Cosmeticos.estiloLetra(widget.estilo)) {
       case 'ola':
         final palabras = EscenaLetra.palabras(widget.texto);

@@ -23,7 +23,6 @@ import 'comunes.dart';
 import 'cumpleanos.dart';
 import 'menu_comunidad.dart';
 import 'novedades/presentacion_mascotas.dart';
-import 'novedades_grandes.dart';
 import 'paginas/acceso.dart';
 import 'paginas/mensajes_pagina.dart';
 import 'paginas/resumen.dart';
@@ -173,21 +172,14 @@ class _ArmazonState extends State<Armazon> {
   /// Después, la presentación de las mascotitas (2.3.2): una sola vez, y nunca
   /// en el mismo arranque que las novedades grandes (espera al siguiente).
   Future<void> _novedadesDeLaVersion() async {
+    // Ya no hay presentación de novedades por versión (ni grandes ni de mascotas): las únicas
+    // presentaciones son «Somos 100» y «Gracias, donador» (main.dart). Se marca la versión como
+    // vista para que, si algún día vuelve, no salga de golpe la de una versión vieja.
     try {
       final p = await SharedPreferences.getInstance();
       final actual = widget.versionActual ?? versionApp;
-      final grandes = tocaNovedades(p.getString(claveNovedadesVistas), actual);
-      if (grandes) {
-        if (!mounted) return;
-        await p.setString(claveNovedadesVistas, actual);
-        if (!mounted) return;
-        await NovedadesGrandes.mostrar(context);
-        return;
-      }
-      if (!tocaPresentacionMascotas(p.getString(clavePresentacionMascotasVista), actual) || !mounted) return;
+      await p.setString(claveNovedadesVistas, actual);
       await p.setString(clavePresentacionMascotasVista, actual);
-      if (!mounted) return;
-      await PresentacionMascotas.mostrar(context);
     } catch (_) {}
   }
 

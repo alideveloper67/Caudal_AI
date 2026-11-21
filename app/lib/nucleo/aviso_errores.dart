@@ -227,6 +227,14 @@ class AvisoErrores {
     } catch (_) {}
   }
 
+  /// Anota un informe ya armado (p. ej. un cierre de Android leído al volver a abrir) y lo manda
+  /// en un rato. Nunca lanza.
+  static Future<void> anotarInforme(Map<String, dynamic> inf) async {
+    try {
+      if (await encolar(inf)) _programar(const Duration(seconds: 5));
+    } catch (_) {}
+  }
+
   static String _pantallaActual() {
     if (pantalla.isNotEmpty) return pantalla;
     return (observador as _Observador).nombre();
