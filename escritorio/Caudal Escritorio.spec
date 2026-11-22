@@ -7,8 +7,12 @@ hiddenimports = ['descargador.juntos', 'descargador.ui.letra_viva', 'descargador
                  'descargador.ui.paginas.inicio', 'descargador.ui.paginas.buscar', 'descargador.ui.paginas.explorar',
                  'descargador.ui.paginas.artista', 'descargador.ui.paginas.coleccion', 'descargador.ui.paginas.biblioteca',
                  'descargador.ui.paginas.descargas', 'descargador.ui.paginas.ajustes', 'descargador.ui.video',
-                 'descargador.ui.ecualizador', 'mpv']
-for paquete in ('yt_dlp', 'ytmusicapi'):
+                 'descargador.ui.ecualizador', 'mpv',
+                 # letra a tiempo sola: reconocedor de voz local (sincronia_letra.py); el modelo se baja aparte
+                 'descargador.sincronia_letra', 'descargador.ui.sincronia_auto', 'huggingface_hub',
+                 # grupos para hablar (texto, canciones y notas de voz)
+                 'descargador.grupos', 'descargador.notas_voz', 'descargador.ui.paginas.grupos']
+for paquete in ('yt_dlp', 'ytmusicapi', 'faster_whisper', 'ctranslate2', 'tokenizers'):
     tmp_ret = collect_all(paquete)
     datas += tmp_ret[0]; binaries += tmp_ret[1]; hiddenimports += tmp_ret[2]
 
@@ -26,7 +30,9 @@ a = Analysis(
     excludes=['PySide6.QtWebEngineCore', 'PySide6.QtWebEngineWidgets', 'PySide6.QtWebEngineQuick',
               'PySide6.QtWebChannel', 'PySide6.QtQuick', 'PySide6.QtQml', 'PySide6.Qt3DCore',
               'PySide6.QtCharts', 'PySide6.QtDataVisualization', 'PySide6.QtPdf',
-              'PySide6.QtMultimedia', 'PySide6.QtMultimediaWidgets', 'tkinter'],
+              'PySide6.QtMultimedia', 'PySide6.QtMultimediaWidgets', 'tkinter',
+              # el reconocedor de la letra no usa PyAV ni el VAD de onnxruntime (sincronia_letra._importar)
+              'av', 'onnxruntime', 'torch'],
     noarchive=False,
     optimize=0,
 )

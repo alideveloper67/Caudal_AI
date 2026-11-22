@@ -58,7 +58,7 @@ class _Repro extends ChangeNotifier implements Reproductor {
   @override
   Future<void> alternar() async => alternados++;
   @override
-  Future<void> siguiente({bool automatico = false}) async {
+  Future<void> siguiente({bool automatico = false, bool porFallo = false}) async {
     siguientes++;
   }
 

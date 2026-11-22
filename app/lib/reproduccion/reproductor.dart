@@ -31,6 +31,8 @@ import 'pausa_suave.dart';
 import 'retomar.dart';
 import 'cast.dart';
 import 'salida_audio.dart';
+import 'salida_unica.dart';
+import 'sin_internet.dart';
 
 const frecuenciasEq = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
 const presetsEq = <String, List<int>>{
@@ -73,7 +75,7 @@ enum EstadoRepro { parado, cargando, sonando, pausa }
 
 /// Uno de los dos motores (libmpv en el teléfono y la PC; el reproductor de
 /// YouTube en la web, ver [Jugador]) con su pantalla de video.
-class _Motor {
+class _Motor implements SalidaMotor {
   _Motor() {
     // lo que dice el motor por dentro (403, certificados, red...) al registro del sistema
     subs.add(player.stream.log.listen((l) {
@@ -82,10 +84,63 @@ class _Motor {
       }
     }));
     // el de respaldo (ExoPlayer) no tiene propiedades de mpv ni limitador por sesión
-    if (!respaldo) _afinar();
+    _listo = respaldo ? Future<void>.value() : _afinar().catchError((_) {});
+    if (_mpvAndroid) _vivos.add(this);
   }
 
   final Jugador player = Jugador.crear();
+
+  /// Las opciones de mpv puestas (la salida de sonido se elige después de esto).
+  late final Future<void> _listo;
+
+  /// ¿Es un mpv de Android? (los únicos con salida AudioTrack, ver salida_unica.dart)
+  bool get _mpvAndroid => !kIsWeb && !respaldo && defaultTargetPlatform == TargetPlatform.android;
+
+  /// Los mpv de Android que aún no se cerraron del todo (también los que se están cambiando).
+  static final Set<_Motor> _vivos = {};
+
+  /// La sesión de audio con limitador reservada para este motor (null: no hay).
+  int? _sesionPropia;
+
+  /// ¿Tiene puesto `ao=audiotrack`? Si no, suena por opensles (sin JNI).
+  bool _audiotrack = false;
+
+  @override
+  bool get tieneSonido => fuente != null;
+
+  @override
+  bool get pideAudiotrack => _audiotrack;
+
+  @override
+  Future<String?> salidaAbierta() async {
+    final ao = await player.getProperty('current-ao').timeout(const Duration(seconds: 1));
+    return ao ?? '';
+  }
+
+  /// ¿Tiene este motor un limitador del sistema para cuando suene por audiotrack?
+  bool get conLimitador => _sesionPropia != null;
+
+  /// Antes de abrir una canción: audiotrack (con su limitador) solo si ningún otro mpv la tiene
+  /// abierta; si no, opensles. Nunca lanza.
+  Future<void> prepararSalida() async {
+    if (!_mpvAndroid) return;
+    await _listo;
+    if (_sesionPropia == null || _cerrado) return; // sin sesión suena siempre por opensles
+    bool libre;
+    try {
+      libre = await puedeUsarAudiotrack(this, _vivos.toList());
+    } catch (_) {
+      libre = false;
+    }
+    if (libre == _audiotrack) return;
+    // a opensles se pasa SIEMPRE antes de que suene junto a otro; si mpv no acepta el cambio,
+    // _audiotrack se queda como estaba y el otro motor lo verá
+    try {
+      await player.setProperty('ao', libre ? 'audiotrack,opensles' : 'opensles');
+      _audiotrack = libre;
+      debugPrint('Caudal: salida de sonido ${libre ? 'audiotrack' : 'opensles (suena otro motor)'}');
+    } catch (_) {}
+  }
 
   /// ¿Es el motor de respaldo de Android (ExoPlayer)? Sin filtros ni video.
   bool get respaldo => player is JugadorExo;
@@ -110,11 +165,14 @@ class _Motor {
     try {
       await player.stop().timeout(const Duration(seconds: 3));
     } catch (_) {}
+    // sigue contando como «puede tener AudioTrack» hasta que mpv termina de cerrarse de verdad
+    final fin = player.dispose().then<void>((_) {}, onError: (_) {});
+    unawaited(fin.whenComplete(() => _vivos.remove(this)));
     try {
-      await player.dispose().timeout(const Duration(seconds: 5));
+      await fin.timeout(const Duration(seconds: 5));
     } catch (_) {}
-    final s = sesion;
-    sesion = null;
+    final s = _sesionPropia;
+    _sesionPropia = null;
     if (s != null) await SalidaAudio.soltar(s);
   }
 
@@ -152,18 +210,22 @@ class _Motor {
     }
     // Android: este motor suena en su propia sesion de audio, que lleva el limitador del
     // sistema (Sonido.kt). Hace falta la salida audiotrack de mpv (media_kit pone opensles).
+    // La salida (audiotrack u opensles) NO se pone aquí: la elige [prepararSalida] antes de cada
+    // canción, para que nunca haya dos AudioTrack de mpv a la vez (salida_unica.dart).
     final s = await SalidaAudio.nuevaSesion();
     if (s != null) {
       try {
         await player.setProperty('audiotrack-session-id', '$s');
-        await player.setProperty('ao', 'audiotrack,opensles');
-        sesion = s;
-      } catch (_) {}
+        _sesionPropia = s;
+      } catch (_) {
+        await SalidaAudio.soltar(s);
+      }
     }
   }
 
-  /// Sesion de audio de Android con limitador (null: no hay, p. ej. en iPhone).
-  int? sesion;
+  /// Sesion de audio de Android con limitador que suena AHORA (null: no hay, p. ej. en iPhone, o
+  /// este motor va por opensles porque suena otro).
+  int? get sesion => _audiotrack ? _sesionPropia : null;
 
   /// dB que lleva la cancion de este motor (Volumen maximo + preamplificador + margen del EQ).
   double gananciaDb = 0;
@@ -459,7 +521,7 @@ class Reproductor extends ChangeNotifier {
 
   /// ¿Falta un limitador de verdad? (iPhone, o un Android sin efectos del sistema): ahí
   /// «Volumen máximo» sube poco para no recortar. En la PC y en Android 7+ lo hay.
-  bool get sonidoLimitado => _filtrosMinimos && _a.sesion == null && _b.sesion == null;
+  bool get sonidoLimitado => _filtrosMinimos && !_a.conLimitador && !_b.conLimitador;
 
   /// ¿Suena el ecualizador avanzado? (solo con beneficios de donador)
   bool get eqAvanzadoActivo => ajustes.sino('eq_avanzado') && esPremiumLetras();
@@ -1101,27 +1163,101 @@ class Reproductor extends ChangeNotifier {
     return _gusto;
   }
 
-  Future<void> siguiente({bool automatico = false}) async {
+  /// Sin internet (o con una red que no responde) solo suena lo descargado: ver sin_internet.dart.
+  final EstadoInternet internet = EstadoInternet();
+
+  /// ¿Esta canción suena sin internet? (archivo propio en el teléfono)
+  bool suenaSinRed(Json p) {
+    final archivo = p['archivo'] as String?;
+    if (archivo != null && archivo.isNotEmpty) {
+      // la música de la comunidad trae un enlace como «archivo»: eso necesita internet
+      if (archivo.startsWith('http://') || archivo.startsWith('https://')) return false;
+      return coleccion.estaDescargada(p);
+    }
+    return coleccion.copiaLocal(p['video_id'] as String?) != null;
+  }
+
+  /// Avanza la cola hasta la próxima canción que suena sin internet (null: no queda ninguna).
+  Json? _avanzarHastaDescargada() {
+    final tope = secuencia.length + proximas.length + 1;
+    for (var i = 0; i < tope; i++) {
+      final o = _avanzar();
+      if (o == null) return null;
+      if (suenaSinRed(o)) return o;
+    }
+    return null;
+  }
+
+  /// Sin internet y sin más descargadas en la cola: sigue con otras canciones descargadas
+  /// (al azar, primero las que no sonaron hace poco), como una radio sin conexión.
+  Future<void> _seguirConDescargadas() async {
+    List<Json> todas;
+    try {
+      todas = await coleccion.descargadas(soloAudio: null);
+    } catch (_) {
+      todas = const [];
+    }
+    final recientes = {
+      for (final p in secuencia.skip(max(0, secuencia.length - 40))) '${p['archivo'] ?? p['video_id']}'
+    };
+    var candidatas = [for (final p in todas) if (!recientes.contains('${p['archivo'] ?? p['video_id']}')) p];
+    if (candidatas.isEmpty) candidatas = List.of(todas);
+    if (candidatas.isEmpty) {
+      _aviso('Sin internet solo suena lo descargado, y no tienes canciones descargadas.');
+      await detener();
+      return;
+    }
+    candidatas.shuffle();
+    final nuevas = [for (final p in candidatas.take(25)) {...p, '_auto': true}];
+    secuencia.addAll(nuevas);
+    original.addAll(nuevas);
+    notifyListeners();
+    _aviso('Sin internet: sigue con tu música descargada.');
+    final o = _avanzar();
+    if (o == null) {
+      await detener();
+      return;
+    }
+    await _cargar(o);
+  }
+
+  /// [porFallo]: la canción no pudo sonar (no se anota como salto ni se repite con «repetir una»).
+  Future<void> siguiente({bool automatico = false, bool porFallo = false}) async {
     if (actual == null) return;
     // saltar antes de que cuente como escuchada: el recomendador lo aprende
-    if (!automatico && !_escuchaContada && posicion.value < const Duration(seconds: 30) &&
+    if (!automatico && !porFallo && !_escuchaContada && posicion.value < const Duration(seconds: 30) &&
         '${actual!['video_id'] ?? ''}'.isNotEmpty && fuente?.local != true) {
       unawaited(Recomendador.anotarSalto(coleccion, actual!).catchError((_) {}));
       // el salto se aplica tambien al gusto en memoria (sin releer el historial)
       _gusto = _gusto?.conSalto(actual!);
     }
-    if (automatico && repetir == 'una') {
+    if (automatico && !porFallo && repetir == 'una') {
       await _cargar(actual!);
       return;
     }
-    final objetivo = _avanzar();
+    var objetivo = _avanzar();
+    // sin internet no se prueban una por una las que no están descargadas: se salta a la próxima
+    // descargada y, si no queda, sigue con otras descargas
+    if (objetivo != null && internet.sinInternet && !suenaSinRed(objetivo)) {
+      objetivo = _avanzarHastaDescargada();
+      if (objetivo == null) {
+        if (sonandoSet) {
+          await detener();
+        } else {
+          await _seguirConDescargadas();
+        }
+        return;
+      }
+    }
     if (objetivo == null) {
       if (sonandoSet) {
         // se acabo el set: no se le pega una radio detras
         await detener();
         return;
       }
-      if (_autoplay && '${actual!['video_id'] ?? ''}'.isNotEmpty) {
+      if (_autoplay && internet.sinInternet) {
+        await _seguirConDescargadas();
+      } else if (_autoplay && '${actual!['video_id'] ?? ''}'.isNotEmpty) {
         _pedirRadio(actual!, ySeguir: true);
       } else {
         await detener();
@@ -1202,7 +1338,11 @@ class Reproductor extends ChangeNotifier {
       if (ySeguir && gen == _gen && nuevas.isNotEmpty) await siguiente();
       if (ySeguir && nuevas.isEmpty) await detener();
     } catch (e) {
-      if (ySeguir) {
+      if (ySeguir && gen == _gen && (internet.sinInternet || esFalloDeRed(e))) {
+        // sin internet no hay radio, pero sí lo descargado
+        internet.fallo();
+        await _seguirConDescargadas();
+      } else if (ySeguir) {
         _aviso(e is CatalogoError ? '$e' : 'No pude seguir con canciones parecidas. Revisa tu conexión.');
         await detener();
       }
@@ -1309,8 +1449,12 @@ class Reproductor extends ChangeNotifier {
       final archivo = pista['archivo'] as String?;
       if (archivo != null && archivo.isNotEmpty && coleccion.estaDescargada(pista)) {
         if (!(querVideo && pista['es_audio'] == true)) local = archivo;
-      } else if (ajustes.sino('preferir_descargado')) {
+      } else if (ajustes.sino('preferir_descargado') || internet.sinInternet) {
         local = coleccion.copiaLocal(pista['video_id'] as String?, conVideo: querVideo)?['archivo'] as String?;
+        // sin internet, en modo video vale la copia de solo audio: mejor que no suene nada
+        if (local == null && internet.sinInternet) {
+          local = coleccion.copiaLocal(pista['video_id'] as String?)?['archivo'] as String?;
+        }
       }
     }
     Fuente f;
@@ -1327,9 +1471,26 @@ class Reproductor extends ChangeNotifier {
       try {
         f = await streams.resolver(vid, video: querVideo,
             calidad: querVideo ? (_calidadForzada ?? ajustes.texto('calidad_video')) : ajustes.texto(Red.conDatos ? 'calidad_audio_datos' : 'calidad_audio'),
-            codec: _codecVideo, intento: intento);
+            codec: _codecVideo, intento: intento)
+            // con una red que no responde el enlace podía tardar minutos: la canción no se queda
+            // «cargando»; se da por fallo de red
+            .timeout(const Duration(seconds: 20));
+        internet.exito();
       } catch (e) {
         if (gen != _gen) return;
+        if (esFalloDeRed(e) || internet.sinInternet) {
+          internet.fallo();
+          if (_traspaso != null) {
+            await _terminarTraspaso(false, volverAAudio: true);
+            return _aviso('Sin internet: sigue la canción sin el video.');
+          }
+          _fijarEstado(EstadoRepro.parado);
+          _aviso('Sin internet: «${pista['titulo'] ?? 'esa canción'}» no está descargada. Suena lo descargado.');
+          Timer(const Duration(milliseconds: 600), () {
+            if (gen == _gen) siguiente(porFallo: true);
+          });
+          return;
+        }
         if (_traspaso != null) {
           await _terminarTraspaso(false, volverAAudio: true);
           return _aviso('No se pudo abrir el video; sigue la canción.');
@@ -1397,6 +1558,7 @@ class Reproductor extends ChangeNotifier {
       t['objetivo'] = objetivo;
       t['listo'] = false;
       t['desde'] = DateTime.now();
+      await entrante.prepararSalida(); // suena junto al que sale: nunca dos AudioTrack
       await _prepararGanancia(entrante, f);
       await entrante.abrir(f, inicio: objetivo, pausado: true, volumen: 0, velocidad: velocidad,
           video: modo == 'video');
@@ -1409,6 +1571,7 @@ class Reproductor extends ChangeNotifier {
         _eq3[_activo] = eq;
         await _ponerAf(_activo, '');
       }
+      await _activo.prepararSalida();
       await _prepararGanancia(_activo, f);
       await _activo.abrir(f, inicio: inicio, pausado: pausado, volumen: _salida, velocidad: velocidad,
           video: modo == 'video');
@@ -1746,7 +1909,11 @@ class Reproductor extends ChangeNotifier {
   /// punto), si se pasa a la siguiente o si se para todo porque está fallando demasiado.
   void _recargar(Json pista, {required String motivo}) {
     final vid = '${pista['video_id'] ?? ''}';
-    final d = vid.isEmpty ? const DecisionRecarga(Recarga.saltar) : _guarda.decidir(_claveGuarda(pista));
+    // un archivo descargado que falla se reintentaría por internet: sin red, a la siguiente
+    final sinRedLocal = fuente?.local == true && internet.sinInternet;
+    final d = vid.isEmpty || sinRedLocal
+        ? const DecisionRecarga(Recarga.saltar)
+        : _guarda.decidir(_claveGuarda(pista));
     debugPrint('Caudal: fallo «${motivo.length > 80 ? motivo.substring(0, 80) : motivo}» → $d');
     _atasco?.cancel();
     _atasco = null;
@@ -1874,6 +2041,7 @@ class Reproductor extends ChangeNotifier {
     _silencioEntrada.reiniciar();
     _silencioFinal.reiniciar();
     // su ganancia (Volumen maximo) antes que sus filtros de entrada, que la usan
+    await entrante.prepararSalida(); // suena junto al que sale: nunca dos AudioTrack
     await _prepararGanancia(entrante, f);
     // la que entra empieza ya recortada (sin graves o sin agudos) y con su ecualizador
     _eq3[entrante] = eqEntra;

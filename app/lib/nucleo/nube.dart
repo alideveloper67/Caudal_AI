@@ -41,7 +41,22 @@ class Nube {
       throw const SinConexion();
     } on http.ClientException {
       throw const SinConexion();
+    } on TlsException {
+      // wifi de un hotel o aeropuerto que intercepta la conexión: es como no tener internet
+      throw const SinConexion();
+    } on HttpException {
+      throw const SinConexion();
     }
+  }
+
+  /// ¿La respuesta dice que la sesión guardada ya no vale? (la única razón para cerrarla)
+  static bool sesionInvalida(int estado, String cuerpo) {
+    if (estado != 400 && estado != 401 && estado != 403) return false;
+    final t = cuerpo.toLowerCase();
+    return t.contains('invalid_grant') || t.contains('refresh_token_not_found') ||
+        t.contains('session_not_found') || t.contains('user_not_found') ||
+        (t.contains('refresh') && (t.contains('not found') || t.contains('invalid') ||
+            t.contains('revoked') || t.contains('already used')));
   }
 
   static ErrorNube _traducir(http.Response r) {
@@ -112,6 +127,34 @@ class Nube {
       'esa persona no está en la lista': 'Esa persona ya no está en la lista.',
       'solo el dueño de la lista': 'Solo el dueño de la lista puede quitar a alguien.',
       'necesitas iniciar sesión': 'Tu sesión terminó. Vuelve a iniciar sesión.',
+      // grupos (supabase/grupos.sql)
+      'entra con tu cuenta': 'Entra con tu cuenta para usar los grupos.',
+      'al menos 3 letras': 'El nombre del grupo necesita al menos 3 letras.',
+      'ya creaste 3 grupos hoy': 'Ya creaste 3 grupos hoy. Podrás crear otro mañana.',
+      'ya tienes 20 grupos': 'Ya tienes 20 grupos. Borra alguno para crear otro.',
+      'es privado (pide su código)': 'Ese grupo es privado: pide su código a alguien que esté dentro.',
+      'ningún grupo con ese código': 'No hay ningún grupo con ese código. Revisa que esté bien escrito.',
+      'no puedes volver a entrar': 'Te sacaron de este grupo y no puedes volver a entrar.',
+      'el grupo está lleno': 'El grupo está lleno.',
+      'ya estás en 100 grupos': 'Ya estás en 100 grupos. Sal de alguno para entrar a otro.',
+      'este grupo está cerrado': 'La moderación de Caudal cerró este grupo.',
+      'no estás en este grupo': 'Ya no estás en este grupo.',
+      'te silenció un rato': 'Quien modera el grupo te silenció un rato. Podrás volver a escribir más tarde.',
+      'vas muy rápido': 'Vas muy rápido. Espera unos segundos.',
+      'la nota de voz no llegó': 'La nota de voz no llegó. Vuelve a grabarla.',
+      'dura como mucho 3 minutos': 'La nota de voz dura como mucho 3 minutos.',
+      'el mensaje está vacío': 'El mensaje está vacío.',
+      'esa canción no se puede compartir': 'Esa canción no se puede compartir.',
+      'no puedes reportar tu propio': 'No puedes reportar tu propio mensaje.',
+      'ese mensaje no existe': 'Ese mensaje ya no existe.',
+      'solo quien lo escribió': 'Solo quien lo escribió o quien modera puede borrarlo.',
+      'solo lo puede hacer quien modera': 'Eso solo lo puede hacer quien modera el grupo.',
+      'ya hay 5 mensajes fijados': 'Ya hay 5 mensajes fijados. Quita alguno.',
+      'no puedes hacerle eso': 'No puedes hacerle eso a esa persona.',
+      'esa persona no está en el grupo': 'Esa persona ya no está en el grupo.',
+      'no puedes cambiar tu propio rol': 'No puedes cambiar tu propio rol.',
+      'se silencia como mucho': 'Se puede silenciar como mucho una semana.',
+      'moderación de caudal': 'Eso solo lo puede hacer la moderación de Caudal.',
       'no se puede': 'No se puede hacer eso con esta persona.',
     };
     for (final e in casos.entries) {
@@ -220,8 +263,17 @@ class Nube {
   static Future<Sesion> renovar(String refresh) async {
     final r = await _peticion('POST', '/auth/v1/token?grant_type=refresh_token',
         cuerpo: {'refresh_token': refresh});
-    if (r.statusCode >= 300) throw _traducir(r);
-    return Sesion.desde(jsonDecode(r.body) as Map<String, dynamic>);
+    if (r.statusCode >= 300) {
+      // Solo «esta sesión ya no vale» la cierra. Supabase caído (5xx), demasiadas peticiones
+      // (429) o un wifi que contesta su propia página: se sigue sin conexión, nunca se echa a nadie
+      if (sesionInvalida(r.statusCode, r.body)) throw _traducir(r);
+      throw const SinConexion();
+    }
+    try {
+      return Sesion.desde(jsonDecode(r.body) as Map<String, dynamic>);
+    } catch (_) {
+      throw const SinConexion();                // llegó otra cosa (la página de un portal wifi)
+    }
   }
 }
 
@@ -314,7 +366,24 @@ class Sesion {
       throw const SinConexion();
     } on http.ClientException {
       throw const SinConexion();
+    } on TlsException {
+      // wifi de un hotel o aeropuerto que intercepta la conexión: es como no tener internet
+      throw const SinConexion();
+    } on HttpException {
+      throw const SinConexion();
     }
+  }
+
+  /// Dirección temporal para oír/ver un archivo de un almacén PRIVADO (p. ej. las notas de voz de
+  /// los grupos): el servidor comprueba con sus políticas que esta cuenta lo pueda leer.
+  Future<String> urlFirmada(String bucket, String ruta, {int segundos = 3600}) async {
+    final r = await Nube._peticion('POST', '/storage/v1/object/sign/$bucket/$ruta',
+        token: await token(), cuerpo: {'expiresIn': segundos});
+    if (r.statusCode >= 300) throw Nube._traducir(r);
+    final d = jsonDecode(r.body);
+    final firmada = d is Map ? '${d['signedURL'] ?? d['signedUrl'] ?? ''}' : '';
+    if (firmada.isEmpty) throw const ErrorNube('No se pudo abrir el audio.');
+    return firmada.startsWith('http') ? firmada : '${Nube.url}/storage/v1$firmada';
   }
 
   /// Borra archivos propios del almacén (no falla si no se puede: es limpieza).

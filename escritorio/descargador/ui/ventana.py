@@ -538,6 +538,9 @@ class Ventana(QWidget):
         elif pag == "mensajes":
             from .paginas.mensajes import PaginaMensajes
             w = PaginaMensajes(self.ctx)
+        elif pag == "grupos":
+            from .paginas.grupos import PaginaGrupos
+            w = PaginaGrupos(self.ctx)
         elif pag == "letra":
             from .letra_viva import PaginaLetra
             w = PaginaLetra(self.ctx)
@@ -666,7 +669,7 @@ class Ventana(QWidget):
         self.bt_adelante.setEnabled(self.indice < len(self.historia) - 1)
         self.bt_resumen.set_activo(pag == "resumen", punto=False)
         self.bt_perfil.set_activo(pag == "perfil" and not destino.get("usuario"), punto=False)
-        self.bt_mensajes.set_activo(pag == "mensajes" or self._sin_leer > 0, punto=self._sin_leer > 0)
+        self.bt_mensajes.set_activo(pag in ("mensajes", "grupos") or self._sin_leer > 0, punto=self._sin_leer > 0)
         self.bt_descargas.set_activo(pag == "descargas", punto=False)
         self.bt_ajustes.set_activo(pag == "ajustes", punto=False)
         if hasattr(self, "barra") and hasattr(self, "panel_der"):

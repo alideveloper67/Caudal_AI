@@ -625,6 +625,11 @@ class PaginaAjustes(Pagina):
         self._conectar(self.fuente_letra, "fuente_letra", self._aplicar_fuente_letra)
         s.fila("Tipo de letra", "La tipografía de la letra en la escena, la letra en grande "
                "y el karaoke.", self.fuente_letra)
+        self.sincronia_letra = _interruptor(a.get("letra_sincronia_auto", True))
+        self._conectar(self.sincronia_letra, "letra_sincronia_auto")
+        s.fila("Poner la letra a tiempo sola", "Caudal escucha un trozo de la canción y, si la letra "
+               "va corrida o es de otra versión, la corrige. La primera vez baja un reconocedor de voz "
+               "(unos 140 MB); funciona en tu PC, sin mandar el audio a ningún sitio.", self.sincronia_letra)
         self.vista_letra = QLabel("Así se ve tu letra")
         self.vista_letra.setAlignment(Qt.AlignCenter)
         self.vista_letra.setMinimumHeight(70)

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import 'nube.dart';
+import 'red.dart';
 
 /// Una cuenta con la que se entro. [sesion] es nula si se entro sin internet
 /// con la sesion guardada (la biblioteca local funciona igual).
@@ -139,25 +140,57 @@ class Cuentas {
     await c?.sesion?.salir();
   }
 
-  static Future<Cuenta?> recordada() async {
+  static Future<Map<String, dynamic>?> _guardada() async {
     final p = await SharedPreferences.getInstance();
     final texto = p.getString(_claveSesion);
     if (texto == null) return null;
-    final g = jsonDecode(texto) as Map<String, dynamic>;
     try {
-      final s = await Nube.renovar('${g['refresh']}');
+      final g = jsonDecode(texto);
+      return g is Map ? Map<String, dynamic>.from(g) : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Cuenta _sinConexion(Map<String, dynamic> g) {
+    // sin internet se entra igual: la sesión se renueva sola cuando vuelva la red
+    final s = Sesion('${g['id']}', '', '${g['refresh']}', DateTime(2000));
+    return Cuenta(id: '${g['id']}', usuario: '${g['usuario']}', nombre: '${g['nombre']}',
+        sesion: s, sinConexion: true, google: g['google'] == true);
+  }
+
+  /// La cuenta guardada sin preguntar a la nube (para cuando el arranque se alarga).
+  static Future<Cuenta?> guardadaSinConexion() async {
+    final g = await _guardada();
+    return g == null ? null : _sinConexion(g);
+  }
+
+  /// La cuenta guardada, con la sesión renovada si hay internet. Sin red entra al momento y con
+  /// una red que no responde espera como mucho [espera]: Caudal siempre abre sin internet.
+  /// Solo se olvida la sesión si la nube dice que ya no vale (nunca por un fallo de red).
+  static Future<Cuenta?> recordada({Duration espera = const Duration(seconds: 6),
+      Future<bool> Function()? sinRed, Future<Sesion> Function(String refresh)? renovar}) async {
+    final g = await _guardada();
+    if (g == null) return null;
+    try {
+      if (await (sinRed ?? Red.comprobarSinRed)()) return _sinConexion(g);
+    } catch (_) {}
+    try {
+      final s = await (renovar ?? Nube.renovar)('${g['refresh']}').timeout(espera);
       final c = Cuenta(id: '${g['id']}', usuario: '${g['usuario']}', nombre: '${g['nombre']}',
           sesion: s, google: g['google'] == true);
       await recordar(c);
       return c;
     } on SinConexion {
-      // sin internet se entra igual: se sincroniza cuando vuelva la red
-      final s = Sesion('${g['id']}', '', '${g['refresh']}', DateTime(2000));
-      return Cuenta(id: '${g['id']}', usuario: '${g['usuario']}', nombre: '${g['nombre']}',
-          sesion: s, sinConexion: true, google: g['google'] == true);
+      // OJO: SinConexion es un ErrorNube; va antes para que la falta de red nunca cierre la sesión
+      return _sinConexion(g);
     } on ErrorNube {
+      // solo llega aquí lo que la nube dijo de verdad: esta sesión ya no vale
       await olvidar();
       return null;
+    } catch (_) {
+      // SinConexion, la espera agotada o cualquier otra cosa rara: se entra sin conexión
+      return _sinConexion(g);
     }
   }
 

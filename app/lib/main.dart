@@ -169,9 +169,14 @@ class _CaudalAppState extends State<CaudalApp> {
     Diagnostico.marcar('cuenta');
     Cuenta? c;
     try {
-      c = await Cuentas.recordada().timeout(const Duration(seconds: 20));
+      c = await Cuentas.recordada().timeout(const Duration(seconds: 12));
     } catch (_) {
-      c = null;
+      // nunca a la pantalla de acceso por un fallo de red: se entra con la cuenta guardada
+      try {
+        c = await Cuentas.guardadaSinConexion();
+      } catch (_) {
+        c = null;
+      }
     }
     if (c != null) {
       try {

@@ -16,6 +16,7 @@ import '../premium/nombre_color.dart';
 import '../servicios.dart';
 import '../tema.dart';
 import 'amigos_pagina.dart';
+import 'grupos_pagina.dart';
 import 'lista_compartida_pagina.dart';
 import 'lista_compartir.dart';
 import 'perfil_comun.dart';
@@ -112,7 +113,7 @@ class _MensajesPaginaState extends State<MensajesPagina> {
   Widget build(BuildContext context) {
     final amigos = _amigos;
     return DefaultTabController(
-      length: 3,
+      length: 4,
       child: Scaffold(
         appBar: AppBar(
           title: const Text('Mensajes', style: estiloTituloBarra),
@@ -124,6 +125,7 @@ class _MensajesPaginaState extends State<MensajesPagina> {
             labelColor: C.texto,
             tabs: [
               const Tab(text: 'Chats'),
+              const Tab(text: 'Grupos'),
               Tab(child: amigos == null ? const Text('Solicitudes') : EtiquetaSolicitudes(amigos)),
               const Tab(text: 'Amigos'),
             ],
@@ -133,6 +135,7 @@ class _MensajesPaginaState extends State<MensajesPagina> {
             ? _listaChats()
             : TabBarView(children: [
                 _listaChats(),
+                const GruposVista(),
                 SolicitudesVista(controlador: amigos),
                 AmigosVista(controlador: amigos),
               ]),

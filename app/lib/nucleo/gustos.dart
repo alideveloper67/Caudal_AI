@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
@@ -105,8 +106,8 @@ class Gustos {
     if (l.listo) {
       actuales = await _localLista(cuenta);
       if (l.pendiente && s != null) {
-        // lo elegido sin red se sube ahora
-        await reintentar(s, cuenta);
+        // lo elegido sin red se sube ahora, sin frenar la entrada (con la red colgada esperaba 15 s)
+        unawaited(reintentar(s, cuenta).then((_) {}, onError: (_) {}));
       }
       return false;
     }

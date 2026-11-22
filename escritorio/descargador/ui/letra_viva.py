@@ -37,6 +37,7 @@ from ..hilos import en_segundo_plano
 from ..memoria import DiccionarioLimitado
 from . import iconos, imagenes, tipografia_letra
 from .componentes import a_la_vista
+from .sincronia_auto import clave_pista as sincronia_clave, sincronia_de
 
 # letras ya pedidas (clave de la pista -> datos de catalogo.letras), las 300 últimas
 CACHE_LETRAS = DiccionarioLimitado(300)
@@ -209,6 +210,14 @@ def _clave_pista_desfase(p):
     return p.get("video_id") or p.get("archivo") or p.get("url") or ""
 
 
+def _texto_auto(corrimiento_ms):
+    """«Letra puesta a tiempo con el audio (iba 13,2 s adelantada)». `corrimiento_ms` positivo: se canta
+    más tarde de lo que decía la letra (la letra iba adelantada)."""
+    seg = abs(corrimiento_ms) / 1000
+    como = "adelantada" if corrimiento_ms > 0 else "atrasada"
+    return f"Letra puesta a tiempo con el audio (iba {seg:.1f} s {como})".replace(".", ",")
+
+
 def _texto_desfase(ms):
     """Aviso breve con el desfase actual: «Letra adelantada 0,25 s», «Letra atrasada 0,50 s»."""
     if not ms:
@@ -265,6 +274,9 @@ class LienzoLetra(QWidget):
         r.pista_cambio.connect(self._pista)
         r.posicion_cambio.connect(self._posicion)
         r.estado_cambio.connect(self._al_estado)
+        sincronia_de(ctx).listo.connect(self._sincronia_lista)
+        if hasattr(r, "modo_cambio"):
+            r.modo_cambio.connect(self._al_modo)
         tipografia_letra.suscribir(self)      # el tipo de letra elegido en Ajustes cambia en vivo
 
         # Ctrl+→ / Ctrl+← mueven la letra 250 ms; Ctrl+0 la vuelve a tiempo. Hace falta haber
@@ -393,6 +405,8 @@ class LienzoLetra(QWidget):
             return
         self._poner_lineas(lineas, sinc, "")
         self.pedir_traduccion()
+        if sinc and not self._desfase_ms():
+            sincronia_de(self.ctx).pedir(self.pista, datos)
 
     def pedir_traduccion(self):
         self.traducciones = []
@@ -491,8 +505,42 @@ class LienzoLetra(QWidget):
             return 0
 
     def _adelanto(self):
-        """Cuánto se adelanta la letra respecto a la música: el ajuste fijo más el desfase."""
-        return ADELANTO_MS + self._desfase_ms()
+        """Cuánto se adelanta la letra respecto a la música: el ajuste fijo, el desfase que puso la
+        persona y, si ella no la tocó, lo que midió la sincronía automática (ui/sincronia_auto.py)."""
+        propio = self._desfase_ms()
+        return ADELANTO_MS + (propio if propio else self._auto_ms())
+
+    def _auto_ms(self):
+        if not self.sincronizada or not self.datos:
+            return 0
+        try:
+            return sincronia_de(self.ctx).desfase(self.pista, self.datos.get("lineas"))
+        except Exception:  # noqa: BLE001
+            return 0
+
+    def _al_modo(self, _m=None):
+        """Al pasar a video (o volver a audio) suena otra versión: se mide también en ese modo."""
+        if self.sincronizada and self.datos and self.pista and not self._desfase_ms():
+            sincronia_de(self.ctx).pedir(self.pista, self.datos)
+        self.update()
+
+    def _sincronia_lista(self, clave, res):
+        """Llegó lo que midió la sincronía: la letra se corre o se cambia por la que cuadra."""
+        if not self.pista or clave != sincronia_clave(self.pista) or not self.datos:
+            return
+        accion = (res or {}).get("accion")
+        if accion == "cambiar":
+            nueva = sincronia_de(self.ctx).letra_nueva(self.pista, self.datos.get("lineas"))
+            if nueva:
+                datos, _ms = nueva
+                self._llegaron(self.clave, datos)
+                self.ctx.avisar("Letra cambiada por la que cuadra con esta versión")
+            return
+        if accion == "corregir":
+            self._despertar()
+            self.update()
+            if self.isVisible() and not self._desfase_ms():
+                self.ctx.avisar(_texto_auto(int(res.get("desfase_ms") or 0)))
 
     def ajustar_desfase(self, delta):
         """Mueve la letra de la canción actual `delta` ms (None = volver a 0), la guarda y avisa.

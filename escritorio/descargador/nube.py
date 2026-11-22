@@ -80,6 +80,34 @@ def _traducir(r):
 
 # lo que la base de datos de «Perfiles, amigos y música» contesta, dicho para personas
 _FRASES_SOCIAL = (
+    # grupos (supabase/grupos.sql)
+    ("entra con tu cuenta", "Entra con tu cuenta para usar los grupos."),
+    ("al menos 3 letras", "El nombre del grupo necesita al menos 3 letras."),
+    ("ya creaste 3 grupos hoy", "Ya creaste 3 grupos hoy. Podrás crear otro mañana."),
+    ("ya tienes 20 grupos", "Ya tienes 20 grupos. Borra alguno para crear otro."),
+    ("es privado (pide su código)", "Ese grupo es privado: pide su código a alguien que esté dentro."),
+    ("ningún grupo con ese código", "No hay ningún grupo con ese código. Revisa que esté bien escrito."),
+    ("no puedes volver a entrar", "Te sacaron de este grupo y no puedes volver a entrar."),
+    ("el grupo está lleno", "El grupo está lleno."),
+    ("ya estás en 100 grupos", "Ya estás en 100 grupos. Sal de alguno para entrar a otro."),
+    ("este grupo está cerrado", "La moderación de Caudal cerró este grupo."),
+    ("no estás en este grupo", "Ya no estás en este grupo."),
+    ("te silenció un rato", "Quien modera el grupo te silenció un rato. Podrás volver a escribir más tarde."),
+    ("vas muy rápido", "Vas muy rápido. Espera unos segundos."),
+    ("la nota de voz no llegó", "La nota de voz no llegó. Vuelve a grabarla."),
+    ("dura como mucho 3 minutos", "La nota de voz dura como mucho 3 minutos."),
+    ("el mensaje está vacío", "El mensaje está vacío."),
+    ("esa canción no se puede compartir", "Esa canción no se puede compartir."),
+    ("no puedes reportar tu propio", "No puedes reportar tu propio mensaje."),
+    ("ese mensaje no existe", "Ese mensaje ya no existe."),
+    ("solo quien lo escribió", "Solo quien lo escribió o quien modera puede borrarlo."),
+    ("solo lo puede hacer quien modera", "Eso solo lo puede hacer quien modera el grupo."),
+    ("ya hay 5 mensajes fijados", "Ya hay 5 mensajes fijados. Quita alguno."),
+    ("no puedes hacerle eso", "No puedes hacerle eso a esa persona."),
+    ("esa persona no está en el grupo", "Esa persona ya no está en el grupo."),
+    ("no puedes cambiar tu propio rol", "No puedes cambiar tu propio rol."),
+    ("se silencia como mucho", "Se puede silenciar como mucho una semana."),
+    ("moderación de caudal", "Eso solo lo puede hacer la moderación de Caudal."),
     ("primero deben ser amigos", "Primero deben ser amigos: envía una solicitud y, cuando la acepten, podrán escribirse."),
     ("espera unos dias", "Esa persona rechazó tu solicitud hace poco. Podrás volver a enviarla pasados 30 días."),
     ("demasiadas solicitudes", "Tienes demasiadas solicitudes pendientes (el máximo es 30). Espera a que respondan o cancela alguna."),
@@ -315,6 +343,19 @@ class Sesion:
                                  "cache-control": "max-age=3600"})
         if r.status_code >= 300:
             raise _traducir(r)
+
+    def url_firmada(self, bucket, ruta, segundos=3600):
+        """Dirección temporal de un archivo de un almacén PRIVADO (las notas de voz de los grupos): el
+        servidor comprueba con sus políticas que esta cuenta lo pueda leer."""
+        r = _peticion("POST", f"/storage/v1/object/sign/{bucket}/{ruta}", token=self.token(),
+                      json={"expiresIn": int(segundos)})
+        if r.status_code >= 300:
+            raise _traducir(r)
+        d = r.json() if r.text.strip() else {}
+        firmada = str((d or {}).get("signedURL") or (d or {}).get("signedUrl") or "")
+        if not firmada:
+            raise ErrorNube("No se pudo abrir el audio.")
+        return firmada if firmada.startswith("http") else f"{URL}/storage/v1{firmada}"
 
     def borrar_archivos(self, bucket, rutas):
         """Borra archivos de su carpeta (los que no existan se ignoran)."""

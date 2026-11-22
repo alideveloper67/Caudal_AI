@@ -14,6 +14,7 @@ def _escena(estado="sonando", modo="audio"):
     e.ctx = types.SimpleNamespace(ajustes={"letra_desfases": {}})
     e._desfase_letra = lambda: 0
     e._desfase_video = lambda: 0
+    e._correccion_letra = lambda: 0          # ajuste a mano > sincronía automática > estimación del video
     return e
 
 
@@ -55,3 +56,10 @@ def test_en_pausa_no_avanza():
     e = _escena(estado="pausa")
     e._pos, e._pos_t = 10.0, 100.0
     assert ms(e, 103.0) == 10000
+
+
+def test_la_correccion_de_la_letra_se_suma_al_reloj():
+    e = _escena()
+    e._pos, e._pos_t = 20.0, 100.0
+    e._correccion_letra = lambda: -13170      # la sincronía midió la letra 13,17 s adelantada
+    assert ms(e, 100.0) == 20000 - 13170

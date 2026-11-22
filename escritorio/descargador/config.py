@@ -152,6 +152,8 @@ DEFECTOS = {
     "al_cerrar": "preguntar",        # preguntar | bandeja | salir (con musica sonando)
     "escena_piezas": {},             # dónde y de qué tamaño puso cada pieza de la escena (o si la ocultó)
     "letra_desfases": {},            # ajuste fino de la letra por canción (ms), con Ctrl+←/→ en la escena
+    "letra_sincronia_auto": True,    # Caudal escucha un tramo y corrige la letra si va corrida (sincronia_letra.py)
+    "letra_auto": {},                # lo que midió: «clave|modo|huella» -> ms (0 = cuadraba)
     "escena_fondo": "video",         # fondo de la escena de escritorio: video | ambiente
     "estilo_letra": "clasica",       # cómo se pinta la letra en la escena: clasica | nitida | neon | simple
     "fuente_letra": "predeterminada",  # tipo de letra de la letra: predeterminada | poppins | bebas | anton |

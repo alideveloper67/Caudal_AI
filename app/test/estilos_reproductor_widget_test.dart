@@ -78,7 +78,7 @@ class _R extends ChangeNotifier implements Reproductor {
   }
 
   @override
-  Future<void> siguiente({bool automatico = false}) async => pedidos.add('siguiente');
+  Future<void> siguiente({bool automatico = false, bool porFallo = false}) async => pedidos.add('siguiente');
 
   @override
   Future<void> anterior() async => pedidos.add('anterior');

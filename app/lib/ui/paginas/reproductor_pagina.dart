@@ -925,6 +925,16 @@ Future<Map<String, dynamic>> _letraDe(Json p) async {
   final clave = '${p['clave']}';
   final hecho = _cacheLetras[clave];
   if (hecho != null) return hecho;
+  // la letra ya vista se guardó en el teléfono: sale al instante y también sin internet
+  try {
+    await LetrasCache.i.listo().timeout(const Duration(seconds: 2));
+  } catch (_) {}
+  final guardada = LetrasCache.i.de(clave);
+  if (guardada != null) {
+    final g = Map<String, dynamic>.from(guardada);
+    _cacheLetras[clave] = g;
+    return g;
+  }
   final l = Map<String, dynamic>.from(await Catalogo.letras(p));
   final vacia = (l['lineas'] as List? ?? const []).isEmpty && '${l['texto'] ?? ''}'.isEmpty;
   // una letra vacía puede ser un fallo de red: no se guarda, se vuelve a intentar

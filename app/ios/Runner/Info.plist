@@ -55,7 +55,7 @@
 		<true/>
 	</dict>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Caudal escucha unos segundos solo cuando tocas «¿Qué suena?», para reconocer la canción.</string>
+	<string>Caudal usa el micrófono solo cuando tú lo pides: unos segundos al tocar «¿Qué suena?» para reconocer la canción, y para grabar las notas de voz que mandas a tus grupos.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Caudal guarda en tu galería los videos que descargues cuando eliges «Guardar video».</string>
 	<key>LSRequiresIPhoneOS</key>

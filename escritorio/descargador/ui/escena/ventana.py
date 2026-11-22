@@ -35,6 +35,7 @@ from .letra import LetraCinetica
 from .lista_reciente import ListaSeguir
 from .reloj import RelojGigante
 from .tarjeta import TarjetaCancion
+from ..sincronia_auto import sincronia_de
 
 # La línea entra con una transición de ~0,4 s y cada palabra en ~0,3 s: se adelanta la animación para que
 # llegue a su sitio justo cuando se canta (si no, se siente tarde aunque el tiempo sea exacto).
@@ -571,7 +572,8 @@ class EscenaEscritorio(QObject):
     def _conectar(self, si):
         pares = [(self.r.pista_cambio, self._pista), (self.r.estado_cambio, self._estado),
                  (self.r.posicion_cambio, self._posicion), (self.r.duracion_cambio, self._duracion),
-                 (self.r.modo_cambio, self._modo)]
+                 (self.r.modo_cambio, self._modo),
+                 (sincronia_de(self.ctx).listo, self._sincronia_lista)]
         cc = getattr(self.ctx, "colores_caratula", None)
         if cc is not None:
             pares.append((cc.cambio, self._colores_caratula))
@@ -593,6 +595,7 @@ class EscenaEscritorio(QObject):
             self._clave_reloj = clave
             self._pos, self._pos_t, self._dur = 0.0, time.monotonic(), 0.0
             self._dur_letra = 0.0
+            self._datos_letra = {}
             self._ms_mostrado = None
         datos = dict(p or {})
         if p:
@@ -643,6 +646,10 @@ class EscenaEscritorio(QObject):
         self._dur = float(d or 0)
 
     def _modo(self, _m):
+        datos = getattr(self, "_datos_letra", None) or {}
+        if self.abierta and datos.get("sincronizada") and not self._desfase_letra():
+            # el videoclip puede ser otra versión que el audio: se mide también en este modo
+            sincronia_de(self.ctx).pedir(self.r.actual, datos)
         if self.abierta:
             self._fondo.ver_video(self.r.modo == "video" and self.r.destino_video == NOMBRE_VIDEO)
             if "barra" in self._piezas:
@@ -816,6 +823,10 @@ class EscenaEscritorio(QObject):
         letra.poner_mensaje("")
         letra.poner_lineas(lineas, sinc)
         self._dur_letra = float((datos or {}).get("duracion") or 0)
+        self._datos_letra = datos or {}
+        if sinc and not self._desfase_letra():
+            # Caudal escucha un tramo y la pone a tiempo (o cambia por la que cuadra): ui/sincronia_auto.py
+            sincronia_de(self.ctx).pedir(self.r.actual, datos)
         self._lineas_actuales = [str((l or {}).get("texto") or "") if isinstance(l, dict) else str(l)
                                  for l in lineas]
         self._traducciones = None
@@ -951,7 +962,7 @@ class EscenaEscritorio(QObject):
         if self.r.estado == "sonando":
             velocidad = float(getattr(self.r, "velocidad", 1.0) or 1.0)
             pos += min(MAX_EXTRAPOLAR_S, max(0.0, ahora - self._pos_t)) * velocidad
-        objetivo = round(pos * 1000) + ADELANTO_LETRA_MS + self._desfase_letra() + self._desfase_video()
+        objetivo = round(pos * 1000) + ADELANTO_LETRA_MS + self._correccion_letra()
         antes = self._ms_mostrado
         if antes is None or abs(objetivo - antes) > SALTO_LETRA_MS or objetivo >= antes:
             self._ms_mostrado = objetivo
@@ -977,6 +988,31 @@ class EscenaEscritorio(QObject):
                 nivel = None
         self._modelo_audio.avanzar(dt, nivel, sonando, self._pos)
         sw.fijar_espectro(list(self._modelo_audio.bandas) if sonando else [])
+
+    def _correccion_letra(self):
+        """Lo que se corre la letra: el ajuste de la persona manda; si no lo hay, lo que midió la sincronía
+        automática escuchando el audio; y si todavía no midió, la estimación por la duración del video."""
+        propio = self._desfase_letra()
+        if propio:
+            return propio
+        datos = getattr(self, "_datos_letra", None) or {}
+        sinc = sincronia_de(self.ctx)
+        if datos.get("lineas") and sinc.activa() and sinc.medida(self.r.actual, datos["lineas"]):
+            return sinc.desfase(self.r.actual, datos["lineas"])
+        return self._desfase_video()
+
+    def _sincronia_lista(self, clave, res):
+        if not self.abierta or clave != clave_de(self.r.actual):
+            return
+        datos = getattr(self, "_datos_letra", None) or {}
+        accion = (res or {}).get("accion")
+        if accion == "cambiar":
+            nueva = sincronia_de(self.ctx).letra_nueva(self.r.actual, datos.get("lineas"))
+            if nueva:
+                self._llego_letra(self._lineas_clave, nueva[0])
+            return
+        if accion == "corregir":
+            self._ms_mostrado = None          # que salte ya al sitio bueno, sin esperar
 
     def _desfase_video(self):
         """Un videoclip suele durar más que la canción (intro, escena hablada): la letra sincronizada es

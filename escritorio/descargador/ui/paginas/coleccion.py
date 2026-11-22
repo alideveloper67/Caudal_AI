@@ -151,7 +151,10 @@ class PaginaColeccion(Pagina):
             return
         self._pendiente_recargar = False
         barra = self.verticalScrollBar().value()
-        self._pintar(self._datos_locales())
+        datos = self._datos_locales()
+        if self._al_dia_sin_repintar(datos):
+            return
+        self._pintar(datos)
 
         def volver_al_sitio():
             try:
@@ -178,8 +181,67 @@ class PaginaColeccion(Pagina):
 
     # ------------------------------------------------------------ pintado
 
+    def _texto_cuenta(self, datos):
+        n = len(datos.get("pistas") or [])
+        texto_n = f"{n} {'canción' if n == 1 else 'canciones'}"
+        if self.tipo == "disco" and not self.destino.get("solo", True):
+            texto_n = f"{n} {'video' if n == 1 else 'videos'}"
+        dur = formato_duracion_larga(datos.get("duracion"))
+        return texto_n + (f", {dur}" if dur else "")
+
+    def _al_dia_sin_repintar(self, datos):
+        """Si en una lista mía solo cambiaron las canciones (añadir, quitar, deshacer, mover), se
+        ponen al día las filas y la cuenta SIN rehacer la página: no se pierde el buscador ni lo
+        que ya buscaste, no se vuelven a pedir las recomendadas y la vista no salta. Una canción
+        añadida aparece al final como una fila nueva. Devuelve False si hace falta repintar."""
+        if self.tipo != "mi_lista" or not self.datos:
+            return False
+        antes, ahora = self.datos.get("lista") or {}, datos.get("lista") or {}
+        if (datos.get("titulo") != self.datos.get("titulo")
+                or datos.get("descripcion") != self.datos.get("descripcion")
+                or datos.get("miniatura") != self.datos.get("miniatura")
+                or {k: v for k, v in antes.items() if k != "tocada"}
+                != {k: v for k, v in ahora.items() if k != "tocada"}):
+            return False
+        nuevas = list(datos.get("pistas") or [])
+        if not nuevas:
+            return False                          # quedó vacía: se enseña el aviso de lista vacía
+        viejas = [p.get("clave") for p in self.pistas]
+        claves = [p.get("clave") for p in nuevas]
+        try:
+            if self.lista is None:
+                # era la lista vacía: la primera canción entra en el sitio del aviso
+                vacia = getattr(self, "_w_vacia", None)
+                if vacia is None:
+                    return False
+                self.lista = ListaPistas(self.ctx, mostrar_album=True)
+                self.lista.al_menu_extra = self._menu_extra_mi_lista
+                self.cuerpo.insertWidget(self.cuerpo.indexOf(vacia), self.lista)
+                vacia.setParent(None)
+                vacia.deleteLater()
+                self._w_vacia = None
+                self.pistas = nuevas
+                self._aplicar_orden()
+            elif (claves[:len(viejas)] == viejas and len(claves) > len(viejas)
+                  and self.orden == "personalizado" and not self.filtro.strip()):
+                self.pistas = nuevas
+                self.lista.agregar_pistas(nuevas[len(viejas):])
+            elif claves != viejas:
+                self.pistas = nuevas
+                self._aplicar_orden()
+            self.datos = datos
+            self._et_cuenta.setText(self._texto_cuenta(datos))
+            self.bt_play.setEnabled(True)
+        except RuntimeError:                      # algún trozo de la página ya se cerró
+            return False
+        self._marcar_sugeridas()
+        return True
+
     def _pintar(self, datos):
         self.vaciar()
+        self.lista = None
+        self._w_vacia = None
+        self._botones_sug = {}
         self.datos = datos
         self.titulo = datos.get("titulo") or ""
         self.titulo_cambio.emit(self.titulo)
@@ -215,12 +277,8 @@ class PaginaColeccion(Pagina):
                 cab.add_dato(str(datos["anio"]))
         elif self.tipo == "lista" and datos.get("autor"):
             cab.add_dato(datos["autor"], negrita=True)
-        n = len(self.pistas)
-        texto_n = f"{n} {'canción' if n == 1 else 'canciones'}"
-        if self.tipo == "disco" and not self.destino.get("solo", True):
-            texto_n = f"{n} {'video' if n == 1 else 'videos'}"
-        dur = formato_duracion_larga(datos.get("duracion"))
-        cab.add_dato(texto_n + (f", {dur}" if dur else ""))
+        cab.add_dato(self._texto_cuenta(datos))
+        self._et_cuenta = cab.linea.itemAt(cab.linea.count() - 1).widget()
         if datos.get("tamano"):
             from ...motor import formato_bytes
             cab.add_dato(formato_bytes(datos["tamano"]))
@@ -231,6 +289,7 @@ class PaginaColeccion(Pagina):
         acciones = BarraAcciones()
         acciones.bt_play.clicked.connect(lambda: self._reproducir(False))
         acciones.bt_play.setEnabled(bool(self.pistas))
+        self.bt_play = acciones.bt_play
         self.bt_aleatorio = acciones.boton("aleatorio", "Reproducir en aleatorio",
                                            lambda: self._reproducir(True), 26, 40)
         if self.tipo in ("album", "lista"):
@@ -297,7 +356,8 @@ class PaginaColeccion(Pagina):
                          "Busca canciones abajo, o arrastra cualquier canción hasta esta lista."),
         }
         icono, t, s = textos.get(self.tipo, ("musica", "No hay canciones", ""))
-        self.cuerpo.addWidget(SinResultados(icono, t, s))
+        self._w_vacia = SinResultados(icono, t, s)
+        self.cuerpo.addWidget(self._w_vacia)
 
     def _ordenadas(self):
         pistas = list(self.pistas)
@@ -523,8 +583,21 @@ class PaginaColeccion(Pagina):
                          ok=lambda ps: self._mostrar_sugeridas(ps, ""), error=lambda _e: None,
                          dueno=self)
 
+    def _marcar_sugeridas(self):
+        """Los botones del buscador dicen si esa canción ya está en la lista (y vuelven a
+        «Añadir» si se deshace)."""
+        ya = {p.get("clave") for p in self.pistas}
+        for clave, b in list(getattr(self, "_botones_sug", {}).items()):
+            try:
+                dentro = clave in ya
+                b.setText("Añadida" if dentro else "Añadir")
+                b.setEnabled(not dentro)
+            except RuntimeError:
+                self._botones_sug.pop(clave, None)
+
     def _mostrar_sugeridas(self, pistas, titulo):
         _borrar_layout(self.zona_res)
+        self._botones_sug = {}
         ya = {p.get("video_id") for p in self.pistas}
         if titulo:
             t = QLabel(titulo)
@@ -543,6 +616,8 @@ class PaginaColeccion(Pagina):
             b.setObjectName("contorno")
             b.setCursor(Qt.PointingHandCursor)
             b.clicked.connect(lambda _=False, p=p: self.ctx.anadir_a_lista([p], self.ident))
+            if p.get("clave"):
+                self._botones_sug[p["clave"]] = b
             fila.addWidget(b)
             self.zona_res.addLayout(fila)
 

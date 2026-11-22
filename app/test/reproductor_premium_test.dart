@@ -60,7 +60,7 @@ class _ReproductorFalso extends ChangeNotifier implements Reproductor {
   }
 
   @override
-  Future<void> siguiente({bool automatico = false}) async {
+  Future<void> siguiente({bool automatico = false, bool porFallo = false}) async {
     pedidos.add('siguiente');
     actual = _pista(2);
     notifyListeners();

@@ -16,6 +16,17 @@ class Red {
   static bool get conDatos => _conDatos;
   static bool get sinRed => _sinRed;
 
+  /// ¿Ahora mismo no hay ninguna red? (pregunta al sistema, ~100 ms; en duda, false)
+  static Future<bool> comprobarSinRed() async {
+    try {
+      final r = await Connectivity().checkConnectivity().timeout(const Duration(seconds: 1));
+      _poner(r);
+      return _sinRed;
+    } catch (_) {
+      return false;
+    }
+  }
+
   static Future<void> iniciar() async {
     if (_oyente != null) return;
     try {

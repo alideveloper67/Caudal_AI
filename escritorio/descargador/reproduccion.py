@@ -733,6 +733,16 @@ class Reproductor(QObject):
             return self.audio[self.activo]
         return None
 
+    def fuente_sonando(self):
+        """(modo, copia de la fuente) de lo que suena ahora, o None mientras no hay nada cargado.
+        La usa la sincronía de la letra para escuchar el MISMO audio que suena (en video, el videoclip,
+        que puede ser otra versión que el audio)."""
+        m = self.motor_actual()
+        f = getattr(m, "fuente", None) if m is not None else None
+        if not f or self._traspaso:
+            return None
+        return self.modo, dict(f)
+
     def _todos(self):
         return list(self.audio) + list(self.videos.values())
 

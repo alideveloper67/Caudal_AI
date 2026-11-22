@@ -122,6 +122,10 @@ class _ColeccionPaginaState extends State<ColeccionPagina> {
           _cache[clave] = d;
       }
       if (!mounted || vuelta != _vuelta) return;
+      // Nada cambió en esta pantalla (otro «me gusta», una descarga que avanza...): no se rehace.
+      // Si solo se añadieron canciones, aparecen al final sin mover la vista.
+      if (_datos != null && _error == null && mismaColeccion(_datos!, d)) return;
+      final miniAntes = '${_datos?['miniatura'] ?? ''}';
       setState(() {
         _datos = d;
         _pistas = [
@@ -131,7 +135,9 @@ class _ColeccionPaginaState extends State<ColeccionPagina> {
         _error = null;
       });
       final mini = '${d['miniatura'] ?? ''}';
-      if (mini.isNotEmpty) {
+      if (mini.isNotEmpty && mini == miniAntes) {
+        // la misma portada: el color de la cabecera ya está (no vuelve a parpadear)
+      } else if (mini.isNotEmpty) {
         colorDominante(mini).then((c) {
           if (mounted) setState(() => _color = c);
         });
@@ -549,4 +555,22 @@ class _ColeccionPaginaState extends State<ColeccionPagina> {
       ])),
     );
   }
+}
+
+/// ¿Los datos nuevos de una colección enseñan lo mismo que los que ya se ven? (mismo título,
+/// descripción, portada y las mismas canciones en el mismo orden)
+bool mismaColeccion(Map<String, dynamic> a, Map<String, dynamic> b) {
+  for (final k in const ['titulo', 'descripcion', 'miniatura']) {
+    if ('${a[k] ?? ''}' != '${b[k] ?? ''}') return false;
+  }
+  List<String> claves(Map<String, dynamic> d) => [
+        for (final e in (d['pistas'] is List ? d['pistas'] as List : const []))
+          if (e is Map) '${e['clave'] ?? e['video_id'] ?? e['archivo'] ?? ''}|${e['titulo'] ?? ''}'
+      ];
+  final x = claves(a), y = claves(b);
+  if (x.length != y.length) return false;
+  for (var i = 0; i < x.length; i++) {
+    if (x[i] != y[i]) return false;
+  }
+  return true;
 }

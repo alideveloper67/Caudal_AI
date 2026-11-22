@@ -283,6 +283,9 @@ class _PerfilEditarPaginaState extends State<PerfilEditarPagina> {
       if (!mounted) return;
       if (p.perfilPublico && !quedo.perfilPublico) {
         _aviso('Guardado. Tu perfil sigue privado: los perfiles públicos son solo para mayores de 18 años.');
+      } else if (!p.perfilPublico && quedo.perfilPublico) {
+        // cuenta nueva y mayor de edad: los perfiles vienen públicos (supabase/perfil_publico_defecto.sql)
+        _aviso('Guardado. Tu perfil es público, como vienen todos: puedes cerrarlo en «Privacidad».');
       } else {
         _aviso('Perfil guardado.');
       }

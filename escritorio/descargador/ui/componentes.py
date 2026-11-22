@@ -854,6 +854,22 @@ class ListaPistas(QWidget):
         self._pendientes = list(enumerate(self.pistas))
         self._tanda()
 
+    def agregar_pistas(self, nuevas):
+        """Suma canciones al final sin rehacer las filas que ya están (añadir a una lista no
+        parpadea ni mueve la vista)."""
+        nuevas = list(nuevas)
+        if not nuevas:
+            return
+        desde = len(self.pistas)
+        self.pistas.extend(nuevas)
+        if self.cabecera is not None:
+            self.cabecera.setVisible(True)
+        previas = list(getattr(self, "_pendientes", None) or [])
+        quedaban = bool(previas)
+        self._pendientes = previas + [(desde + k, p) for k, p in enumerate(nuevas)]
+        if not quedaban:
+            self._tanda()
+
     def _tanda(self):
         lote, self._pendientes = self._pendientes[:60], self._pendientes[60:]
         for i, p in lote:
