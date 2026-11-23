@@ -233,7 +233,7 @@ class _HojaSonidoState extends State<_HojaSonido> {
                     ),
                 ]),
               ),
-              if (limitado)
+              if (limitado && !kIsWeb)
                 const Padding(
                   padding: EdgeInsets.only(top: 8),
                   child: Text('En iPhone no hay limitador: sube un poco menos para no distorsionar.',
@@ -242,7 +242,8 @@ class _HojaSonidoState extends State<_HojaSonido> {
               if (kIsWeb)
                 const Padding(
                   padding: EdgeInsets.only(top: 8),
-                  child: Text('En la web suena el reproductor de YouTube, que pone su propio volumen.',
+                  child: Text('En la web, YouTube pone su propio volumen y no deja cambiar su sonido. El ecualizador '
+                      'vale para tu música y la de la comunidad, en la computadora.',
                       style: TextStyle(fontSize: 12.5, color: C.texto3)),
                 ),
               const SizedBox(height: 8),

@@ -6,6 +6,7 @@ import 'package:caudal/nucleo/cuentas.dart';
 import 'package:caudal/nucleo/chat.dart';
 import 'package:caudal/nucleo/descargas.dart';
 import 'package:caudal/nucleo/nube.dart';
+import 'package:caudal/nucleo/premium.dart';
 import 'package:caudal/nucleo/streams.dart';
 import 'package:caudal/reproduccion/reproductor.dart';
 import 'package:caudal/ui/paginas/aspecto_pagina.dart';
@@ -51,10 +52,13 @@ class _Sesion extends Sesion {
   _Sesion() : super('yo', 'token', 'r', DateTime.now().add(const Duration(hours: 1)));
   final enviados = <Map>[];
   bool falla = false;
+  Object? premium = {'premium': false};
 
   @override
   Future<dynamic> pedir(String metodo, String ruta,
       {Object? cuerpo, Map<String, String> cabeceras = const {}}) async {
+    if (ruta == 'rpc/mi_premium') return premium;
+    if (ruta.startsWith('perfiles?')) return [];
     if (ruta.startsWith('mensajes?')) return [];
     if (ruta == 'rpc/marcar_leido') return null;
     if (ruta == 'mensajes' && metodo == 'POST') {
@@ -137,6 +141,56 @@ void main() {
       await t.tap(find.text('Volver al aspecto de siempre'));
       await t.pumpAndSettle();
       expect(_ajustes.texto('acento'), 'cian');
+    });
+  });
+
+  group('escenarios recién donados', () {
+    setUp(Premium.i.reiniciar);
+    tearDown(Premium.i.reiniciar);
+
+    Future<void> tocarCyberpunk(WidgetTester t) async {
+      await t.scrollUntilVisible(find.text('Cyberpunk'), 200, scrollable: find.byType(Scrollable).first);
+      await t.pumpAndSettle();
+      await t.tap(find.text('Cyberpunk'));
+      await t.pumpAndSettle();
+    }
+
+    testWidgets('tocar un escenario con lo guardado atrasado pregunta y lo pone', (t) async {
+      await _montar(t, const AspectoPagina());
+      await t.pumpAndSettle();
+      expect(Premium.i.activo, isFalse);                  // el servidor aún decía que no
+      _nube.premium = {'premium': true, 'tipo': 'donador', 'vence': null};   // acaba de donar
+      await tocarCyberpunk(t);
+      expect(Premium.i.activo, isTrue);
+      expect(_ajustes.texto('escenario_reproductor'), isNotEmpty);
+    });
+
+    testWidgets('quien no dona sigue viendo el aviso', (t) async {
+      await _montar(t, const AspectoPagina());
+      await t.pumpAndSettle();
+      await tocarCyberpunk(t);
+      expect(Premium.i.activo, isFalse);
+      expect(_ajustes.texto('escenario_reproductor'), isEmpty);
+    });
+
+    testWidgets('al entrar a Aspecto ya se pregunta (donación nueva sin esperar 20 min)', (t) async {
+      SharedPreferences.setMockInitialValues({});
+      _ajustes = await Ajustes.cargar('prueba');
+      final ses = _Sesion()..premium = {'premium': true, 'tipo': 'donador', 'vence': null};
+      _nube = ses;
+      await t.pumpWidget(Caudal(
+          s: Servicios(
+            cuenta: Cuenta(id: 'yo', usuario: 'yo', nombre: 'Yo', sesion: ses),
+            ajustes: _ajustes,
+            coleccion: _Coleccion(),
+            reproductor: _Reproductor(),
+            streams: _Streams(),
+            descargas: _Descargas(),
+            cerrarSesion: () async {},
+          ),
+          child: MaterialApp(theme: temaCaudal(), home: const AspectoPagina())));
+      await t.pumpAndSettle();
+      expect(Premium.i.activo, isTrue);
     });
   });
 

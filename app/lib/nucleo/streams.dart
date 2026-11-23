@@ -160,12 +160,16 @@ class Fuente {
 
   bool get local => archivo.isNotEmpty;
 
+  /// ¿Suena con el recuadro de YouTube? (solo en la web)
+  bool get esYouTubeWeb => url.startsWith('yt:');
+
   factory Fuente.archivo(String ruta, {String videoId = ''}) =>
       Fuente(url: ruta, archivo: ruta, videoId: videoId, lufs: RegistroSonoridad.i.lufs(videoId));
 
   /// Lo que se muestra en la insignia de calidad.
   String get insignia {
-    if (local) return 'EN EL TELÉFONO';
+    if (url.startsWith('web:')) return 'TU MÚSICA';
+    if (local) return kIsWeb && url.startsWith('http') ? 'COMUNIDAD' : 'EN EL TELÉFONO';
     if (url.startsWith('yt:')) return 'YOUTUBE';
     if (alto > 0) {
       final nombre = {4320: '8K', 2160: '4K', 1440: '2K'}[alto] ?? '${alto}p';

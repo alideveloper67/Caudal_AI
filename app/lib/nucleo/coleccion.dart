@@ -8,6 +8,7 @@ import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
 
+import 'archivos_web.dart';
 import 'base_datos_io.dart' if (dart.library.js_interop) 'base_datos_web.dart';
 import 'huella_cancion.dart';
 import 'plataforma.dart';
@@ -55,6 +56,12 @@ class Coleccion extends ChangeNotifier {
           onCreate: (db, _) => _crear(db), onUpgrade: _migrar);
       final c = Coleccion._(db, 'caudal_$cuentaId.db');
       await c._cargarMemoria();
+      // las carátulas de la música propia guardada en el navegador
+      try {
+        for (final e in (await ArchivosWeb.portadas().timeout(const Duration(seconds: 4))).entries) {
+          PortadasMem.poner('mem:${e.key}', e.value);
+        }
+      } catch (_) {}
       return c;
     }
     // En iPhone, Documentos es lo que el usuario ve en la app Archivos: ahi
@@ -831,6 +838,8 @@ class Coleccion extends ChangeNotifier {
   bool _existe(String ruta) {
     // la música de la comunidad es una dirección de internet, no un archivo
     if (ruta.startsWith('http')) return true;
+    // la música propia guardada en el navegador (versión web)
+    if (ArchivosWeb.esRef(ruta)) return kIsWeb;
     final ahora = DateTime.now().millisecondsSinceEpoch;
     final dato = _existeCache[ruta];
     if (dato != null && ahora - dato.$2 < 20000) return dato.$1;
@@ -871,7 +880,10 @@ class Coleccion extends ChangeNotifier {
 
   Future<void> borrarDescarga(int id) async {
     final f = await db.query('descargas', where: 'id = ?', whereArgs: [id]);
-    if (f.isNotEmpty) {
+    if (f.isNotEmpty && ArchivosWeb.esRef('${f.first['archivo']}')) {
+      await ArchivosWeb.borrar('${f.first['archivo']}');
+      PortadasMem.quitar('${f.first['caratula']}');
+    } else if (f.isNotEmpty) {
       final archivo = File('${f.first['archivo']}');
       if (await archivo.exists()) await archivo.delete();
       _existeCache.remove(archivo.path);

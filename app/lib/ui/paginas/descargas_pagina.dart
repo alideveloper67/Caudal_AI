@@ -1,6 +1,5 @@
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter/services.dart';
 
 import '../../nucleo/catalogo.dart';
@@ -12,6 +11,7 @@ import '../plataforma.dart';
 import '../servicios.dart';
 import '../tema.dart';
 import 'inicio.dart';
+import 'tu_musica_web.dart';
 
 /// Descargar cualquier video de cualquier enlace: se pega, se ve y se baja.
 class DescargasPagina extends StatefulWidget {
@@ -134,7 +134,7 @@ class _DescargasPaginaState extends State<DescargasPagina> with AutomaticKeepAli
   Widget build(BuildContext context) {
     super.build(context);
     final s = Caudal.of(context);
-    if (kIsWeb) return const _DescargasEnLaApp();
+    if (kIsWeb) return const TuMusicaWeb();
     return Scaffold(
       body: ListenableBuilder(
         listenable: s.descargas,
@@ -362,38 +362,4 @@ class _FilaDescarga extends StatelessWidget {
       ]),
     );
   }
-}
-
-
-/// En el navegador no se puede guardar música en el equipo: se ofrece la app.
-class _DescargasEnLaApp extends StatelessWidget {
-  const _DescargasEnLaApp();
-
-  @override
-  Widget build(BuildContext context) => Scaffold(
-        body: Center(
-          child: Padding(
-            padding: const EdgeInsets.all(32),
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 460),
-              child: Column(mainAxisSize: MainAxisSize.min, children: [
-                Icon(Icons.download_for_offline_rounded, size: 64, color: C.acento),
-                const SizedBox(height: 16),
-                const Text('Las descargas están en la app', textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 24, fontWeight: FontWeight.w900)),
-                const SizedBox(height: 10),
-                const Text('El navegador no deja guardar música para oírla sin internet. Instala Caudal en tu '
-                    'teléfono o en tu computadora: entras con esta misma cuenta y tienes todo igual.',
-                    textAlign: TextAlign.center, style: estiloSecundario),
-                const SizedBox(height: 22),
-                FilledButton.icon(
-                  onPressed: () => launchUrl(Uri.parse('https://caudal-musica.netlify.app/#descargar')),
-                  icon: const Icon(Icons.open_in_new_rounded),
-                  label: const Text('Descargar la app'),
-                ),
-              ]),
-            ),
-          ),
-        ),
-      );
 }

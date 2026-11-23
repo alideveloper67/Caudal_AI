@@ -409,7 +409,7 @@ class Servicios {
                 _opcion(Icons.share_rounded, 'Compartir', () => hacer(() => SharePlus.instance
                     .share(ShareParams(text: '${pista['titulo']} — ${pista['artista']}\n$enlace')))),
               if (pista['descarga_id'] != null)
-                _opcion(Icons.delete_outline_rounded, 'Borrar del teléfono',
+                _opcion(Icons.delete_outline_rounded, kIsWeb ? 'Borrar de este navegador' : 'Borrar del teléfono',
                     () => hacer(() => _borrarDescarga(context, pista))),
               ...extra,
               const SizedBox(height: 8),
@@ -428,14 +428,15 @@ class Servicios {
       );
 
   Future<void> _borrarDescarga(BuildContext context, Json pista) async {
-    final ok = await confirmar(context, 'Borrar del teléfono',
-        '«${pista['titulo']}» se borrará del teléfono. No se puede deshacer.');
+    const donde = kIsWeb ? 'de este navegador' : 'del teléfono';
+    final ok = await confirmar(context, 'Borrar $donde',
+        '«${pista['titulo']}» se borrará $donde. No se puede deshacer.');
     if (!ok) return;
     final id = idLista(pista['descarga_id']);
     if (id == null) return;
     if (reproductor.actual?['archivo'] == pista['archivo']) await reproductor.detener();
     await coleccion.borrarDescarga(id);
-    avisar('Borrado del teléfono');
+    avisar('Borrado $donde');
   }
 
   Future<void> compartirArchivo(String ruta) async {

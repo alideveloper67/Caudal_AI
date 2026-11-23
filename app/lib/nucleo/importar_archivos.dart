@@ -1,12 +1,15 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:ffmpeg_kit_flutter_new/ffmpeg_kit.dart';
 import 'package:ffmpeg_kit_flutter_new/ffprobe_kit.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:path/path.dart' as p;
 
+import 'archivos_web.dart';
 import 'coleccion.dart';
 import 'descargas.dart';
+import 'etiquetas_audio.dart';
 
 /// Traer a Caudal canciones que ya tienes en el teléfono (MP3, M4A, FLAC...).
 ///
@@ -26,6 +29,80 @@ class ImportarArchivos {
         ? await FilePicker.pickFiles(type: FileType.custom, allowedExtensions: extensiones, allowMultiple: true)
         : await FilePicker.pickFiles(type: FileType.audio, allowMultiple: true);
     return [for (final f in r?.files ?? const <PlatformFile>[]) if (f.path != null) f.path!];
+  }
+
+  static const _tipos = {
+    'mp3': 'audio/mpeg', 'm4a': 'audio/mp4', 'aac': 'audio/aac', 'flac': 'audio/flac', 'wav': 'audio/wav',
+    'ogg': 'audio/ogg', 'opus': 'audio/ogg', 'webm': 'audio/webm', 'alac': 'audio/mp4', 'aiff': 'audio/aiff',
+  };
+
+  /// En el navegador no hay rutas: se eligen los archivos y se leen de uno en uno.
+  static Future<List<PlatformFile>> elegirWeb() async {
+    final r = await FilePicker.pickFiles(
+        type: FileType.custom, allowedExtensions: extensiones, allowMultiple: true, withData: true);
+    return r?.files ?? const [];
+  }
+
+  /// Guarda en el navegador lo elegido con [elegirWeb]. Lo que no sabe reproducir
+  /// (p. ej. WMA) no se guarda: vuelve en [sinSoporte]. Si se acaba el espacio, para
+  /// y lo dice en [sinEspacio].
+  static Future<({List<Json> pistas, int sinSoporte, bool sinEspacio})> importarWeb(
+      Coleccion c, List<PlatformFile> archivos, {void Function(int, int)? alAvanzar}) async {
+    final salida = <Json>[];
+    var sinSoporte = 0;
+    var sinEspacio = false;
+    await ArchivosWeb.pedirPermanencia();
+    final ya = await c.descargadas(soloAudio: true);
+    for (final (i, f) in archivos.indexed) {
+      final bytes = f.bytes;
+      if (bytes == null || bytes.isEmpty) {
+        sinSoporte++;
+      } else {
+        // el mismo archivo ya guardado: no se duplica
+        final repetida = ya.where((x) => x['nombre_archivo'] == f.name && x['peso'] == bytes.length).firstOrNull;
+        if (repetida != null) {
+          salida.add(repetida);
+        } else {
+          final ext = (f.extension ?? p.extension(f.name).replaceFirst('.', '')).toLowerCase();
+          final tipo = _tipos[ext] ?? 'audio/mpeg';
+          final dur = await ArchivosWeb.duracion(bytes, tipo);
+          if (dur < 0) {
+            sinSoporte++;
+          } else {
+            try {
+              salida.add(await _unaWeb(c, f, bytes, ext, tipo, dur));
+            } catch (e) {
+              if ('$e'.contains('Quota')) {
+                sinEspacio = true;
+                break;
+              }
+              sinSoporte++;
+            }
+          }
+        }
+      }
+      alAvanzar?.call(i + 1, archivos.length);
+    }
+    return (pistas: salida, sinSoporte: sinSoporte, sinEspacio: sinEspacio);
+  }
+
+  static Future<Json> _unaWeb(
+      Coleccion c, PlatformFile f, Uint8List bytes, String ext, String tipo, double dur) async {
+    final datos = EtiquetasAudio.leer(bytes);
+    final porNombre = separarNombre(p.basenameWithoutExtension(f.name));
+    final portada = datos.portada == null ? null : await ArchivosWeb.reducirPortada(datos.portada!);
+    final ref = await ArchivosWeb.guardar(bytes, tipo: tipo, portada: portada);
+    if (portada != null) PortadasMem.poner('mem:$ref', portada);
+    final id = await c.agregarDescarga(
+      videoId: '', url: '',
+      titulo: datos.titulo.isNotEmpty ? datos.titulo : porNombre.$2,
+      artista: datos.artista.isNotEmpty ? datos.artista : porNombre.$1,
+      archivo: ref, esAudio: true, tamano: bytes.length, duracion: dur.round(), calidad: ext.toUpperCase(),
+      caratula: portada == null ? '' : 'mem:$ref',
+      datos: {'importada': true, 'album': {'nombre': datos.album}, 'nombre_archivo': f.name, 'peso': bytes.length},
+    );
+    final filas = await c.db.query('descargas', where: 'id = ?', whereArgs: [id]);
+    return Coleccion.pistaDeDescarga(filas.first);
   }
 
   /// Copia y registra cada archivo. [alAvanzar] recibe (hechas, total).

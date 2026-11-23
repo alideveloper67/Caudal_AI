@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import '../../nucleo/coleccion.dart';
@@ -108,9 +109,9 @@ class _BibliotecaPaginaState extends State<BibliotecaPagina> with AutomaticKeepA
     if (f == null || f == 'telefono') {
       final m = (await col.descargadas(soloAudio: true)).length;
       final v = (await col.descargadas(soloAudio: false)).length;
-      salida.add({'tipo': 'descargados', 'id': 'musica', 'solo': true, 'titulo': 'Música descargada',
-        'subtitulo': 'En tu teléfono • $m canciones', 'icono': 'musica'});
-      salida.add({'tipo': 'descargados', 'id': 'videos', 'solo': false, 'titulo': 'Videos descargados',
+      salida.add({'tipo': 'descargados', 'id': 'musica', 'solo': true, 'titulo': kIsWeb ? 'Tu música' : 'Música descargada',
+        'subtitulo': '${kIsWeb ? 'En este navegador' : 'En tu teléfono'} • $m canciones', 'icono': 'musica'});
+      if (!kIsWeb) salida.add({'tipo': 'descargados', 'id': 'videos', 'solo': false, 'titulo': 'Videos descargados',
         'subtitulo': 'En tu teléfono • $v videos', 'icono': 'video'});
     }
     if (f == null || f == 'listas') {
@@ -208,7 +209,7 @@ class _BibliotecaPaginaState extends State<BibliotecaPagina> with AutomaticKeepA
                       _cargar();
                     }),
                   for (final (clave, texto) in const [('listas', 'Listas'), ('albumes', 'Álbumes'),
-                    ('artistas', 'Artistas'), ('telefono', 'En tu teléfono')])
+                    ('artistas', 'Artistas'), ('telefono', kIsWeb ? 'Tu música' : 'En tu teléfono')])
                     if (_filtro == null || _filtro == clave)
                       Pildora(texto: texto, activa: _filtro == clave, alPulsar: () {
                         setState(() => _filtro = _filtro == clave ? null : clave);

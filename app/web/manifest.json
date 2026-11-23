@@ -1,12 +1,15 @@
 {
     "name": "Caudal",
     "short_name": "Caudal",
+    "id": "/app/",
     "start_url": ".",
+    "lang": "es",
+    "categories": ["music", "entertainment"],
     "display": "standalone",
     "background_color": "#06070A",
     "theme_color": "#06070A",
     "description": "Tu música, tus listas y tus amigos, en el navegador.",
-    "orientation": "portrait-primary",
+    "orientation": "any",
     "prefer_related_applications": false,
     "icons": [
         {

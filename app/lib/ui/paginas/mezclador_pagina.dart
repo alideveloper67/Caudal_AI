@@ -249,11 +249,12 @@ class _MezcladorPaginaState extends State<MezcladorPagina> {
     final a = _analizador;
     final s = Caudal.leer(context);
     if (a == null || _analizando) return;
-    if (kIsWeb) {
-      s.avisar('El análisis de ritmo no está disponible en el navegador. Escribe el tempo a mano.');
+    if (pendientes.isEmpty) return;
+    if (kIsWeb && pendientes.every((p) => '${p['archivo'] ?? ''}'.isEmpty)) {
+      s.avisar('En el navegador solo se puede saber el ritmo de tu música y la de la comunidad. '
+          'Para las de YouTube, toca su tempo y escríbelo a mano.');
       return;
     }
-    if (pendientes.isEmpty) return;
     setState(() {
       _analizando = true;
       _hechas = 0;

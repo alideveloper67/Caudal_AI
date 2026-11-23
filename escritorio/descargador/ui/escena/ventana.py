@@ -171,6 +171,9 @@ class EscenaEscritorio(QObject):
         self._anim_aviso = None
         self._timer_aviso = None
         self._forzar_propia = False    # «Mi imagen» con imagen nueva: recrear el escenario
+        self._escenario_negado = False # el fondo guardado es un escenario y se puso la carátula (sin donador)
+        self._fondo_pendiente = None   # el fondo de donador que se tocó mientras se pregunta al servidor
+        self._esperando_donador = False
         self._dur_letra = 0.0
         self._ms_mostrado = None       # último instante de letra mostrado (reloj suave)
         self._lineas_actuales = []
@@ -212,6 +215,8 @@ class EscenaEscritorio(QObject):
         # para que abrir no sea un único tirón con las once ventanas y el video a la vez
         QTimer.singleShot(280, self._preparar_video)
         QTimer.singleShot(0, self._recientes)
+        # quien acaba de donar no tiene que esperar al refresco periódico (20 min): se pregunta ya
+        self._preguntar_donador()
         self._reloj_letra.start()
         if self.solo_ver:
             from . import escritorio_win
@@ -536,6 +541,8 @@ class EscenaEscritorio(QObject):
         if not self.abierta:
             return
         self.abierta = False
+        self._soltar_espera_donador()
+        self._fondo_pendiente = None
         self._reloj_letra.stop()
         self._quitar_aviso_ya()
         self._aviso = None                 # el QLabel muere con la ventana de fondo
@@ -688,7 +695,9 @@ class EscenaEscritorio(QObject):
         if not self.abierta:
             return
         modo = self.ctx.ajustes.get("escena_fondo", "video")
+        self._escenario_negado = False
         if modo in escenarios.ESCENARIOS and not self._es_donador():
+            self._escenario_negado = True
             modo = "ambiente"                   # los escenarios son de donadores: la carátula viva
         if modo in escenarios.ESCENARIOS:
             if modo == "propia":
@@ -764,14 +773,75 @@ class EscenaEscritorio(QObject):
         if not clave:
             return
         if clave not in FONDOS_LIBRES and not self._es_donador():
-            self.ctx.avisar("Los escenarios son exclusivos para donadores. Desbloquéalos apoyando a Caudal "
-                            "(Más → Donar) o con un código de prueba.")
+            # lo guardado en este equipo puede ir atrasado (una donación de hace un rato): se pregunta
+            # al servidor y, si ya es donador, el fondo se pone solo
+            if self._preguntar_donador(pendiente=clave):
+                return
+            self._avisar_solo_donadores()
             return
         if clave == "elegir_propia" or (clave == "propia" and not self._ruta_propia_valida()):
             # el selector se abre cuando el menú ya se cerró, no dentro de su evento
             QTimer.singleShot(0, self._elegir_imagen_propia)
             return
         self.poner_fondo(clave)
+
+    AVISO_SOLO_DONADORES = ("Los escenarios son exclusivos para donadores. Desbloquéalos apoyando a Caudal "
+                            "(Más → Donar) o con un código de prueba.")
+    ESPERA_DONADOR_MS = 10000
+
+    def _avisar_solo_donadores(self):
+        self.ctx.avisar(self.AVISO_SOLO_DONADORES)
+
+    def _preguntar_donador(self, pendiente=None):
+        """Pide al servidor el estado de donador (en segundo plano). Devuelve False si no se puede preguntar."""
+        g = getattr(self.ctx, "premium", None)
+        if g is None or not hasattr(g, "refrescar") or not hasattr(g, "cambiado"):
+            return False
+        if ((getattr(self.ctx, "cuenta", None) or {}).get("sesion")) is None:
+            return False                        # sin sesión no hay a quién preguntar
+        if pendiente is not None:
+            self._fondo_pendiente = pendiente
+        if not self._esperando_donador:
+            self._esperando_donador = True
+            g.cambiado.connect(self._estado_donador_llego)
+            QTimer.singleShot(self.ESPERA_DONADOR_MS, self._sin_respuesta_donador)
+        g.refrescar()
+        return True
+
+    def _soltar_espera_donador(self):
+        if not self._esperando_donador:
+            return
+        self._esperando_donador = False
+        try:
+            self.ctx.premium.cambiado.disconnect(self._estado_donador_llego)
+        except (RuntimeError, TypeError, AttributeError):
+            pass
+
+    def _estado_donador_llego(self):
+        self._soltar_espera_donador()
+        pendiente, self._fondo_pendiente = self._fondo_pendiente, None
+        if not self.abierta:
+            return
+        if not self._es_donador():
+            if pendiente is not None:
+                self._avisar_solo_donadores()
+            return
+        if pendiente is not None:
+            if pendiente == "elegir_propia" or (pendiente == "propia" and not self._ruta_propia_valida()):
+                QTimer.singleShot(0, self._elegir_imagen_propia)
+            else:
+                self.poner_fondo(pendiente)
+        elif self._escenario_negado:
+            self._preparar_video()              # el escenario guardado ya se puede ver
+
+    def _sin_respuesta_donador(self):
+        """Sin red o el servidor no contestó: lo de siempre."""
+        if not self._esperando_donador:
+            return
+        self._soltar_espera_donador()
+        pendiente, self._fondo_pendiente = self._fondo_pendiente, None
+        if pendiente is not None and self.abierta:
+            self._avisar_solo_donadores()
 
     def poner_fondo(self, nuevo):
         self.ctx.ajustes["escena_fondo"] = nuevo

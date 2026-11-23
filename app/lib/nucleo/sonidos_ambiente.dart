@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../reproduccion/jugador.dart';
+import 'archivos_web.dart';
 import 'streams.dart' show Fuente;
 
 /// Los sonidos ambientales del Modo estudio. Se fabrican en el propio
@@ -472,7 +473,7 @@ typedef FabricaJugador = Jugador Function();
 /// temporal.
 class SonidosAmbiente extends ChangeNotifier {
   SonidosAmbiente({FabricaJugador? fabrica, Future<Directory> Function()? carpeta, bool? disponible})
-      : _fabrica = fabrica ?? Jugador.crear,
+      : _fabrica = fabrica ?? Jugador.crearAparte,
         _carpeta = carpeta ?? getTemporaryDirectory,
         // ignore: prefer_initializing_formals
         _disponible = disponible;
@@ -483,14 +484,22 @@ class SonidosAmbiente extends ChangeNotifier {
 
   static const _version = 1;
 
-  /// ¿Hay un reproductor local para las capas? En la web no: allí la música
-  /// sale del reproductor de YouTube incrustado.
-  bool get disponible => _disponible ?? !(kIsWeb || Jugador.esWeb);
+  /// ¿Hay un reproductor para las capas? (en la web, el audio del navegador)
+  bool get disponible => _disponible ?? true;
 
   final Map<CapaAmbiente, Jugador> _motores = {};
   final Map<CapaAmbiente, double> _volumenes = {};
   final Set<CapaAmbiente> _preparando = {};
   final Map<CapaAmbiente, Future<File>> _archivos = {};
+
+  /// En la web no hay carpeta temporal: cada WAV vive en la memoria del navegador.
+  final Map<CapaAmbiente, Future<String>> _enMemoria = {};
+
+  Future<String> _rutaDe(CapaAmbiente c) async {
+    if (!kIsWeb) return (await archivoDe(c)).path;
+    return _enMemoria[c] ??= compute(_wavDeCapa, (c.index, 11 + c.index * 7, SintesisAmbiente.segundosPorDefecto))
+        .then((b) => ArchivosWeb.urlTemporal(b, 'audio/wav'));
+  }
 
   /// Capas que suenan (o se están preparando para sonar).
   Set<CapaAmbiente> get sonando => {..._motores.keys, ..._preparando};
@@ -514,14 +523,14 @@ class SonidosAmbiente extends ChangeNotifier {
     if (!disponible || _motores.containsKey(c) || !_preparando.add(c)) return;
     notifyListeners();
     try {
-      final f = await archivoDe(c);
+      final ruta = await _rutaDe(c);
       // si mientras se fabricaba la apagaron, no se arranca
       if (!_preparando.contains(c)) return;
       final j = _fabrica();
       _motores[c] = j;
       await j.setProperty('loop-file', 'inf');
       await j.setVolume((_volumenes[c] ?? 0) * 100);
-      await j.open(Fuente.archivo(f.path));
+      await j.open(Fuente.archivo(ruta));
     } catch (e) {
       debugPrint('ambiente ${c.name}: $e');
       final j = _motores.remove(c);
@@ -564,6 +573,7 @@ class SonidosAmbiente extends ChangeNotifier {
   /// Un tono suave: al terminar un bloque (dos notas) o al volver al enfoque.
   Future<void> campana({required bool alTerminarBloque, double volumen = 0.7}) async {
     if (!disponible) return;
+    if (kIsWeb) return _campanaWeb(alTerminarBloque, volumen);
     try {
       final dir = Directory('${(await _carpeta()).path}${Platform.pathSeparator}caudal_ambiente');
       if (!await dir.exists()) await dir.create(recursive: true);
@@ -575,6 +585,21 @@ class SonidosAmbiente extends ChangeNotifier {
       await j.setVolume(volumen * 100);
       await j.open(Fuente.archivo(f.path));
       Timer(const Duration(seconds: 6), () => j.dispose().catchError((_) {}));
+    } catch (e) {
+      debugPrint('campana: $e');
+    }
+  }
+
+  Future<void> _campanaWeb(bool fin, double volumen) async {
+    try {
+      final url = ArchivosWeb.urlTemporal(await compute(_wavDeCampana, fin), 'audio/wav');
+      final j = _fabrica();
+      await j.setVolume(volumen * 100);
+      await j.open(Fuente.archivo(url));
+      Timer(const Duration(seconds: 6), () {
+        j.dispose().catchError((_) {});
+        ArchivosWeb.soltarTemporal(url);
+      });
     } catch (e) {
       debugPrint('campana: $e');
     }

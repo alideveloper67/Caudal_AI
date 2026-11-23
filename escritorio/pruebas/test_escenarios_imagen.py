@@ -70,6 +70,8 @@ def test_los_escenarios_son_de_donadores():
     esc = types.SimpleNamespace(ctx=types.SimpleNamespace(avisar=avisos.append, premium=None,
                                                           ajustes={"escena_fondo": "video"}))
     esc._es_donador = lambda: False
+    esc._preguntar_donador = lambda pendiente=None: False      # sin gestor premium: no hay a quién preguntar
+    esc._avisar_solo_donadores = lambda: avisos.append(V.EscenaEscritorio.AVISO_SOLO_DONADORES)
     puesto = []
     esc.poner_fondo = puesto.append
     esc._ruta_propia_valida = lambda: True

@@ -8,12 +8,16 @@ import 'jugador_io.dart' if (dart.library.js_interop) 'jugador_web.dart' as plat
 /// Lo que el reproductor necesita de un motor de sonido, sea cual sea.
 ///
 /// * En el teléfono y la PC: libmpv (media_kit), con ecualizador y demás.
-/// * En el navegador: el reproductor oficial de YouTube incrustado, que es lo
-///   único que deja sonar canciones de YouTube desde una web.
+/// * En el navegador: el reproductor oficial de YouTube incrustado (lo único que
+///   deja sonar canciones de YouTube desde una web) y, para lo que no es de
+///   YouTube, el audio del navegador, que sigue con la pantalla bloqueada.
 ///
 /// Los nombres imitan a los de media_kit para que el reproductor no cambie.
 abstract class Jugador {
   static Jugador crear() => plataforma.crearJugador();
+
+  /// Un motor aparte del de la música (ambiente, soniditos de la interfaz).
+  static Jugador crearAparte() => plataforma.crearJugadorAparte();
 
   /// ¿Es el reproductor de YouTube del navegador? (sin filtros ni descargas)
   static bool get esWeb => plataforma.esJugadorWeb;
@@ -56,6 +60,12 @@ abstract class EstadoJugador {
   Duration get position;
   bool get playing;
   bool get buffering;
+}
+
+/// El espectro de lo que suena en la web (visualizador). Null donde no se puede medir.
+abstract class EspectroWeb {
+  static void medir(bool si) => plataforma.medirEspectro(si);
+  static (List<int>, double)? leer() => plataforma.leerEspectro();
 }
 
 /// Dónde se ve el video de YouTube en la web (el reproductor lo coloca).

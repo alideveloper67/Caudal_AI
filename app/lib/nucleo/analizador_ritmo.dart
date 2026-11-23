@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:path_provider/path_provider.dart';
 
 import 'coleccion.dart';
+import 'decodificar_audio.dart';
 import 'ritmo.dart';
 
 AnalisisRitmo _calcular(({Float64List muestras, int hz, double inicio}) a) =>
@@ -63,12 +64,28 @@ class AnalizadorRitmo extends ChangeNotifier {
     await _guardar();
   }
 
+  Future<AnalisisRitmo> _anotar(String clave, Float64List muestras, double inicio) async {
+    final r = await compute(_calcular, (muestras: muestras, hz: _hz, inicio: inicio));
+    _datos[clave] = r;
+    notifyListeners();
+    await _guardar();
+    return r;
+  }
+
   /// Analiza una cancion a partir de un archivo o un enlace que ffmpeg pueda leer.
   /// Devuelve null si no se pudo (sin red, formato raro...). Lo manual no se pisa.
   Future<AnalisisRitmo?> analizar(String clave, String origen, {double duracion = 0}) async {
     final previo = _datos[clave];
     if (previo != null && (previo.manual || previo.valido)) return previo;
     final inicio = duracion > 120 ? 40.0 : (duracion > 60 ? duracion * 0.25 : 0.0);
+    if (kIsWeb) {
+      try {
+        final m = await decodificarAudio(origen, hz: _hz, inicio: inicio, segundos: _segundos.toDouble());
+        return m == null || m.length < _hz * 8 ? null : await _anotar(clave, m, inicio);
+      } catch (_) {
+        return null;
+      }
+    }
     File? salida;
     try {
       final tmp = await getTemporaryDirectory();
@@ -86,11 +103,7 @@ class AnalizadorRitmo extends ChangeNotifier {
       for (var i = 0; i < n; i++) {
         muestras[i] = datos.getInt16(i * 2, Endian.little) / 32768.0;
       }
-      final r = await compute(_calcular, (muestras: muestras, hz: _hz, inicio: inicio));
-      _datos[clave] = r;
-      notifyListeners();
-      await _guardar();
-      return r;
+      return await _anotar(clave, muestras, inicio);
     } catch (_) {
       return null;
     } finally {

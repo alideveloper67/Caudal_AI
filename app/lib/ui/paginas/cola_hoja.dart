@@ -32,6 +32,20 @@ class HojaCola extends StatelessWidget {
     }
   }
 
+  @override
+  Widget build(BuildContext context) => DraggableScrollableSheet(
+        expand: false,
+        initialChildSize: 0.75,
+        maxChildSize: 0.95,
+        builder: (_, scroll) => ColaLista(scroll: scroll),
+      );
+}
+
+/// Lo que suena y lo que viene: en la hoja del teléfono y en el panel de la web.
+class ColaLista extends StatelessWidget {
+  const ColaLista({super.key, this.scroll});
+  final ScrollController? scroll;
+
   Widget _movible({
     required Key key,
     required int indice,
@@ -71,11 +85,7 @@ class HojaCola extends StatelessWidget {
   Widget build(BuildContext context) {
     final s = Caudal.of(context);
     final r = s.reproductor;
-    return DraggableScrollableSheet(
-      expand: false,
-      initialChildSize: 0.75,
-      maxChildSize: 0.95,
-      builder: (_, scroll) => ListenableBuilder(
+    return ListenableBuilder(
         listenable: r,
         builder: (context, _) {
           final siguientes = r.siguientesDeContexto;
@@ -88,7 +98,7 @@ class HojaCola extends StatelessWidget {
                 const Expanded(child: Text('Sonando ahora', style: estiloTituloSeccion)),
                 TextButton.icon(
                   key: const ValueKey('guardar-cola'),
-                  onPressed: () => guardarComoLista(context),
+                  onPressed: () => HojaCola.guardarComoLista(context),
                   icon: const Icon(Icons.playlist_add_rounded, size: 20),
                   label: const Text('Guardar como lista'),
                 ),
@@ -162,7 +172,6 @@ class HojaCola extends StatelessWidget {
             SliverToBoxAdapter(child: SizedBox(height: 30 + MediaQuery.paddingOf(context).bottom)),
           ]);
         },
-      ),
     );
   }
 }

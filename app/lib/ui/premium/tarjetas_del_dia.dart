@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import '../../nucleo/coleccion.dart';
@@ -9,7 +10,9 @@ import '../../nucleo/premium_letras.dart';
 import '../../nucleo/resumen_semanal.dart';
 import '../comunes.dart';
 import '../paginas/modo_auto_pagina.dart';
+import '../paginas/escena_web.dart';
 import '../paginas/modos_escucha_pagina.dart';
+import '../paginas/visualizador_pagina.dart';
 import '../plataforma.dart';
 import '../servicios.dart';
 import '../tema.dart';
@@ -379,9 +382,17 @@ class MenuMasEscucha extends StatelessWidget {
               QueCancionEraPagina.abrir(context);
             case 3:
               EqAdaptablePagina.abrir(context);
+            case 4:
+              VisualizadorPagina.abrir(context);
+            case 5:
+              EscenaWebPagina.abrir(context);
           }
         },
         itemBuilder: (_) => const [
+          if (kIsWeb) ...[
+            PopupMenuItem(value: 4, child: ListTile(leading: Icon(Icons.blur_on_rounded), title: Text('Visualizador'), contentPadding: EdgeInsets.zero)),
+            PopupMenuItem(value: 5, child: ListTile(leading: Icon(Icons.desktop_windows_rounded), title: Text('Escena'), contentPadding: EdgeInsets.zero)),
+          ],
           PopupMenuItem(value: 0, child: ListTile(leading: Icon(Icons.directions_car_rounded), title: Text('Modo auto'), contentPadding: EdgeInsets.zero)),
           PopupMenuItem(value: 1, child: ListTile(leading: Icon(Icons.self_improvement_rounded), title: Text('Modos de escucha'), contentPadding: EdgeInsets.zero)),
           PopupMenuItem(value: 2, child: ListTile(leading: Icon(Icons.manage_search_rounded), title: Text('¿Qué canción era?'), contentPadding: EdgeInsets.zero)),

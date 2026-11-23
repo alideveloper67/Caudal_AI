@@ -18,13 +18,19 @@ import '../nucleo/tarjeta_lista.dart';
 import '../nucleo/version.dart';
 import '../reproduccion/reproductor.dart';
 import '../reproduccion/retomar.dart' show avisoRetomado;
+import '../reproduccion/sesion_medios.dart';
 import '../nucleo/cumpleanos.dart';
+import 'atajos_teclado.dart';
+import 'barra_web.dart';
 import 'comunes.dart';
 import 'cumpleanos.dart';
 import 'menu_comunidad.dart';
 import 'novedades/presentacion_mascotas.dart';
 import 'paginas/acceso.dart';
 import 'paginas/mensajes_pagina.dart';
+import 'paginas/modo_gamer_pagina.dart';
+import 'paginas/modos_escucha_pagina.dart';
+import 'paginas/que_suena_pagina.dart';
 import 'paginas/resumen.dart';
 import 'paginas/resumen_anual_pagina.dart';
 import 'paginas/ajustes_pagina.dart';
@@ -34,7 +40,12 @@ import 'premium/regalo_pases.dart';
 import 'paginas/biblioteca.dart';
 import 'paginas/buscar.dart';
 import 'paginas/descargas_pagina.dart';
+import 'paginas/despertador_pagina.dart';
+import 'paginas/escena_web.dart';
+import 'paginas/visualizador_pagina.dart';
+import 'panel_web.dart';
 import 'paginas/estudio_pagina.dart';
+import 'paginas/fiesta_pagina.dart';
 import 'paginas/importar_pagina.dart';
 import 'paginas/inicio.dart';
 import 'paginas/juntos_pagina.dart';
@@ -239,22 +250,22 @@ class _ArmazonState extends State<Armazon> {
     }
   }
 
-  /// En el navegador de un teléfono, YouTube pausa la música al bloquearlo:
-  /// se avisa una vez y se ofrece la app, que sí sigue sonando.
+  /// En el navegador de un teléfono, YouTube pausa la música al bloquearlo: se avisa
+  /// una vez de qué sí sigue sonando y se ofrece la app.
   Future<void> _avisoWebEnTelefono() async {
-    final telefono = defaultTargetPlatform == TargetPlatform.android || defaultTargetPlatform == TargetPlatform.iOS;
-    if (!kIsWeb || !telefono) return;
+    if (!kIsWeb || !SesionMedios.esTelefono) return;
     final p = await SharedPreferences.getInstance();
-    if (p.getBool('aviso_web_telefono') == true || !mounted) return;
-    await p.setBool('aviso_web_telefono', true);
+    if (p.getBool('aviso_web_reposo') == true || !mounted) return;
+    await p.setBool('aviso_web_reposo', true);
     if (!mounted) return;
     await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Estás en el navegador'),
-        content: const Text('Aquí la música se pausa si bloqueas el teléfono o cambias de app: así lo hace '
-            'el reproductor de YouTube en los navegadores. Para escuchar con la pantalla bloqueada, '
-            'instala la app de Caudal (entras con esta misma cuenta).'),
+        content: const SingleChildScrollView(child: Text('Con el teléfono bloqueado aquí sigue sonando tu música y la '
+            'de la comunidad. Las canciones de YouTube se pausan: YouTube no las deja sonar sin verse. '
+            'Para esas, abre el «Modo reposo» arriba en el reproductor, que deja la pantalla '
+            'encendida y casi negra, o instala la app de Caudal con esta misma cuenta.')),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Seguir en el navegador')),
           FilledButton(
@@ -377,7 +388,7 @@ class _ArmazonState extends State<Armazon> {
             listenable: Caudal.of(context).reproductor,
             builder: (context, _) {
               final r = Caudal.of(context).reproductor;
-              if (r.actual == null || _sigueOculto(r)) return const SizedBox.shrink();
+              if (r.actual == null || (kIsWeb && ancho) || _sigueOculto(r)) return const SizedBox.shrink();
               return Stack(children: [
                 Positioned(left: 8, right: 8, bottom: 6,
                     child: RepaintBoundary(child: MiniReproductor(alQuitar: _quitarMini))),
@@ -392,34 +403,42 @@ class _ArmazonState extends State<Armazon> {
             },
           ),
         ]);
+        // el navegador de un teléfono de lado: la barra de abajo se hace fina para dejar sitio
+        final bajita = kIsWeb && medidas.maxHeight < 480;
         if (ancho) {
-          return Scaffold(
-            body: Row(children: [
+          final cuerpo = Row(children: [
               _BarraLateral(pestana: _pestana, alIr: _ir, alAbrir: _abrirEnPestana),
               VerticalDivider(width: 1, thickness: 1, color: C.borde),
               Expanded(child: contenido),
-            ]),
-          );
+              if (kIsWeb && medidas.maxWidth >= PanelWeb.anchoMinimo) const PanelWeb(),
+            ]);
+          // en el navegador, la barra de reproducción de abajo como en Caudal Escritorio
+          return Scaffold(body: kIsWeb ? Column(children: [Expanded(child: cuerpo), const BarraWeb()]) : cuerpo);
         }
         return Scaffold(
         // la version, en una franja chiquita bajo todo el contenido (y sobre la barra):
         // asi nunca tapa una pagina ni el mini reproductor
-        body: Column(children: [Expanded(child: contenido), const FranjaVersion()]),
+        body: Column(children: [Expanded(child: contenido), if (!bajita) const FranjaVersion()]),
         bottomNavigationBar: NavigationBar(
+          height: bajita ? 52 : null,
           selectedIndex: _pestana,
           onDestinationSelected: _ir,
-          labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
-          destinations: const [
-            NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home_rounded), label: 'Inicio'),
-            NavigationDestination(icon: Icon(Icons.search_rounded), selectedIcon: Icon(Icons.manage_search_rounded), label: 'Buscar'),
-            NavigationDestination(icon: Icon(Icons.library_music_outlined), selectedIcon: Icon(Icons.library_music_rounded), label: 'Tu biblioteca'),
-            NavigationDestination(icon: Icon(Icons.download_outlined), selectedIcon: Icon(Icons.download_rounded), label: 'Descargar'),
+          labelBehavior: bajita ? NavigationDestinationLabelBehavior.alwaysHide
+              : NavigationDestinationLabelBehavior.alwaysShow,
+          destinations: [
+            const NavigationDestination(icon: Icon(Icons.home_outlined), selectedIcon: Icon(Icons.home_rounded), label: 'Inicio'),
+            const NavigationDestination(icon: Icon(Icons.search_rounded), selectedIcon: Icon(Icons.manage_search_rounded), label: 'Buscar'),
+            const NavigationDestination(icon: Icon(Icons.library_music_outlined), selectedIcon: Icon(Icons.library_music_rounded), label: 'Tu biblioteca'),
+            const NavigationDestination(icon: Icon(kIsWeb ? Icons.headphones_outlined : Icons.download_outlined),
+                selectedIcon: Icon(kIsWeb ? Icons.headphones_rounded : Icons.download_rounded),
+                label: kIsWeb ? 'Tu música' : 'Descargar'),
           ],
         ),
       );
       }),
     );
     // el modo coche se abre al conectar el Bluetooth del coche: solo en Android, debajo del Armazon
+    if (kIsWeb) return AtajosTeclado(alBuscar: () => _ir(1), child: raiz);
     return Plataforma.esAndroid ? VigiaCoche(child: raiz) : raiz;
   }
 
@@ -478,7 +497,8 @@ class _BarraLateral extends StatelessWidget {
           item(Icons.home_outlined, Icons.home_rounded, 'Inicio', pestana == 0, () => alIr(0)),
           item(Icons.search_rounded, Icons.manage_search_rounded, 'Buscar', pestana == 1, () => alIr(1)),
           item(Icons.library_music_outlined, Icons.library_music_rounded, 'Tu biblioteca', pestana == 2, () => alIr(2)),
-          item(Icons.download_outlined, Icons.download_rounded, 'Descargar', pestana == 3, () => alIr(3)),
+          item(kIsWeb ? Icons.headphones_outlined : Icons.download_outlined,
+              kIsWeb ? Icons.headphones_rounded : Icons.download_rounded, kIsWeb ? 'Tu música' : 'Descargar', pestana == 3, () => alIr(3)),
           Padding(
             padding: const EdgeInsets.fromLTRB(24, 18, 16, 6),
             child: Text('TÚ Y TUS AMIGOS', style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800,
@@ -489,8 +509,16 @@ class _BarraLateral extends StatelessWidget {
               () => alAbrir(MenuComunidad.pantalla(0, context))),
           item(Icons.explore_outlined, Icons.explore_rounded, 'Perfiles de Caudal', false,
               () => alAbrir(MenuComunidad.pantalla(1, context))),
-          item(Icons.library_music_outlined, Icons.library_music_rounded, 'Música de la comunidad', false,
+          item(Icons.library_music_outlined, Icons.library_music_rounded, kIsWeb ? 'Comunidad' : 'Música de la comunidad', false,
               () => alAbrir(MenuComunidad.pantalla(3, context))),
+          if (kIsWeb) ...[
+            item(Icons.group_add_outlined, Icons.group_add_rounded, 'Amigos y solicitudes', false,
+                () => alAbrir(MenuComunidad.pantalla(2, context))),
+            item(Icons.cloud_upload_outlined, Icons.cloud_upload_rounded, 'Subir mi música', false,
+                () => alAbrir(MenuComunidad.pantalla(4, context))),
+            item(Icons.celebration_outlined, Icons.celebration_rounded, 'Fiesta', false,
+                () => alAbrir(const FiestaPagina())),
+          ],
           item(Icons.album_outlined, Icons.album_rounded, 'Mezclador', false,
               () => alAbrir(MenuComunidad.pantalla(5, context))),
           item(Icons.groups_2_outlined, Icons.groups_2_rounded, 'Escuchar juntos', false,
@@ -502,6 +530,18 @@ class _BarraLateral extends StatelessWidget {
               () => alAbrir(const ResumenAnualPagina())),
           item(Icons.self_improvement_outlined, Icons.self_improvement_rounded, 'Modo estudio', false,
               () => alAbrir(const EstudioPagina())),
+          if (kIsWeb) ...[
+            item(Icons.blur_on_rounded, Icons.blur_on_rounded, 'Visualizador', false, () => VisualizadorPagina.abrir(context)),
+            item(Icons.desktop_windows_outlined, Icons.desktop_windows_rounded, 'Escena', false,
+                () => EscenaWebPagina.abrir(context)),
+            item(Icons.alarm_rounded, Icons.alarm_rounded, 'Despertador', false, () => alAbrir(const DespertadorPagina())),
+            item(Icons.mic_none_rounded, Icons.mic_rounded, '¿Qué suena?', false, () => alAbrir(const QueSuenaPagina())),
+            item(Icons.tune_rounded, Icons.tune_rounded, 'Modos de escucha', false,
+                () => alAbrir(const ModosEscuchaPagina())),
+            if (s.gamer != null)
+              item(Icons.sports_esports_outlined, Icons.sports_esports_rounded, 'Modo gamer', false,
+                  () => alAbrir(ModoGamerPagina(control: s.gamer!))),
+          ],
           const Spacer(),
           item(Icons.settings_outlined, Icons.settings_rounded, 'Ajustes', false, () => alAbrir(const AjustesPagina())),
           Padding(

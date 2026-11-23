@@ -38,6 +38,7 @@ import 'reproduccion/motor_eleccion.dart';
 import 'reproduccion/pip.dart';
 import 'reproduccion/reproductor.dart';
 import 'reproduccion/servicio_audio.dart';
+import 'reproduccion/sesion_medios.dart';
 import 'ui/armazon.dart';
 import 'ui/comunes.dart';
 import 'nucleo/fondo_app.dart';
@@ -301,7 +302,9 @@ class _CaudalAppState extends State<CaudalApp> {
     } catch (_) {} // si la ultima sesion no se puede leer, se empieza de cero
     // con tiempo maximo dentro: si Android tarda, la musica de fondo se engancha despues
     // modo seguro (la vez anterior se trabo): sin las piezas nativas opcionales
-    // en el navegador no hay notificacion de musica, ventana flotante ni descargas
+    // en el navegador no hay ventana flotante ni descargas; los controles de la pantalla
+    // bloqueada los lleva la propia web (sesion_medios.dart)
+    SesionMedios.enganchar(reproductor);
     final seguro = Diagnostico.modoSeguro || kIsWeb;
     if (!seguro) {
       Diagnostico.marcar('notificacion');
@@ -412,8 +415,9 @@ class _CaudalAppState extends State<CaudalApp> {
     } catch (e) {
       debugPrint('logros: $e');
     }
-    // pantalla bloqueada: despertador y letra (una vez por cuenta; en el navegador no existen)
-    if (!kIsWeb) engancharDespertador(s, _navegador);
+    // despertador y letra en la pantalla bloqueada (una vez por cuenta; en el navegador, solo el
+    // despertador, que suena con la página abierta)
+    engancharDespertador(s, _navegador);
   }
 
   /// Android 13+: sin este permiso no se ven los controles de la musica en la
@@ -469,7 +473,7 @@ class _CaudalAppState extends State<CaudalApp> {
     _vigia?.detener();
     _vigia = null;
     // las alarmas de Android siguen programadas; aquí solo se suelta la cuenta
-    if (!kIsWeb) soltarDespertador();
+    soltarDespertador();
     await Cuentas.olvidar(s.cuenta);
     FondoApp.i.reiniciar();
     Premium.i.reiniciar();

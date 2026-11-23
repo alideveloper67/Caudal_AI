@@ -8,6 +8,7 @@ import 'package:web/web.dart' as web;
 
 import '../nucleo/streams.dart';
 import 'jugador.dart';
+import 'jugador_audio_web.dart';
 
 /// El reproductor oficial de YouTube incrustado (versión web de Caudal).
 ///
@@ -18,7 +19,12 @@ import 'jugador.dart';
 
 bool get esJugadorWeb => true;
 
-Jugador crearJugador() => _JugadorYouTube();
+Jugador crearJugador() => _JugadorWeb();
+
+void medirEspectro(bool si) => JugadorAudio.medir(si);
+(List<int>, double)? leerEspectro() => JugadorAudio.espectro();
+
+Jugador crearJugadorAparte() => JugadorAudio(secundario: true);
 
 // ------------------------------------------------------------ el recuadro
 
@@ -145,6 +151,108 @@ Future<void> _api() {
 }
 
 int _contador = 0;
+
+/// El motor de la web: cada canción suena con el que le toca. Las de YouTube, con
+/// su recuadro oficial; las demás (Comunidad, tu música), con el audio del navegador.
+class _JugadorWeb implements Jugador {
+  _JugadorWeb() {
+    _unir(_yt);
+    _unir(_audio);
+    _audio.stream.playing.listen((s) {
+      // suena lo propio: no hay video que enseñar
+      if (s && identical(_activo, _audio)) _caja?.style.display = 'none';
+    });
+  }
+
+  final Jugador _yt = _JugadorYouTube();
+  final Jugador _audio = JugadorAudio();
+  late Jugador _activo = _yt;
+
+  final _pos = StreamController<Duration>.broadcast();
+  final _dur = StreamController<Duration>.broadcast();
+  final _sonando = StreamController<bool>.broadcast();
+  final _esperando = StreamController<bool>.broadcast();
+  final _fin = StreamController<bool>.broadcast();
+  final _error = StreamController<String>.broadcast();
+  final _log = StreamController<PlayerLog>.broadcast();
+
+  /// Solo se oye lo que cuenta el que está sonando.
+  void _unir(Jugador j) {
+    void pasar<T>(Stream<T> de, StreamController<T> a) => de.listen((x) {
+          if (identical(j, _activo) && !a.isClosed) a.add(x);
+        });
+    pasar(j.stream.position, _pos);
+    pasar(j.stream.duration, _dur);
+    pasar(j.stream.playing, _sonando);
+    pasar(j.stream.buffering, _esperando);
+    pasar(j.stream.completed, _fin);
+    pasar(j.stream.error, _error);
+    pasar(j.stream.log, _log);
+  }
+
+  @override
+  late final FlujosJugador stream = FlujosJugador(
+    position: _pos.stream, duration: _dur.stream, playing: _sonando.stream, buffering: _esperando.stream,
+    completed: _fin.stream, error: _error.stream, log: _log.stream,
+  );
+
+  @override
+  EstadoJugador get state => _activo.state;
+
+  @override
+  VideoController? get video => null;
+
+  @override
+  Future<void> open(Fuente f, {Duration? inicio, bool play = true}) async {
+    final nuevo = f.url.startsWith('yt:') ? _yt : _audio;
+    if (!identical(nuevo, _activo)) {
+      final viejo = _activo;
+      _activo = nuevo;
+      unawaited(viejo.stop());
+    }
+    await nuevo.open(f, inicio: inicio, play: play);
+  }
+
+  @override
+  Future<void> play() => _activo.play();
+  @override
+  Future<void> pause() => _activo.pause();
+  @override
+  Future<void> playOrPause() => _activo.playOrPause();
+  @override
+  Future<void> seek(Duration d) => _activo.seek(d);
+
+  @override
+  Future<void> setVolume(double v) async {
+    await _yt.setVolume(v);
+    await _audio.setVolume(v);
+  }
+
+  @override
+  Future<void> setRate(double v) async {
+    await _yt.setRate(v);
+    await _audio.setRate(v);
+  }
+
+  @override
+  Future<void> stop() => _activo.stop();
+
+  @override
+  Future<void> dispose() async {
+    await _yt.dispose();
+    await _audio.dispose();
+    for (final c in [_pos, _dur, _sonando, _esperando, _fin, _error, _log]) {
+      await c.close();
+    }
+  }
+
+  @override
+  Future<void> setProperty(String clave, String valor) => _audio.setProperty(clave, valor);
+  @override
+  Future<String?> getProperty(String clave) => _activo.getProperty(clave);
+  @override
+  Future<void> command(List<String> orden) async {}
+}
 
 class _JugadorYouTube implements Jugador {
   _JugadorYouTube();

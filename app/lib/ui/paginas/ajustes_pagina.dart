@@ -12,6 +12,8 @@ import '../../nucleo/mixes.dart';
 import '../../nucleo/plataforma.dart';
 import '../../nucleo/version.dart';
 import '../../coche/modo_coche_ajustes_pagina.dart';
+import '../../reproduccion/sesion_medios.dart';
+import '../atajos_teclado.dart';
 import '../comunes.dart';
 import '../cumpleanos.dart';
 import '../../nucleo/cumpleanos.dart';
@@ -394,6 +396,15 @@ class _AjustesPaginaState extends State<AjustesPagina> {
           },
         ),
 
+        if (kIsWeb && !SesionMedios.esTelefono) ...[
+          _seccion('Teclado'),
+          ListTile(
+            leading: const Icon(Icons.keyboard_rounded, color: C.texto2),
+            title: const Text('Atajos del teclado'),
+            subtitle: const Text('Pulsa ? en cualquier pantalla para verlos', style: estiloSecundario),
+            onTap: () => AtajosTeclado.mostrar(context),
+          ),
+        ],
         _seccion('Sonido'),
         const AjustesDespertador(),
         if (Plataforma.esAndroid)
@@ -405,7 +416,7 @@ class _AjustesPaginaState extends State<AjustesPagina> {
             onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ModoCocheAjustesPagina())),
           ),
         if (!kIsWeb) const AjusteBateria(),
-        if (!kIsWeb) ListTile(
+        ListTile(
           leading: const Icon(Icons.graphic_eq_rounded, color: C.texto2),
           title: const Text('Volumen máximo, ecualizador y velocidad'),
           subtitle: Text([

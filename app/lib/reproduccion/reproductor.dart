@@ -32,6 +32,7 @@ import 'retomar.dart';
 import 'cast.dart';
 import 'salida_audio.dart';
 import 'salida_unica.dart';
+import 'sesion_medios.dart';
 import 'sin_internet.dart';
 
 const frecuenciasEq = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
@@ -555,7 +556,11 @@ class Reproductor extends ChangeNotifier {
 
   /// Le pone a un motor la ganancia de la cancion que va a sonar en el (antes de abrirla).
   Future<void> _prepararGanancia(_Motor m, Fuente f) async {
-    if (kIsWeb) return; // en la web suena el reproductor de YouTube, con su propio volumen
+    if (kIsWeb) {
+      // YouTube pone su volumen; al audio del navegador solo le llega el ecualizador
+      if (!f.esYouTubeWeb) await _ponerAf(m, '');
+      return;
+    }
     if (!_filtrosMinimos) {
       // PC: ganancia y limitador van en la cadena de filtros de ese motor
       m.gananciaDb = gananciaPara(f);
@@ -1097,7 +1102,9 @@ class Reproductor extends ChangeNotifier {
   }
 
   /// En un fundido o traspaso no se suaviza (ya tienen su propio volumen).
-  bool get _puedeSuavizar => _fundido == null && _traspaso == null && _activo.fuente != null;
+  /// (En la web con la pantalla apagada los relojes van lentos: allí se corta en seco.)
+  bool get _puedeSuavizar =>
+      _fundido == null && _traspaso == null && _activo.fuente != null && !SesionMedios.oculta;
 
   Future<void> pausar() async {
     if (cast.activo) return cast.pausar();
@@ -1177,6 +1184,25 @@ class Reproductor extends ChangeNotifier {
     return coleccion.copiaLocal(p['video_id'] as String?) != null;
   }
 
+  /// ¿Suena en el navegador con el teléfono bloqueado? (todo menos YouTube)
+  bool _suenaEnReposo(Json p) =>
+      '${p['archivo'] ?? ''}'.isNotEmpty || '${p['video_id'] ?? ''}'.isEmpty || coleccion.estaDescargada(p);
+
+  /// La próxima de la cola que suena con el teléfono bloqueado. Si no hay, la cola queda como estaba.
+  Json? _siguienteEnReposo() {
+    final i = proximas.indexWhere(_suenaEnReposo);
+    if (i >= 0) {
+      final p = proximas.removeAt(i);
+      secuencia.insert(pos + 1, p);
+      pos++;
+      return p;
+    }
+    final j = secuencia.indexWhere(_suenaEnReposo, pos + 1);
+    if (j < 0) return null;
+    pos = j;
+    return secuencia[j];
+  }
+
   /// Avanza la cola hasta la próxima canción que suena sin internet (null: no queda ninguna).
   Json? _avanzarHastaDescargada() {
     final tope = secuencia.length + proximas.length + 1;
@@ -1236,6 +1262,12 @@ class Reproductor extends ChangeNotifier {
       return;
     }
     var objetivo = _avanzar();
+    // web con el teléfono bloqueado: YouTube no arranca, así que se sigue con lo próximo de la
+    // cola que sí puede (tu música y la de la comunidad); si no queda, se espera a que vuelva
+    if (objetivo != null && automatico && SesionMedios.oculta && SesionMedios.esTelefono && !_suenaEnReposo(objetivo)) {
+      final puede = _siguienteEnReposo();
+      if (puede != null) objetivo = puede;
+    }
     // sin internet no se prueban una por una las que no están descargadas: se salta a la próxima
     // descargada y, si no queda, sigue con otras descargas
     if (objetivo != null && internet.sinInternet && !suenaSinRed(objetivo)) {
@@ -1464,12 +1496,16 @@ class Reproductor extends ChangeNotifier {
       final original = '${pista['video_id'] ?? ''}';
       // si YouTube dijo que ese video no se puede reproducir, suena otra subida de la misma canción
       final vid = _videoAlterno[original] ?? original;
-      if (vid.isEmpty) {
+      final directa = '${pista['url_directa'] ?? ''}';
+      if (vid.isEmpty && !directa.startsWith('http')) {
         _fijarEstado(EstadoRepro.parado);
         return _aviso('No hay de dónde reproducir esta pista.');
       }
       try {
-        f = await streams.resolver(vid, video: querVideo,
+        f = vid.isEmpty
+            // música de la comunidad guardada en una lista (la nube no guarda «archivo»)
+            ? Fuente.archivo(directa)
+            : await streams.resolver(vid, video: querVideo,
             calidad: querVideo ? (_calidadForzada ?? ajustes.texto('calidad_video')) : ajustes.texto(Red.conDatos ? 'calidad_audio_datos' : 'calidad_audio'),
             codec: _codecVideo, intento: intento)
             // con una red que no responde el enlace podía tardar minutos: la canción no se queda
@@ -1737,7 +1773,7 @@ class Reproductor extends ChangeNotifier {
     final cf = _crossfade;
     final dur = duracion.value.inMilliseconds / 1000.0;
     // con "al terminar la cancion" no se funde con la siguiente: se apaga
-    if (modo == 'audio' && _fundido == null && dur > 20 && repetir != 'una' && !_apagarAlFinal &&
+    if (modo == 'audio' && _fundido == null && _puedeFundir && dur > 20 && repetir != 'una' && !_apagarAlFinal &&
         estado == EstadoRepro.sonando) {
       final paso = _pasosSet[actual];
       if (paso != null) {
@@ -1777,6 +1813,10 @@ class Reproductor extends ChangeNotifier {
       _guardarRetomar();
     }
   }
+
+  /// En el navegador de un teléfono no se funde: allí el volumen no se puede tocar y
+  /// con la pantalla apagada los relojes van a tirones.
+  bool get _puedeFundir => !kIsWeb || !(SesionMedios.esTelefono || SesionMedios.oculta);
 
   void _alDuracion(_Motor m, Duration d) {
     if (_traspaso != null || !_esActual(m) || d == Duration.zero) return;

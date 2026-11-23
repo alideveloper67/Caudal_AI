@@ -10,7 +10,10 @@ import 'package:media_kit/media_kit.dart' show Media, Player, PlaylistMode;
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
+import '../reproduccion/jugador.dart';
 import '../reproduccion/reproductor.dart';
+import '../reproduccion/sesion_medios.dart';
+import 'archivos_web.dart';
 import 'coleccion.dart';
 import 'despertador.dart';
 import 'despertador_nativo.dart';
@@ -105,7 +108,9 @@ class PuertoCaudal implements PuertoDespertador {
   }
 
   @override
-  bool get hayRed => !Red.sinRed;
+  bool get hayRed =>
+      // web con el teléfono bloqueado: lo de internet (YouTube) no arranca; suena tu música o el tono
+      !Red.sinRed && !(SesionMedios.oculta && SesionMedios.esTelefono);
 
   @override
   Future<void> sonar(List<Json> pistas, {required String titulo}) => reproductor.reproducirLista(pistas,
@@ -547,8 +552,20 @@ class ControlDespertador extends ChangeNotifier {
 class _TonoSuave {
   dynamic _player;
 
+  /// En la web el tono vive en la memoria del navegador.
+  static String? _urlTono;
+
   Future<void> empezar(double volumen) async {
     try {
+      if (kIsWeb) {
+        final b = await rootBundle.load('assets/despertador/amanecer.wav');
+        final j = Jugador.crearAparte();
+        _player = j;
+        await j.setProperty('loop-file', 'inf');
+        await j.setVolume(volumen);
+        await j.open(Fuente.archivo(_urlTono ??= ArchivosWeb.urlTemporal(b.buffer.asUint8List(), 'audio/wav')));
+        return;
+      }
       final dir = await getTemporaryDirectory();
       final f = File(p.join(dir.path, 'caudal_despertador_amanecer.wav'));
       if (!f.existsSync()) {

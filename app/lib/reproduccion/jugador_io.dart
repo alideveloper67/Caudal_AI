@@ -14,6 +14,11 @@ bool get esJugadorWeb => false;
 Jugador crearJugador() =>
     Platform.isAndroid && EleccionMotor.actual == MotorSonido.android ? JugadorExo() : _JugadorMpv();
 
+Jugador crearJugadorAparte() => crearJugador();
+
+void medirEspectro(bool si) {}
+(List<int>, double)? leerEspectro() => null;
+
 void mostrarVideoGrande(bool grande) {}
 void ocultarVideo(bool oculto) {}
 void colocarVideo(double? x, double? y, double? ancho, double? alto) {}

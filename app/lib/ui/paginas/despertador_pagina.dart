@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import '../../nucleo/coleccion.dart' show Json;
@@ -119,7 +120,10 @@ class _DespertadorPaginaState extends State<DespertadorPagina> with WidgetsBindi
         if (!Plataforma.esAndroid)
           const Padding(
             padding: EdgeInsets.fromLTRB(Esp.lado, 4, Esp.lado, 8),
-            child: Text('En este aparato la alarma suena con Caudal abierto.', style: estiloDetalle),
+            child: Text(kIsWeb
+                ? 'En el navegador suena con esta página abierta y el equipo encendido. Con el teléfono bloqueado '
+                    'puede no sonar: para despertarte, mejor la app de Android.'
+                : 'En este aparato la alarma suena con Caudal abierto.', style: estiloDetalle),
           ),
         if (alarmas.isEmpty)
           const Padding(

@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../nucleo/cosmeticos.dart';
@@ -19,6 +21,34 @@ class AspectoPagina extends StatefulWidget {
 }
 
 class _AspectoPaginaState extends State<AspectoPagina> {
+  @override
+  void initState() {
+    super.initState();
+    Premium.i.addListener(_premiumCambio);
+    // quien acaba de donar no espera al refresco de cada 20 min: se pregunta al entrar
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) unawaited(_preguntarPremium());
+    });
+  }
+
+  @override
+  void dispose() {
+    Premium.i.removeListener(_premiumCambio);
+    super.dispose();
+  }
+
+  void _premiumCambio() {
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _preguntarPremium() async {
+    final social = socialDe(context);
+    if (social == null) return;
+    try {
+      await Premium.i.refrescar(social).timeout(const Duration(seconds: 8));
+    } catch (_) {}
+  }
+
   Future<void> _poner(String clave, Object valor) async {
     // elegir un fondo es cambiar de aspecto: si había un tema exclusivo puesto, se quita para que el fondo
     // elegido (con su personaje y sus colores) se vea de verdad
@@ -37,6 +67,9 @@ class _AspectoPaginaState extends State<AspectoPagina> {
 
   /// Un escenario del reproductor: solo con beneficios; si no, avisa igual que el resto de lo exclusivo.
   Future<void> _elegirEscenario(String clave) async {
+    // lo guardado en el teléfono puede ir atrasado (una donación de hace un rato): se pregunta antes de negar
+    if (!Premium.i.activo) await _preguntarPremium();
+    if (!mounted) return;
     if (!Premium.i.activo) {
       Caudal.leer(context).avisar('Es exclusivo de donadores: dona o canjea un código de prueba para usarlo.');
       return;

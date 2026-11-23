@@ -91,6 +91,11 @@ class Ajustes extends ChangeNotifier {
     // «Modo gamer» (ver gamer_control.dart): interruptor, ahorro al jugar, perfil de sonido
     // y lo que hay que devolver al apagarlo
     'gamer_activo': false,
+    // solo en la versión web: panel de la derecha, visualizador y escena (no viajan a la nube)
+    'panel_derecho': 'sonando', // sonando | cola | letras | oculto
+    'visualizador_estilo': 'ondas', // ondas | particulas | barras
+    'escena_fondo': 'ambiente', // ambiente | clave de un escenario
+    'escena_web': '', // dónde puso cada pieza (JSON)
     'gamer_ahorro': true,
     'gamer_sonido': '',
     'gamer_ligero_previo': '',

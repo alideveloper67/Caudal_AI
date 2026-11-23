@@ -696,7 +696,30 @@ class MiniReproductor(QWidget):
         flags = Qt.Window | Qt.FramelessWindowHint | Qt.Tool
         if self.ctx.ajustes["mini_encima"]:
             flags |= Qt.WindowStaysOnTopHint
+        if self.windowFlags() == flags:
+            return      # cambiar las banderas rehace la ventana nativa: solo si de verdad cambian
+        # la ventana nativa (y la pantalla donde pinta mpv) se va a rehacer: el motor del video
+        # no puede quedarse apuntando a una ventana que ya no existe
+        self._soltar_motor()
         self.setWindowFlags(flags)
+
+    def _soltar_motor(self):
+        """Apaga el mpv del mini. Su ventana vive en otro hilo pero es hija de esta, y Windows
+        une la cola de ratón y teclado de los dos hilos: si ese mpv se queda colgado con la
+        ventanita oculta, Caudal sigue sonando y pintando pero ya no recibe clics."""
+        if self.motor is None:
+            return
+        self.motor = None
+        try:
+            self.r.soltar_video("mini")
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _asegurar_motor(self):
+        """El motor de video del mini solo existe mientras hay un video que mostrar en él."""
+        if self.motor is None and self.r.disponible:
+            self.motor = self.r.registrar_video("mini", int(self.pantalla.winId()))
+        return self.motor is not None
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
@@ -709,11 +732,10 @@ class MiniReproductor(QWidget):
             self.move(pantalla.right() - self.width() - 24, pantalla.bottom() - self.height() - 24)
         self.show()
         self.raise_()
-        if self.motor is None and self.r.disponible:
-            self.motor = self.r.registrar_video("mini", int(self.pantalla.winId()))
-        self._modo(self.r.modo)
-        if self.r.modo == "video":
+        # con una canción no hace falta ningún mpv de video aquí: solo la portada
+        if self.r.modo == "video" and self._asegurar_motor():
             self.r.mover_video("mini")
+        self._modo(self.r.modo)
 
     def closeEvent(self, e):
         if (not getattr(self, "_cerrando", False) and self.r.modo == "video"
@@ -727,6 +749,10 @@ class MiniReproductor(QWidget):
             self._esperar_traspaso()
             return
         self._cerrando = False
+        # el video ya está en la ventana grande (o era una canción): el mpv del mini se apaga
+        # ANTES de ocultar la ventanita, para que no quede una ventana suya colgada detrás
+        if self.r.destino_video != "mini":
+            self._soltar_motor()
         self.cerrado.emit()
         super().closeEvent(e)
 

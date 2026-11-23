@@ -6,6 +6,7 @@ import 'package:flutter/services.dart' show rootBundle;
 import 'package:path_provider/path_provider.dart';
 
 import '../reproduccion/jugador.dart';
+import 'archivos_web.dart';
 import 'estilo_reproductor.dart';
 import 'premium_letras.dart';
 import 'streams.dart' show Fuente;
@@ -26,7 +27,7 @@ class SonidosInterfaz {
     bool? disponible,
     this.espera = const Duration(milliseconds: 1800),
     this.reposo = const Duration(seconds: 20),
-  })  : _fabrica = fabrica ?? Jugador.crear,
+  })  : _fabrica = fabrica ?? Jugador.crearAparte,
         _carpeta = carpeta ?? getTemporaryDirectory,
         _cargarAsset = cargarAsset ?? _delBundle,
         _prefs = preferencias ?? PreferenciasReproductor.i,
@@ -51,7 +52,7 @@ class SonidosInterfaz {
   static const _version = 1;
   static Future<Uint8List> _delBundle(String a) async => (await rootBundle.load(a)).buffer.asUint8List();
 
-  bool get disponible => _disponible ?? !(kIsWeb || Jugador.esWeb);
+  bool get disponible => _disponible ?? true;
   bool get _donador => (_esDonador ?? esPremiumLetras)();
 
   Jugador? _motor;
@@ -89,10 +90,10 @@ class SonidosInterfaz {
     if (!vistaPrevia && ahora.difference(_ultimo) < const Duration(milliseconds: 250)) return;
     _ultimo = ahora;
     try {
-      final f = await archivoDe(s);
+      final ruta = await _rutaDe(s);
       final j = _motor ??= _fabrica();
       await j.setVolume(_prefs.volumenSonido.clamp(0.05, 0.6) * 100);
-      await j.open(Fuente.archivo(f.path));
+      await j.open(Fuente.archivo(ruta));
       sonados++;
       _ultimo = DateTime.now();
       _suelta?.cancel();
@@ -101,6 +102,14 @@ class SonidosInterfaz {
       debugPrint('sonido de interfaz: $e');
       await soltar();
     }
+  }
+
+  /// En la web no hay carpeta temporal: el WAV vive en la memoria del navegador.
+  final Map<SonidoUi, Future<String>> _enMemoria = {};
+
+  Future<String> _rutaDe(SonidoUi s) async {
+    if (!kIsWeb) return (await archivoDe(s)).path;
+    return _enMemoria[s] ??= _cargarAsset(s.asset).then((b) => ArchivosWeb.urlTemporal(b, 'audio/wav'));
   }
 
   Future<File> archivoDe(SonidoUi s) => _archivos[s] ??= _asegurar(s);

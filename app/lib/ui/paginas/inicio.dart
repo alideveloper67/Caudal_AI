@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import '../../nucleo/vida_app.dart';
@@ -220,9 +221,11 @@ class _InicioPaginaState extends State<InicioPagina> with AutomaticKeepAliveClie
                 delegate: SliverChildListDelegate([
                   if (_filtro == 'telefono') ...[
                     if (_localListo && _enTelefono.isEmpty)
-                      Vacio(icono: Icons.download_for_offline_outlined, titulo: 'Aún no hay nada en tu teléfono',
-                          texto: 'Descarga canciones, álbumes o videos y suenan sin internet.',
-                          textoAccion: 'Descargar un enlace', iconoAccion: Icons.link_rounded,
+                      Vacio(icono: Icons.download_for_offline_outlined, titulo: kIsWeb ? 'Aún no hay canciones aquí' : 'Aún no hay nada en tu teléfono',
+                          texto: kIsWeb ? 'Agrega las que tengas en este equipo y suenan sin internet.'
+                              : 'Descarga canciones, álbumes o videos y suenan sin internet.',
+                          textoAccion: kIsWeb ? 'Agregar canciones' : 'Descargar un enlace',
+                          iconoAccion: kIsWeb ? Icons.add_rounded : Icons.link_rounded,
                           alAccion: () => s.irAPestana?.call(3))
                     else ...[
                       // sin titulos de carruseles vacios (solo musica o solo videos)
@@ -265,7 +268,8 @@ class _InicioPaginaState extends State<InicioPagina> with AutomaticKeepAliveClie
                     if (_catalogo == null && !_sinRed) const Esqueleto(),
                     if (_sinRed)
                       Vacio(icono: Icons.wifi_off_rounded, titulo: 'Sin conexión', error: true,
-                          texto: 'Mientras vuelve, tienes lo descargado en «En tu teléfono».',
+                          texto: kIsWeb ? 'Mientras vuelve, puedes oír «Tu música».'
+                              : 'Mientras vuelve, tienes lo descargado en «En tu teléfono».',
                           alAccion: () => _cargar(forzar: true)),
                     ...pintarSecciones(context, secciones, desde: turno + 1),
                   ],
@@ -338,7 +342,7 @@ class _Cabecera extends StatelessWidget {
             scrollDirection: Axis.horizontal,
             child: Row(children: [
               for (final (clave, texto) in const [('todo', 'Todo'), ('musica', 'Música'),
-                ('videos', 'Videos'), ('telefono', 'En tu teléfono')])
+                ('videos', 'Videos'), ('telefono', kIsWeb ? 'Tu música' : 'En tu teléfono')])
                 Pildora(texto: texto, activa: filtro == clave, alPulsar: () => alFiltrar(clave)),
             ]),
           ),

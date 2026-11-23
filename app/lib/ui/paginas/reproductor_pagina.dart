@@ -1,8 +1,9 @@
 import 'dart:async';
+import 'dart:math' show min;
 import 'dart:ui' as ui;
 
 import 'package:cached_network_image/cached_network_image.dart';
-import 'package:flutter/foundation.dart' show ValueListenable;
+import 'package:flutter/foundation.dart' show ValueListenable, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit_video/media_kit_video.dart';
@@ -24,6 +25,7 @@ import '../../nucleo/traductor.dart';
 import '../../reproduccion/frenos.dart';
 import '../../reproduccion/jugador.dart';
 import '../../reproduccion/reproductor.dart';
+import '../../reproduccion/sesion_medios.dart';
 import '../comunes.dart';
 import '../escenarios/catalogo.dart';
 import '../escenarios/escenario_fondo.dart';
@@ -33,6 +35,7 @@ import '../reproductor/barra_progreso.dart';
 import '../reproductor/compartir_cancion.dart';
 import '../reproductor/estilos_portada.dart';
 import '../reproductor/fondo_ambiente.dart';
+import '../reproductor/hueco_video_web.dart';
 import '../reproductor/insignia_calidad.dart';
 import '../reproductor/paleta_portada.dart';
 import '../reproductor/personalizar_hoja.dart';
@@ -49,6 +52,7 @@ import 'compartir_letra.dart';
 import 'karaoke_pagina.dart';
 import 'mezclador_ajustes.dart';
 import 'mezclador_pagina.dart';
+import 'modo_reposo_pagina.dart';
 import 'sonido.dart';
 
 class ReproductorPagina extends StatefulWidget {
@@ -287,7 +291,15 @@ class _ReproductorPaginaState extends State<ReproductorPagina> with SingleTicker
   Widget build(BuildContext context) {
     final s = Caudal.of(context);
     final r = s.reproductor;
-    final ancho = MediaQuery.sizeOf(context).width;
+    final pantalla = MediaQuery.sizeOf(context);
+    final ancho = pantalla.width;
+    // en el navegador (PC o teléfono de lado) no cabe una portada tan ancha como la ventana
+    final horizontal = kIsWeb && ancho >= 600 && ancho > pantalla.height;
+    final altoLibre = pantalla.height - MediaQuery.paddingOf(context).vertical - 84;
+    final lado = horizontal
+        ? min(ladoPortadaGrande(ancho / 2), altoLibre).clamp(120.0, 620.0)
+        : kIsWeb ? min(ladoPortadaGrande(ancho), 620.0) : ladoPortadaGrande(ancho);
+    final anchoVideo = min(ladoPortadaGrande(ancho / 2), altoLibre * 16 / 9).clamp(200.0, 900.0);
     return ValueListenableBuilder<double>(
       valueListenable: _arrastre,
       builder: (_, bajada, hijo) => Transform.translate(offset: Offset(0, bajada), child: hijo),
@@ -319,57 +331,10 @@ class _ReproductorPaginaState extends State<ReproductorPagina> with SingleTicker
             final gusta = s.coleccion.meGusta(clave);
             final ctx = r.contexto;
             final video = r.modo == 'video';
+            final conRecuadro = _conRecuadro(r);
             final escenario = _escenarioDelReproductor(s.ajustes);
-            return Stack(children: [
-              // ---- modo ambiente: la portada desenfocada, moviendose despacio (o un escenario elegido)
-              Positioned.fill(
-                child: ValueListenableBuilder<PaletaPortada>(
-                  valueListenable: _vista,
-                  builder: (_, pal, _) => Stack(fit: StackFit.expand, children: [
-                    if (escenario != null) ...[
-                      // sin espectro de audio en la app: el escenario respira solo (bandas: null)
-                      EscenarioFondo(clave: escenario.clave, bandas: null),
-                      // velo oscuro suave abajo para que se lean los controles
-                      IgnorePointer(
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.topCenter,
-                              end: Alignment.bottomCenter,
-                              colors: [Colors.black.withValues(alpha: 0), Colors.black.withValues(alpha: 0.55)],
-                              stops: const [0.45, 1],
-                            ),
-                          ),
-                        ),
-                      ),
-                    ] else
-                      FondoAmbiente(url: url, color: pal.fondo, enMovimiento: !video && r.estado == EstadoRepro.sonando),
-                    // con los colores de la caratula, el fondo se funde hacia su segundo tono
-                    if (escenario == null && _prefs.coloresActivos)
-                      IgnorePointer(
-                        child: DecoratedBox(
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.topCenter,
-                              end: Alignment.bottomCenter,
-                              colors: [pal.contraste.withValues(alpha: 0), pal.contraste.withValues(alpha: 0.38)],
-                            ),
-                          ),
-                        ),
-                      ),
-                  ]),
-                ),
-              ),
-              Scaffold(
-                backgroundColor: Colors.transparent,
-                body: FadeTransition(
-                  opacity: _entrada,
-                  child: SafeArea(
-                  // en iOS rebota abajo, pero arriba el tiron llega a "bajar para cerrar"
-                  child: ListView(padding: EdgeInsets.zero, physics: esIOS ? const RebotaSoloAbajo() : null,
-                      children: [
-                    // ---- cabecera
-                    Padding(
+            // ---- cabecera
+            final cabecera = Padding(
                       padding: const EdgeInsets.fromLTRB(4, 4, 4, 0),
                       child: Row(children: [
                         IconButton(icon: const Icon(Icons.keyboard_arrow_down_rounded, size: 32),
@@ -388,7 +353,13 @@ class _ReproductorPaginaState extends State<ReproductorPagina> with SingleTicker
                           icon: const Icon(Icons.ios_share_rounded),
                           onPressed: () => _compartirCancion(context, r, p),
                         ),
-                        if (!Jugador.esWeb)
+                        if (Jugador.esWeb && SesionMedios.esTelefono)
+                          IconButton(
+                            tooltip: 'Modo reposo',
+                            icon: const Icon(Icons.screen_lock_portrait_rounded),
+                            onPressed: () => ModoReposoPagina.abrir(context),
+                          ),
+                        if (!_conRecuadro(r))
                           IconButton(
                             tooltip: 'Personalizar el reproductor',
                             icon: Icon(Icons.style_rounded,
@@ -397,14 +368,13 @@ class _ReproductorPaginaState extends State<ReproductorPagina> with SingleTicker
                           ),
                         IconButton(icon: const Icon(Icons.more_vert_rounded), onPressed: () => s.hojaPista(context, p)),
                       ]),
-                    ),
-                    const SizedBox(height: 14),
-                    // ---- portada o video
-                    Padding(
+                    );
+            // ---- portada o video
+            final portada = Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 22),
-                      child: Jugador.esWeb
+                      child: _conRecuadro(r)
                           // web: aqui va el video de YouTube (el recuadro se coloca encima)
-                          ? const _HuecoVideoWeb()
+                          ? const HuecoVideoWeb()
                           : video
                           ? _VideoEnLinea(r: r)
                           : estilo != EstiloReproductor.clasico
@@ -413,7 +383,7 @@ class _ReproductorPaginaState extends State<ReproductorPagina> with SingleTicker
                               url: url,
                               r: r,
                               vista: _vista,
-                              lado: ladoPortadaGrande(ancho),
+                              lado: lado,
                               ritmoDe: () => _ritmoDe(s, clave),
                               alDobleToque: () => _meGustaDobleToque(s, p),
                               alSiguiente: () => _siguiente(r),
@@ -421,14 +391,14 @@ class _ReproductorPaginaState extends State<ReproductorPagina> with SingleTicker
                             )
                           : PortadaDeslizable(
                               pista: p,
-                              lado: ladoPortadaGrande(ancho),
+                              lado: lado,
                               direccion: _direccion,
                               alSiguiente: () => _siguiente(r),
                               alAnterior: () => _anterior(r),
                               alDobleToque: () => _meGustaDobleToque(s, p),
                             ),
-                    ),
-                    const SizedBox(height: 26),
+                    );
+            final resto = <Widget>[
                     // ---- titulo
                     Padding(
                       padding: const EdgeInsets.only(left: 22, right: 10),
@@ -531,7 +501,8 @@ class _ReproductorPaginaState extends State<ReproductorPagina> with SingleTicker
                       padding: const EdgeInsets.fromLTRB(14, 4, 14, 0),
                       child: Row(children: [
                         const Spacer(),
-                        if ('${p['video_id'] ?? ''}'.isNotEmpty || (p['archivo'] != null && p['es_audio'] != true))
+                        // (en la web el video de YouTube siempre se ve: no hay qué elegir)
+                        if (!kIsWeb && ('${p['video_id'] ?? ''}'.isNotEmpty || (p['archivo'] != null && p['es_audio'] != true)))
                           // en un telefono estrecho se encoge en vez de desbordar la fila
                           Flexible(child: FittedBox(fit: BoxFit.scaleDown, child: SegmentedButton<String>(
                             showSelectedIcon: false,
@@ -593,7 +564,78 @@ class _ReproductorPaginaState extends State<ReproductorPagina> with SingleTicker
                       ),
                     ),
                     const SizedBox(height: 24),
+            ];
+            return Stack(children: [
+              // ---- modo ambiente: la portada desenfocada, moviendose despacio (o un escenario elegido)
+              Positioned.fill(
+                child: ValueListenableBuilder<PaletaPortada>(
+                  valueListenable: _vista,
+                  builder: (_, pal, _) => Stack(fit: StackFit.expand, children: [
+                    if (escenario != null) ...[
+                      // sin espectro de audio en la app: el escenario respira solo (bandas: null)
+                      EscenarioFondo(clave: escenario.clave, bandas: null),
+                      // velo oscuro suave abajo para que se lean los controles
+                      IgnorePointer(
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [Colors.black.withValues(alpha: 0), Colors.black.withValues(alpha: 0.55)],
+                              stops: const [0.45, 1],
+                            ),
+                          ),
+                        ),
+                      ),
+                    ] else
+                      FondoAmbiente(url: url, color: pal.fondo, enMovimiento: !video && r.estado == EstadoRepro.sonando),
+                    // con los colores de la caratula, el fondo se funde hacia su segundo tono
+                    if (escenario == null && _prefs.coloresActivos)
+                      IgnorePointer(
+                        child: DecoratedBox(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [pal.contraste.withValues(alpha: 0), pal.contraste.withValues(alpha: 0.38)],
+                            ),
+                          ),
+                        ),
+                      ),
                   ]),
+                ),
+              ),
+              Scaffold(
+                backgroundColor: Colors.transparent,
+                body: FadeTransition(
+                  opacity: _entrada,
+                  child: SafeArea(
+                  // en iOS rebota abajo, pero arriba el tiron llega a "bajar para cerrar"
+                  child: horizontal
+                      // ventana ancha o teléfono de lado: la portada a la izquierda y lo demás al lado
+                      ? Column(children: [
+                          cabecera,
+                          Expanded(
+                            child: Row(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                              Expanded(
+                                child: Center(child: SizedBox(width: (conRecuadro ? anchoVideo : lado) + 44, child: portada)),
+                              ),
+                              Expanded(
+                                child: ListView(
+                                  padding: EdgeInsets.fromLTRB(0, pantalla.height < 520 ? 0 : 24, 12, 0),
+                                  children: resto,
+                                ),
+                              ),
+                            ]),
+                          ),
+                        ])
+                      : ListView(padding: EdgeInsets.zero, physics: esIOS ? const RebotaSoloAbajo() : null, children: [
+                          cabecera,
+                          const SizedBox(height: 14),
+                          portada,
+                          const SizedBox(height: 26),
+                          ...resto,
+                        ]),
                 ),
                 ),
               ),
@@ -1520,6 +1562,11 @@ class BotonTraducir extends StatelessWidget {
 }
 
 
+/// Web: ¿lo que suena va en el recuadro de YouTube? (la música propia y la de la
+/// comunidad enseñan su portada, como en la app)
+bool _conRecuadro(Reproductor r) =>
+    Jugador.esWeb && (r.fuente?.esYouTubeWeb ?? '${r.actual?['video_id'] ?? ''}'.isNotEmpty);
+
 /// En la web el video es el del reproductor de YouTube (el recuadro de la
 /// esquina): aquí se agranda o se achica.
 class _VideoWeb extends StatefulWidget {
@@ -1555,54 +1602,4 @@ class _VideoWebState extends State<_VideoWeb> {
           ),
         ),
       );
-}
-
-
-/// El hueco donde se coloca el reproductor de YouTube en la web. Se mide cada
-/// vez que se pinta (y al desplazar) para que el recuadro lo siga.
-class _HuecoVideoWeb extends StatefulWidget {
-  const _HuecoVideoWeb();
-
-  @override
-  State<_HuecoVideoWeb> createState() => _HuecoVideoWebState();
-}
-
-class _HuecoVideoWebState extends State<_HuecoVideoWeb> {
-  final _llave = GlobalKey();
-  ScrollPosition? _scroll;
-
-  void _medir() {
-    if (!mounted) return;
-    final caja = _llave.currentContext?.findRenderObject() as RenderBox?;
-    if (caja == null || !caja.attached) return;
-    final o = caja.localToGlobal(Offset.zero);
-    LienzoVideoWeb.colocar(o & caja.size);
-  }
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    _scroll?.removeListener(_medir);
-    _scroll = Scrollable.maybeOf(context)?.position;
-    _scroll?.addListener(_medir);
-  }
-
-  @override
-  void dispose() {
-    _scroll?.removeListener(_medir);
-    LienzoVideoWeb.colocar(null);
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    WidgetsBinding.instance.addPostFrameCallback((_) => _medir());
-    return AspectRatio(
-      key: _llave,
-      aspectRatio: 16 / 9,
-      child: DecoratedBox(
-        decoration: BoxDecoration(color: Colors.black, borderRadius: BorderRadius.circular(10)),
-      ),
-    );
-  }
 }

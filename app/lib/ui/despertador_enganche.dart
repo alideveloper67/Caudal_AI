@@ -1,5 +1,6 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/widgets.dart';
 
 import '../nucleo/despertador_control.dart';
@@ -12,7 +13,7 @@ VigiaDespertador? _vigia;
 /// Engancha el despertador y la letra en la pantalla bloqueada a la cuenta que se acaba de abrir.
 /// Se llama una vez por cuenta (main.dart, al final de `_abrir`).
 void engancharDespertador(Servicios s, GlobalKey<NavigatorState> navegador) {
-  LetraEnBloqueo.i.enlazar(s.reproductor);
+  if (!kIsWeb) LetraEnBloqueo.i.enlazar(s.reproductor);
   _vigia?.soltar();
   _vigia = VigiaDespertador(ControlDespertador.i, navegador);
   unawaited(ControlDespertador.i
@@ -22,7 +23,7 @@ void engancharDespertador(Servicios s, GlobalKey<NavigatorState> navegador) {
 
 /// Al cerrar la sesión (las alarmas de Android siguen programadas).
 void soltarDespertador() {
-  LetraEnBloqueo.i.soltar();
+  if (!kIsWeb) LetraEnBloqueo.i.soltar();
   _vigia?.soltar();
   _vigia = null;
   ControlDespertador.i.soltar();
