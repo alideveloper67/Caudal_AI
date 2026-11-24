@@ -24,6 +24,8 @@ import time
 
 import requests
 
+from . import elegir_letra
+
 REGION = "PE"
 _local = threading.local()
 
@@ -940,96 +942,176 @@ def relacionados(video_id):
 # ---------------------------------------------------------------- letras
 
 def _lrc_a_lineas(texto):
+    """[(ms, verso)] de un texto LRC: con [offset:…], marcas por palabra <mm:ss> y varias marcas por verso."""
+    corrido = 0
+    m = re.search(r"\[offset:\s*([+-]?\d+)\s*\]", texto or "", flags=re.I)
+    if m:
+        corrido = int(m.group(1))            # en LRC, positivo = la letra va antes
     lineas = []
     for fila in (texto or "").splitlines():
-        marcas = re.findall(r"\[(\d+):(\d+(?:\.\d+)?)\]", fila)
-        contenido = re.sub(r"\[\d+:\d+(?:\.\d+)?\]", "", fila).strip()
+        marcas = re.findall(r"\[(\d+):(\d+(?:[.:]\d+)?)\]", fila)
+        contenido = re.sub(r"\[\d+:\d+(?:[.:]\d+)?\]|<\d+:\d+(?:[.:]\d+)?>", "", fila)
+        contenido = re.sub(r"\s+", " ", contenido).strip()
         for mm, ss in marcas:
-            lineas.append((int((int(mm) * 60 + float(ss)) * 1000), contenido))
+            ms = int((int(mm) * 60 + float(ss.replace(":", "."))) * 1000) - corrido
+            lineas.append((max(0, ms), contenido))
     lineas.sort(key=lambda x: x[0])
     return lineas
 
 
-def letras(pista):
-    """{"sincronizada": bool, "lineas": [(ms, texto)] o [], "texto": str, "fuente"}."""
-    titulo = re.sub(r"\s*[\(\[](official|video|audio|lyric|visualizer|letra)[^\)\]]*[\)\]]",
-                    "", pista.get("titulo") or "", flags=re.I).strip()
-    artista = (pista.get("artistas") or [{}])[0].get("nombre") if pista.get("artistas") else ""
-    artista = artista or pista.get("artista") or ""
+_CAB_LRCLIB = {"User-Agent": "Caudal (reproductor de escritorio)"}
+
+
+def _lrclib(ruta, params):
+    """Lo que responde LRCLIB, o None si no está (o no contesta)."""
+    try:
+        r = requests.get(f"https://lrclib.net/api/{ruta}", params=params, headers=_CAB_LRCLIB, timeout=10)
+        return r.json() if r.status_code == 200 else None
+    except (requests.RequestException, ValueError):
+        return None
+
+
+def _candidatas_lrclib(pista):
+    """Las fichas de LRCLIB que podrían ser esta canción, sin repetir (aún sin comprobar)."""
+    salida, vistas = [], set()
+
+    def sumar(x):
+        for c in (x if isinstance(x, list) else [x]):
+            if isinstance(c, dict) and c.get("id") not in vistas:
+                vistas.add(c.get("id"))
+                salida.append(c)
     dur = int(pista.get("duracion") or 0)
-    cab = {"User-Agent": "Caudal (reproductor de escritorio)"}
+    for titulo, artista, _valen in elegir_letra.consultas(pista)[:2]:
+        params = {"track_name": titulo, "artist_name": artista}
+        if dur:
+            exacta = _lrclib("get", dict(params, duration=dur))
+            if exacta:
+                sumar(exacta)
+                if (exacta.get("syncedLyrics") or "").strip():
+                    continue
+        sumar(_lrclib("search", params) or [])
+        if not any((c.get("syncedLyrics") or "").strip() for c in salida):
+            sumar(_lrclib("search", {"q": f"{artista} {titulo}".strip()}) or [])
+    return salida
 
-    # 1) LRCLIB: letras sincronizadas, gratis y sin clave
-    if titulo and artista:
-        try:
-            params = {"track_name": titulo, "artist_name": artista}
-            if dur:
-                params["duration"] = dur
-            r = requests.get("https://lrclib.net/api/get", params=params, headers=cab, timeout=10)
-            datos = r.json() if r.status_code == 200 else None
-            if not datos:
-                r = requests.get("https://lrclib.net/api/search",
-                                 params={"q": f"{artista} {titulo}"}, headers=cab, timeout=10)
-                candidatos = r.json() if r.status_code == 200 else []
-                if dur:
-                    candidatos = sorted(candidatos,
-                                        key=lambda c: abs((c.get("duration") or 0) - dur))
-                datos = next((c for c in candidatos if c.get("syncedLyrics")), None) \
-                    or (candidatos[0] if candidatos else None)
-            if datos:
-                if datos.get("syncedLyrics"):
-                    return {"sincronizada": True, "lineas": _lrc_a_lineas(datos["syncedLyrics"]),
-                            "texto": datos.get("plainLyrics") or "", "fuente": "LRCLIB",
-                            "duracion": float(datos.get("duration") or 0)}
-                if datos.get("plainLyrics"):
-                    return {"sincronizada": False, "lineas": [],
-                            "texto": datos["plainLyrics"], "fuente": "LRCLIB"}
-        except (requests.RequestException, ValueError):
-            pass
 
-    # 2) YouTube Music
-    vid = pista.get("video_id")
-    if vid:
+def _letra_youtube(vid):
+    """(líneas con tiempos, texto, fuente) de YouTube Music para ese video exacto."""
+    if not vid:
+        return [], "", ""
+    try:
+        lid = _yt().get_watch_playlist(videoId=vid, limit=1).get("lyrics")
+        if not lid:
+            return [], "", ""
         try:
-            w = _yt().get_watch_playlist(videoId=vid, limit=1)
-            lid = w.get("lyrics")
-            if lid:
-                l = _yt().get_lyrics(lid, timestamps=True)
-                if l and l.get("hasTimestamps"):
-                    lineas = [(x.start_time, x.text) for x in l.get("lyrics") or []]
-                    return {"sincronizada": True, "lineas": lineas, "texto": "",
-                            "fuente": l.get("source") or "YouTube Music"}
-                l = _yt().get_lyrics(lid)
-                if l and l.get("lyrics"):
-                    return {"sincronizada": False, "lineas": [], "texto": l["lyrics"],
-                            "fuente": l.get("source") or "YouTube Music"}
-        except Exception:
+            l = _yt().get_lyrics(lid, timestamps=True)
+            if l and l.get("hasTimestamps"):
+                lineas = [(int(x.start_time), x.text) for x in l.get("lyrics") or []]
+                if any((t or "").strip(" ♪") for _ms, t in lineas):
+                    return lineas, "\n".join(t for _ms, t in lineas), l.get("source") or "YouTube Music"
+        except Exception:  # noqa: BLE001  (sin tiempos: se pide el texto)
             pass
+        l = _yt().get_lyrics(lid)
+        if l and l.get("lyrics"):
+            return [], l["lyrics"], l.get("source") or "YouTube Music"
+    except Exception:  # noqa: BLE001
+        pass
+    return [], "", ""
+
+
+def _cancion_oficial(pista, texto=""):
+    """La canción de YouTube Music de la que sale este video (o archivo), con su letra y sus tiempos:
+    {"video_id", "duracion", "lineas", "texto", "fuente"}, o None. `texto`: la letra ya sabida, para no
+    quedarse con otra canción."""
+    dur = float(pista.get("duracion") or 0)
+    for titulo, artista, _valen in elegir_letra.consultas(pista)[:2]:
+        try:
+            crudo = _yt().search(f"{artista} {titulo}".strip(), filter="songs", limit=10)
+        except Exception:  # noqa: BLE001
+            continue
+        buenas = []
+        for x in crudo or []:
+            ficha = {"trackName": x.get("title"), "albumName": (x.get("album") or {}).get("name"),
+                     "artistName": ", ".join(z.get("name") or "" for z in x.get("artists") or [])}
+            if x.get("videoId") and x["videoId"] != pista.get("video_id") and elegir_letra.es_la_cancion(ficha, pista):
+                buenas.append((abs(float(x.get("duration_seconds") or 0) - dur) if dur else 0, x))
+        buenas.sort(key=lambda z: z[0])
+        for _d, x in buenas[:2]:
+            lineas, tx, fuente = _letra_youtube(x["videoId"])
+            if lineas and (not texto or elegir_letra.palabras_en_comun(tx, texto) >= elegir_letra.PARECIDO_TEXTO_MIN):
+                return {"video_id": x["videoId"], "duracion": float(x.get("duration_seconds") or 0),
+                        "lineas": lineas, "texto": tx, "fuente": fuente}
+    return None
+
+
+def letras(pista):
+    """{"sincronizada": bool, "lineas": [(ms, texto)] o [], "texto": str, "fuente", "verificada": bool}.
+
+    La letra tiene que ser la de esta canción (descargador/elegir_letra.py) y sus tiempos, los del audio
+    que suena:
+    1. la que YouTube Music trae con tiempos para ese mismo video;
+    2. la de la canción oficial de la que sale el video, si dura lo mismo. Si dura distinto, va
+       «otra_duracion» hasta que cotejo_audio compare el sonido de las dos y la ponga a tiempo;
+    3. la de LRCLIB con el mismo título, artista, versión y duración y, si se sabe el texto, con las
+       mismas palabras;
+    4. solo texto. Antes que enseñar la letra de otra canción, ninguna.
+    «ref» es el video de YouTube Music al que pertenecen los tiempos («ref_lineas»)."""
+    vid, dur = pista.get("video_id") or "", float(pista.get("duracion") or 0)
+    lineas, texto_yt, fuente_yt = _letra_youtube(vid)
+    if lineas:
+        return {"sincronizada": True, "lineas": lineas, "texto": texto_yt, "fuente": fuente_yt,
+                "verificada": True, "duracion": dur, "ref": vid, "ref_lineas": lineas}
+    of = _cancion_oficial(pista, texto_yt)
+    if of is not None and dur and abs(of["duracion"] - dur) <= elegir_letra.DIFERENCIA_OFICIAL:
+        return {"sincronizada": True, "lineas": of["lineas"], "texto": of["texto"], "fuente": of["fuente"],
+                "verificada": True, "duracion": of["duracion"], "ref": of["video_id"], "ref_lineas": of["lineas"]}
+    bueno = texto_yt or (of["texto"] if of else "")
+    con, texto, otra = elegir_letra.elegir(_candidatas_lrclib(pista), pista, bueno)
+    ref = {"ref": of["video_id"], "ref_lineas": of["lineas"]} if of else {}
+    if of is not None and con is not None:
+        # LRCLIB tiene fichas con la duración del video y los tiempos del disco, sin ajustar: si van igual
+        # que la canción oficial aunque el video dure distinto, no son de fiar
+        c = elegir_letra.corrimiento(_lrc_a_lineas(con["syncedLyrics"]), of["lineas"])
+        if c is None or abs(c) <= 1.0:
+            con = None
+    if of is not None and con is None:
+        return dict({"sincronizada": True, "lineas": of["lineas"], "texto": of["texto"], "fuente": of["fuente"],
+                     "verificada": True, "duracion": of["duracion"], "otra_duracion": True}, **ref)
+    for c, distinta in ((con, False), (otra, True)):
+        if c is None:
+            continue
+        d = dict({"sincronizada": True, "lineas": _lrc_a_lineas(c["syncedLyrics"]), "texto": c.get("plainLyrics") or "",
+                  "fuente": "LRCLIB", "duracion": float(c.get("duration") or 0), "verificada": bool(bueno)}, **ref)
+        if distinta:
+            d["otra_duracion"] = True
+        if d["lineas"]:
+            return d
+    if texto_yt:
+        return {"sincronizada": False, "lineas": [], "texto": texto_yt, "fuente": fuente_yt, "verificada": True}
+    if texto is not None:
+        return {"sincronizada": False, "lineas": [], "texto": elegir_letra.texto_de(texto), "fuente": "LRCLIB",
+                "verificada": False}
     return {"sincronizada": False, "lineas": [], "texto": "", "fuente": ""}
 
 
 def letras_alternativas(pista, limite=8):
     """Otras letras de LRCLIB para la misma canción (para el botón «Otra letra»).
 
-    Mismo formato que `letras`, más "etiqueta" para decir de cuál se trata. Primero las
-    sincronizadas y las de duración más parecida; sin repetir textos iguales."""
-    titulo = re.sub(r"\s*[\(\[](official|video|audio|lyric|visualizer|letra)[^\)\]]*[\)\]]",
-                    "", pista.get("titulo") or "", flags=re.I).strip()
-    artista = (pista.get("artistas") or [{}])[0].get("nombre") if pista.get("artistas") else ""
-    artista = artista or pista.get("artista") or ""
-    if not titulo:
+    Mismo formato que `letras`, más "etiqueta" para decir de cuál se trata. Primero las que son de esta
+    canción, luego las sincronizadas y las de duración más parecida; sin repetir textos iguales."""
+    formas = elegir_letra.consultas(pista)
+    if not formas:
         return []
     dur = int(pista.get("duracion") or 0)
-    cab = {"User-Agent": "Caudal (reproductor de escritorio)"}
-    try:
-        r = requests.get("https://lrclib.net/api/search", params={"q": f"{artista} {titulo}".strip()},
-                         headers=cab, timeout=10)
-        candidatos = r.json() if r.status_code == 200 else []
-    except (requests.RequestException, ValueError):
-        return []
-    if not isinstance(candidatos, list):
-        return []
-    candidatos.sort(key=lambda c: (not c.get("syncedLyrics"),
+    candidatos, vistas = [], set()
+    for titulo, artista, _valen in formas[:2]:
+        for params in ({"track_name": titulo, "artist_name": artista}, {"q": f"{artista} {titulo}".strip()}):
+            r = _lrclib("search", params)
+            for c in r if isinstance(r, list) else []:
+                if isinstance(c, dict) and c.get("id") not in vistas:
+                    vistas.add(c.get("id"))
+                    candidatos.append(c)
+    candidatos.sort(key=lambda c: (not elegir_letra.es_la_cancion(c, pista, formas), not c.get("syncedLyrics"),
                                    abs((c.get("duration") or 0) - dur) if dur else 0))
     salida, vistos = [], set()
     for c in candidatos:

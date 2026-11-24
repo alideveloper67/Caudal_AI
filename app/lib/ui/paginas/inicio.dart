@@ -7,6 +7,7 @@ import '../../nucleo/vida_app.dart';
 import '../../nucleo/recomendador.dart';
 import '../../nucleo/catalogo.dart';
 import '../../nucleo/coleccion.dart';
+import 'musica_libre_pagina.dart';
 import '../../nucleo/gustos.dart';
 import '../comunes.dart';
 import '../cumpleanos.dart';
@@ -237,6 +238,7 @@ class _InicioPaginaState extends State<InicioPagina> with AutomaticKeepAliveClie
                         ],
                     ],
                   ] else ...[
+                    if (kIsWeb && _filtro != 'videos') const SeccionMusicaLibre(),
                     if (_filtro != 'videos' && _recientes.isNotEmpty) ...[
                       Entrada(indice: ++turno, child: Carrusel(titulo: 'Volver a escuchar', elementos: _recientes)),
                       const SizedBox(height: Esp.entreSecciones),

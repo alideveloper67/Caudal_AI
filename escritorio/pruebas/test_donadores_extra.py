@@ -115,7 +115,8 @@ def test_leer_pared_limpia_lo_que_llega():
 
 
 def test_estilos_de_la_letra_con_efectos():
-    assert D.ESTILOS_ESCENA == ("resplandor", "ola", "neon", "cine")
+    assert D.ESTILOS_ESCENA == ("resplandor", "ola", "neon", "cine", "zoom", "maquina", "lluvia", "giro")
+    assert D.texto_estilos_escena() == ("Ocho estilos: Resplandor, Ola, Neón, Cine, Zoom, Máquina, Lluvia y Giro")
     assert all(k in D.NOMBRES_ESCENA and k in D.DETALLE_ESCENA for k in D.ESTILOS_ESCENA)
     assert D.estilo_escena_valido(" NEON ") == "neon"
     assert D.estilo_escena_valido("inventado") == "resplandor" and D.estilo_escena_valido(None) == "resplandor"
@@ -439,13 +440,41 @@ def test_las_entradas_de_cada_estilo_empiezan_apagadas_y_terminan_puestas():
         n = len(E.unidades_de(estilo, "Cuando la noche cae sobre la ciudad"))
         inicio = E.entrada(estilo, 0.0, n)
         fin = E.entrada(estilo, 5.0, n)
-        assert len(inicio) == len(fin) == (n if estilo in ("ola", "cine") else 1)
+        por_piezas = E.POR_PALABRAS + E.POR_LETRAS
+        assert len(inicio) == len(fin) == (n if estilo in por_piezas else 1)
+        assert all(abs(E.giro_de(estilo, 5.0, i)) < 0.01 for i in range(n)), estilo
+        assert all(abs(e - 1.0) < 0.01 for _a, _s, e in fin), estilo
         assert max(a for a, _s, _e in inicio) < 0.3, estilo          # al entrar todavía no se ve
         assert all(a > 0.95 and abs(s) < 0.01 for a, s, _e in fin), estilo
         assert not E.termino_entrada(estilo, 0.0, n) and E.termino_entrada(estilo, 5.0, n)
     assert E.unidades_de("ola", "uno dos  tres") == ["uno", "dos", "tres"]
     assert E.unidades_de("cine", "a b") == ["a", "b"]
-    assert E.unidades_de("resplandor", "a b") == ["a b"]
+    assert E.unidades_de("resplandor", "a b") == ["a b"] == E.unidades_de("zoom", "a b")
+    assert E.unidades_de("giro", "uno dos") == ["uno", "dos"]
+    assert E.unidades_de("maquina", "a b") == ["a", "b"] == E.unidades_de("lluvia", "a b")
+
+
+def test_los_efectos_nuevos_entran_como_dicen():
+    from descargador.ui import letra_escena as E
+    # zoom: de enorme a su tamaño, pasándose un poco de pequeño (el golpe)
+    escalas = [E.entrada("zoom", t / 100, 1)[0][2] for t in range(0, 60)]
+    assert escalas[0] > 2 and min(escalas) < 0.98 and abs(escalas[-1] - 1) < 0.01
+    # máquina: tecla a tecla, en orden, y nunca tarda más de lo previsto
+    assert E.letras_escritas(0.0, 30) == 0 and E.letras_escritas(9.0, 30) == 30
+    escritas = [E.letras_escritas(t / 100, 30) for t in range(0, 200, 5)]
+    assert escritas == sorted(escritas)
+    a = [x[0] for x in E.entrada("maquina", 0.3, 30)]
+    assert a[0] == 1.0 and a[-1] == 0.0
+    assert E.termino_entrada("maquina", E.MAQUINA_TOTAL + 0.05, 300)
+    # lluvia: cae desde arriba y rebota (la altura sube y baja más de una vez)
+    alturas = [E.entrada("lluvia", t / 100, 1)[0][1] for t in range(0, 90)]
+    assert alturas[0] > 1.2 and abs(alturas[-1]) < 0.01
+    rebotes = sum(1 for x, y in zip(alturas, alturas[1:]) if y > x + 0.001)
+    assert rebotes > 3
+    assert E.termino_entrada("lluvia", E.LLUVIA_TOTAL + 0.2, 200)
+    # giro: entra torcida, cada palabra hacia un lado, y acaba derecha
+    assert abs(E.giro_de("giro", 0.0, 0)) > 45 and E.giro_de("giro", 0.0, 0) * E.giro_de("giro", 0.085, 1) < 0
+    assert E.giro_de("ola", 0.0, 0) == 0.0
 
 
 def test_la_ola_entra_palabra_por_palabra_y_el_neon_parpadea():
@@ -599,6 +628,23 @@ def test_se_puede_elegir_estilo_y_se_guarda(app, escena):
     from PySide6.QtTest import QTest
     QTest.keyClick(w, Qt.Key_2)
     assert w.lienzo.estilo == "ola"
+    QTest.keyClick(w, Qt.Key_8)
+    assert w.lienzo.estilo == "giro"
+    QTest.keyClick(w, Qt.Key_9)                                     # no hay noveno: no pasa nada
+    assert w.lienzo.estilo == "giro"
+    # cada efecto se pinta a media entrada, con el verso ya puesto y con otro tipo de letra
+    import time
+    from descargador.ui import tipografia_letra as T
+    try:
+        for fuente in ("predeterminada", "marker"):
+            T.fijar(fuente)
+            for clave in D.ESTILOS_ESCENA:
+                w.elegir_estilo(clave)
+                for hace in (0.05, 0.3, 3.0):
+                    w.lienzo._t_cambio = time.monotonic() - hace
+                    assert not _pintar(w).isNull()
+    finally:
+        T.fijar("predeterminada")
 
 
 def test_el_resplandor_usa_los_colores_de_la_caratula(app, escena):

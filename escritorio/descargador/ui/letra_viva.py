@@ -35,9 +35,10 @@ from PySide6.QtWidgets import (QApplication, QHBoxLayout, QLabel, QPushButton, Q
 from .. import catalogo, traductor
 from ..hilos import en_segundo_plano
 from ..memoria import DiccionarioLimitado
-from . import iconos, imagenes, tipografia_letra
+from . import estilo_letra, iconos, imagenes, tipografia_letra
 from .componentes import a_la_vista
-from .sincronia_auto import clave_pista as sincronia_clave, sincronia_de
+from .vista_grande import _Elidida as Elidida
+from .sincronia_auto import clave_pista as sincronia_clave, en_duda, sin_tiempos, sincronia_de
 
 # letras ya pedidas (clave de la pista -> datos de catalogo.letras), las 300 últimas
 CACHE_LETRAS = DiccionarioLimitado(300)
@@ -52,6 +53,7 @@ FPS_REPOSO = 50
 FPS_QUIETO = 150
 FPS_DORMIDO = 300        # ventana minimizada u oculta: solo mira si vuelve a verse
 VEL_QUIETA = 18.0        # px/s: más lento que esto ya no hace falta ir a 60 fps
+ESPERA_COLORES = 0.25    # s: los diseños con color se repintan cuando la paleta se queda quieta
 
 
 # ------------------------------------------------------------------ colores
@@ -265,6 +267,10 @@ class LienzoLetra(QWidget):
         self._pos_reloj = time.monotonic()
         self._rutas = {}             # brillo de la linea actual (caminos de texto)
         self._moviendo = True        # hay una transicion en marcha: cuadros fluidos
+        self._capas = estilo_letra.CacheCapas()      # filas ya pintadas con el diseño elegido
+        self._col_letra = None       # colores de la portada con que se pintaron
+        self._col_visto = None
+        self._col_desde = 0.0
 
         self.reloj = QTimer(self)
         self.reloj.setTimerType(Qt.PreciseTimer)
@@ -278,6 +284,7 @@ class LienzoLetra(QWidget):
         if hasattr(r, "modo_cambio"):
             r.modo_cambio.connect(self._al_modo)
         tipografia_letra.suscribir(self)      # el tipo de letra elegido en Ajustes cambia en vivo
+        estilo_letra.suscribir(self)          # y el estilo con que se pinta
 
         # Ctrl+→ / Ctrl+← mueven la letra 250 ms; Ctrl+0 la vuelve a tiempo. Hace falta haber
         # pinchado la letra (ClickFocus) para que el atajo le llegue.
@@ -337,6 +344,14 @@ class LienzoLetra(QWidget):
         """Otra tipografía mide distinto: se vuelve a repartir la letra en filas."""
         self._ancho_hecho = -1
         self._rutas = {}
+        self._capas.vaciar()
+        self._despertar()
+        self.update()
+
+    def al_cambiar_estilo_letra(self):
+        """Se eligió otro estilo: las filas se vuelven a pintar (miden lo mismo, no se recolocan)."""
+        self._rutas = {}
+        self._capas.vaciar()
         self._despertar()
         self.update()
 
@@ -397,6 +412,10 @@ class LienzoLetra(QWidget):
         CACHE_LETRAS[clave] = datos
         if clave != self.clave:
             return
+        # tiempos de otra grabación: se ve como texto hasta que la sincronía la ajuste a esta
+        self._en_duda = datos if not self._desfase_ms() and en_duda(sincronia_de(self.ctx), self.pista, datos) else None
+        if self._en_duda is not None:
+            datos = sin_tiempos(datos)
         self.datos = datos
         lineas, sinc = preparar_lineas(datos)
         if not lineas:
@@ -405,8 +424,8 @@ class LienzoLetra(QWidget):
             return
         self._poner_lineas(lineas, sinc, "")
         self.pedir_traduccion()
-        if sinc and not self._desfase_ms():
-            sincronia_de(self.ctx).pedir(self.pista, datos)
+        if (sinc or self._en_duda) and not self._desfase_ms():
+            sincronia_de(self.ctx).pedir(self.pista, self._en_duda or datos)
 
     def pedir_traduccion(self):
         self.traducciones = []
@@ -433,6 +452,7 @@ class LienzoLetra(QWidget):
         self._manual = 0.0
         self._ancho_hecho = -1
         self._rutas = {}
+        self._capas.vaciar()
         self._items = []
         self._scroll = 0.0
         self._despertar()
@@ -465,7 +485,8 @@ class LienzoLetra(QWidget):
         f, ft = self._fuentes()
         fm, fmt = QFontMetricsF(f), QFontMetricsF(ft)
         ancho = max(120, self.width() - 2 * self._margen_x())
-        alto_fila = fm.height() * 1.04
+        subida, bajada = tipografia_letra.subida_bajada(f)
+        alto_fila = max(fm.height(), subida + bajada) * 1.04
         alto_tr = fmt.height() * 1.1
         hueco = self._tam() * (0.62 if not self.compacto else 0.55)
         y = 0.0
@@ -490,10 +511,11 @@ class LienzoLetra(QWidget):
         self._alto_total = y
         self._alto_fila = alto_fila
         self._alto_tr = alto_tr
-        self._ascenso = fm.ascent()
+        self._ascenso = subida
         self._ascenso_tr = fmt.ascent()
         self._ancho_hecho = self.width()
         self._rutas = {}
+        self._capas.vaciar()
 
     def _desfase_ms(self):
         """Desfase guardado para la canción que suena (ms, puede ser negativo). Si falta o algo
@@ -529,8 +551,12 @@ class LienzoLetra(QWidget):
         if not self.pista or clave != sincronia_clave(self.pista) or not self.datos:
             return
         accion = (res or {}).get("accion")
+        duda = getattr(self, "_en_duda", None)
+        if duda is not None and accion in ("bien", "corregir"):
+            self._llegaron(self.clave, duda)
+            return
         if accion == "cambiar":
-            nueva = sincronia_de(self.ctx).letra_nueva(self.pista, self.datos.get("lineas"))
+            nueva = sincronia_de(self.ctx).letra_nueva(self.pista, (duda or self.datos).get("lineas"))
             if nueva:
                 datos, _ms = nueva
                 self._llegaron(self.clave, datos)
@@ -623,10 +649,110 @@ class LienzoLetra(QWidget):
                                      or abs(it["foco"] - foco) > 0.02):
                     moviendo = True
         self._moviendo = moviendo
+        if not moviendo:
+            self._adelantar_capas()
         ms = self._ms_objetivo()
         if self.reloj.interval() != ms:
             self.reloj.start(ms)
         self.update()
+
+    # ----------------------------------------------------------- pintura con diseño
+    def _colores_letra(self):
+        """Los colores de la portada para los diseños de color. La paleta puede ir cambiando con una
+        transición: hasta que no se queda quieta se siguen usando los de antes."""
+        clave = tuple(c.rgb() for c in self.paleta[:3])
+        ahora = time.monotonic()
+        if clave != self._col_visto:
+            self._col_visto, self._col_desde = clave, ahora
+        if self._col_letra is None or (self._col_letra[0] != clave and ahora - self._col_desde > ESPERA_COLORES):
+            self._col_letra = (clave, estilo_letra.Colores(*self.paleta[:3]))
+            self._capas.vaciar()
+        return self._col_letra[1]
+
+    def _medida_fila(self, k, n, f):
+        it = self._items[k]
+        subida, bajada = estilo_letra.alturas(f)
+        return estilo_letra.Medida(QRectF(0, self._ascenso - subida, it["anchos"][n] or 1, subida + bajada),
+                                   self._ascenso, subida, bajada, estilo_letra.grosor_borde(f))
+
+    def _capa_fila(self, k, n, capa, f):
+        """La imagen de la fila `n` de la línea `k` en una capa (se pinta la primera vez y se guarda)."""
+        estilo = estilo_letra.actual()
+        capa = estilo_letra.capa_real(estilo, capa)
+        dpr = self.devicePixelRatioF() or 1.0
+        colores = self._colores_letra()
+
+        def crear():
+            trazo = estilo_letra.trazo_de(self._items[k]["filas"][n], f, 0, self._ascenso)
+            return estilo_letra.imagen_capa(trazo, f.pixelSize(), estilo, capa, colores,
+                                            self._medida_fila(k, n, f), dpr)
+        return self._capas.pedir((k, n, capa, estilo, dpr), crear)
+
+    def _adelantar_capas(self):
+        """Entre versos se deja pintada la línea siguiente, para que al entrar no haya un tirón."""
+        estilo = estilo_letra.actual()
+        if estilo == estilo_letra.POR_DEFECTO or not self.sincronizada:
+            return
+        k = self._actual + 1
+        if not (0 <= k < len(self._items)) or self.lineas[k]["pausa"]:
+            return
+        f, _ft = self._fuentes()
+        dpr = self.devicePixelRatioF() or 1.0
+        for n in range(len(self._items[k]["filas"])):
+            for capa in ("base", "viva"):
+                if (k, n, capa, estilo, dpr) not in self._capas:
+                    self._capa_fila(k, n, capa, f)
+                    return                            # una por cuadro
+
+    def _pintar_con_diseno(self, p, k, it, f, foco, progreso):
+        """Las filas de una línea con el estilo elegido (cualquiera menos el clásico)."""
+        estilo = estilo_letra.actual()
+        sonando = self.sincronizada and k == self._actual
+        tam = f.pixelSize()
+        antes = p.opacity()
+        pasada = self.sincronizada and not sonando and k < self._actual
+        if not self.sincronizada:
+            foco = 0.0
+        # cuánto se ve «de cantada» esta línea: al entrar y al salir se funde con cómo se ven las demás
+        vivo = foco if (sonando or pasada) else 0.0
+        if vivo > 0.97:
+            vivo = 1.0
+        elif vivo < 0.03:
+            vivo = 0.0
+        for n in range(len(it["filas"])):
+            y = n * self._alto_fila
+            if vivo < 1.0:
+                img, en = self._capa_fila(k, n, "reposo", f)
+                p.setOpacity(antes * (1.0 - vivo))
+                p.drawImage(QPointF(en.x(), en.y() + y), img)
+            if vivo > 0.0:
+                p.setOpacity(antes * vivo)
+                self._pintar_fila_viva(p, k, n, it, f, y, tam, estilo, progreso if sonando else 1.0)
+            p.setOpacity(antes)
+
+    def _pintar_fila_viva(self, p, k, n, it, f, y, tam, estilo, progreso):
+        total = sum(len(x) for x in it["filas"]) or 1
+        previas = sum(len(x) for x in it["filas"][:n])
+        local = max(0.0, min(1.0, (progreso * total - previas) / max(1, len(it["filas"][n]))))
+        ancho = it["anchos"][n] or 1
+        hasta = local * ancho
+        if local < 1.0 or estilo == "marcador":
+            img, en = self._capa_fila(k, n, "base", f)
+            p.drawImage(QPointF(en.x(), en.y() + y), img)
+        if local <= 0.0:
+            return
+        if estilo == "marcador":
+            m = self._medida_fila(k, n, f)
+            r = estilo_letra.rect_pastilla(QRectF(0, m.arriba, ancho, m.abajo - m.arriba), m, tam)
+            r.setWidth(r.width() * local)
+            estilo_letra.pintar_pastilla(p, r.translated(0, y), self._colores_letra(), tam)
+            hasta = r.right()
+        img, en = self._capa_fila(k, n, "viva", f)
+        en = QPointF(en.x(), en.y() + y)
+        if local >= 1.0:
+            p.drawImage(en, img)
+        else:
+            estilo_letra.dibujar_hasta(p, img, en, hasta, tam * (0.08 if estilo == "marcador" else 0.5))
 
     # ----------------------------------------------------------- pintura
     def _fondo(self):
@@ -680,7 +806,7 @@ class LienzoLetra(QWidget):
             if ln["pausa"]:
                 self._pintar_puntos(p, x0, y, k, ms, foco, borde)
                 continue
-            base = 0.34 if self.sincronizada else 0.92
+            base = estilo_letra.OPACIDAD_REPOSO.get(estilo_letra.actual(), 0.34) if self.sincronizada else 0.92
             if k == self._encima and self.sincronizada:
                 base += 0.18
             opacidad = (base + (1 - base) * foco) * borde
@@ -694,12 +820,15 @@ class LienzoLetra(QWidget):
             p.setOpacity(opacidad)
             p.setFont(f)
             progreso = self._progreso(k, ms)
-            if k == self._actual and self.sincronizada:
-                self._pintar_brillo(p, k, it, f, foco)
-            for n, fila in enumerate(it["filas"]):
-                yy = n * self._alto_fila + self._ascenso
-                p.setPen(self._pluma(n, it, progreso, k))
-                p.drawText(QPointF(0, yy), fila)
+            if estilo_letra.actual() != estilo_letra.POR_DEFECTO:
+                self._pintar_con_diseno(p, k, it, f, foco, progreso)
+            else:
+                if k == self._actual and self.sincronizada:
+                    self._pintar_brillo(p, k, it, f, foco)
+                for n, fila in enumerate(it["filas"]):
+                    yy = n * self._alto_fila + self._ascenso
+                    p.setPen(self._pluma(n, it, progreso, k))
+                    p.drawText(QPointF(0, yy), fila)
             if it["tr"]:
                 p.setFont(ft)
                 p.setPen(QColor(255, 255, 255, 190 if k == self._actual else 150))
@@ -1122,11 +1251,10 @@ class PaginaLetra(QWidget):
         h.addWidget(self.portada)
         textos = QVBoxLayout()
         textos.setSpacing(0)
-        self.et_titulo = QLabel("")
-        self.et_titulo.setStyleSheet("color:#FFFFFF;font-size:17px;font-weight:800;background:transparent;")
-        self.et_artista = QLabel("")
-        self.et_artista.setStyleSheet("color:rgba(255,255,255,0.72);font-size:13px;"
-                                      "font-weight:600;background:transparent;")
+        # con puntos suspensivos si no caben: un título largo no puede empujar los botones fuera
+        self.et_titulo = Elidida("color:#FFFFFF;font-size:17px;font-weight:800;background:transparent;")
+        self.et_artista = Elidida("color:rgba(255,255,255,0.72);font-size:13px;"
+                                  "font-weight:600;background:transparent;")
         textos.addStretch(1)
         textos.addWidget(self.et_titulo)
         textos.addWidget(self.et_artista)
@@ -1141,6 +1269,9 @@ class PaginaLetra(QWidget):
         self.bt_imagen.setToolTip("Una tarjeta vertical con la portada y estas líneas, "
                                   "lista para tus historias (también queda copiada)")
         self.bt_imagen.clicked.connect(self._tarjeta)
+        self.bt_diseno = QPushButton("Diseño")
+        self.bt_diseno.setToolTip("Elegir el tipo de letra y el estilo con que se ve la letra")
+        self.bt_diseno.clicked.connect(self._abrir_diseno)
         # «Guardar imagen» sigue siendo un solo clic (con el último estilo elegido); el estilo se cambia aparte
         self.estilo_tarjeta = "clasico"
         self.bt_estilo = QPushButton("Estilo")
@@ -1156,8 +1287,11 @@ class PaginaLetra(QWidget):
         self.bt_volver = QPushButton("Cerrar")
         self.bt_volver.setToolTip("Volver a donde estabas")
         self.bt_volver.clicked.connect(self.volver.emit)
-        for b in (self.bt_traducir, self.bt_antes, self.bt_despues, self.bt_estilo,
-                  self.bt_imagen, self.bt_volver):
+        self.botones_cabecera = (self.bt_diseno, self.bt_traducir, self.bt_antes, self.bt_despues,
+                                 self.bt_estilo, self.bt_imagen, self.bt_volver)
+        self._nivel_cabecera = 0
+        self._cabecera_minima = False
+        for b in self.botones_cabecera:
             b.setCursor(Qt.PointingHandCursor)
             b.setStyleSheet(_BOTON)
             h.addWidget(b, 0, Qt.AlignVCenter)
@@ -1168,23 +1302,82 @@ class PaginaLetra(QWidget):
     def resizeEvent(self, e):
         super().resizeEvent(e)
         self.lienzo.setGeometry(0, 0, self.width(), self.height())
+        self._acomodar_cabecera()
         self.cabecera.setGeometry(0, 0, self.width(), 86)
         self.cabecera.raise_()
 
     def showEvent(self, e):
         super().showEvent(e)
         self._cabecera(self.ctx.reproductor.actual)
+        self._acomodar_cabecera()
+
+    # textos de la cabecera según lo que quepa: completos, cortos o mínimos (lo que hace cada botón sigue
+    # en su ayuda al pasar el ratón)
+    TEXTOS_CABECERA = (
+        ("Diseño", "Traducir", "Letra antes (Ctrl+→)", "Letra después (Ctrl+←)", "Guardar imagen", "Cerrar"),
+        ("Diseño", "Traducir", "Letra antes", "Letra después", "Guardar imagen", "Cerrar"),
+        ("Diseño", "Traducir", "− 0,25 s", "+ 0,25 s", "Imagen", "Cerrar"),
+        ("Aa", "Trad.", "−", "+", "Imagen", "✕"),
+        ("Aa", "Trad.", "−", "+", "Imagen", "✕"),        # apretada y sin el título ni el estilo de la imagen
+    )
+    ANCHO_TITULO_MIN = 150          # lo que se le guarda al título de la canción
+
+    def _acomodar_cabecera(self):
+        """Acorta los botones hasta que quepan todos: en una ventana estrecha la cabecera no se desborda."""
+        if not hasattr(self, "botones_cabecera"):
+            return
+        h = self.cabecera.layout()
+        for nivel, textos in enumerate(self.TEXTOS_CABECERA):
+            for b, texto in zip((self.bt_diseno, self.bt_traducir, self.bt_antes, self.bt_despues,
+                                 self.bt_imagen, self.bt_volver), textos):
+                b.setText(texto)
+            self._nivel_cabecera = nivel
+            self._texto_estilo()
+            minimo = nivel == len(self.TEXTOS_CABECERA) - 1
+            h.setSpacing(14 if nivel < 2 else (10 if nivel == 2 else (6 if not minimo else 4)))
+            if minimo:
+                h.setContentsMargins(12, 18, 10, 0)
+            else:
+                h.setContentsMargins(28, 18, 22, 0)
+            if minimo != self._cabecera_minima:
+                self._cabecera_minima = minimo
+                for b in self.botones_cabecera:
+                    b.setStyleSheet(_BOTON.replace("6px 14px", "6px 8px") if minimo else _BOTON)
+            m = h.contentsMargins()
+            self.portada.setVisible(nivel < 3)
+            for w in (self.et_titulo, self.et_artista, self.bt_estilo):
+                w.setVisible(not minimo)
+            titulo = 0 if minimo else (60 if nivel == 3 else self.ANCHO_TITULO_MIN)
+            visibles = [b for b in self.botones_cabecera if not b.isHidden()]
+            ocupan = sum(b.sizeHint().width() for b in visibles)
+            ocupan += h.spacing() * (len(visibles) + 1) + m.left() + m.right() + titulo
+            if nivel < 3:
+                ocupan += self.portada.width()
+            if ocupan <= self.width():
+                break
+
+    def _texto_estilo(self):
+        if self.estilo_tarjeta == "clasico":
+            self.bt_estilo.setText("Estilo" if self._nivel_cabecera else "Estilo de imagen")
+        elif self._nivel_cabecera >= 3:
+            self.bt_estilo.setText(ESTILOS_TARJETA[self.estilo_tarjeta])
+        else:
+            self.bt_estilo.setText(f"Estilo: {ESTILOS_TARJETA[self.estilo_tarjeta]}")
+
+    def _abrir_diseno(self):
+        from .selector_letra import abrir_selector
+        abrir_selector(self.ctx, self)
 
     def _cabecera(self, p):
         if not p:
-            self.et_titulo.setText("")
-            self.et_artista.setText("")
+            self.et_titulo.poner("")
+            self.et_artista.poner("")
             self.portada.clear()
             return
-        self.et_titulo.setText(p.get("titulo") or "")
+        self.et_titulo.poner(p.get("titulo") or "")
         artista = ", ".join(a.get("nombre", "") for a in p.get("artistas") or []) \
             or p.get("artista") or ""
-        self.et_artista.setText(artista)
+        self.et_artista.poner(artista)
         url = p.get("miniatura") or ""
         self.portada.clear()
         if url:
@@ -1238,7 +1431,7 @@ class PaginaLetra(QWidget):
         if estilo is None:
             return
         self.estilo_tarjeta = estilo
-        self.bt_estilo.setText("Estilo" if estilo == "clasico" else f"Estilo: {ESTILOS_TARJETA[estilo]}")
+        self._acomodar_cabecera()
         self.ctx.avisar(f"Estilo «{ESTILOS_TARJETA[estilo]}»: se usará al guardar la imagen")
 
     def _tarjeta(self):

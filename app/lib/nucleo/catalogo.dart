@@ -30,6 +30,7 @@ import 'dart:io' show SocketException, HttpException;
 
 import 'package:flutter/foundation.dart' show kIsWeb, visibleForTesting;
 import 'package:http/http.dart' as http;
+import 'elegir_letra.dart';
 import 'json_aparte.dart';
 
 /// Error del catalogo, con un texto en espanol listo para ensenar al usuario.
@@ -526,16 +527,22 @@ class Catalogo {
 
   /// Convierte un texto LRC ("[01:02.30] hola") en [[ms, texto], ...] ordenado.
   static List<List<dynamic>> lrcALineas(String? texto) {
-    final reMarca = RegExp(r'\[(\d+):(\d+(?:\.\d+)?)\]');
+    final reMarca = RegExp(r'\[(\d+):(\d+(?:[.:]\d+)?)\]');
+    final rePalabra = RegExp(r'<\d+:\d+(?:[.:]\d+)?>');
+    // en LRC, un [offset:+500] quiere decir que la letra va medio segundo antes
+    final corrido = int.tryParse(
+            RegExp(r'\[offset:\s*([+-]?\d+)\s*\]', caseSensitive: false).firstMatch(texto ?? '')?.group(1) ?? '') ??
+        0;
     final filas = <List<dynamic>>[];
     for (final fila in (texto ?? '').split(RegExp(r'\r?\n'))) {
       final marcas = reMarca.allMatches(fila).toList();
       if (marcas.isEmpty) continue;
-      final contenido = fila.replaceAll(reMarca, '').trim();
+      final contenido = fila.replaceAll(reMarca, '').replaceAll(rePalabra, '').replaceAll(RegExp(r'\s+'), ' ').trim();
       for (final m in marcas) {
         final mm = int.parse(m.group(1)!);
-        final ss = double.parse(m.group(2)!);
-        filas.add([((mm * 60 + ss) * 1000).round(), contenido]);
+        final ss = double.parse(m.group(2)!.replaceAll(':', '.'));
+        final ms = ((mm * 60 + ss) * 1000).round() - corrido;
+        filas.add([ms < 0 ? 0 : ms, contenido]);
       }
     }
     // orden estable por tiempo (como sorted() de Python)
@@ -2106,142 +2113,241 @@ class Catalogo {
 
   // ------------------------------------------------------------ letras
 
-  /// Lo más que puede diferir (en segundos) la duración de la letra de la de la canción
-  /// para fiarse de sus tiempos: más allá, la letra llegaría corrida.
-  static const int _desfaseMaxLetra = 3;
+  static const _cabLrclib = {'User-Agent': 'Caudal (reproductor)'};
+
+  /// Lo que responde LRCLIB, o null si no está. [red] se entera de si hubo respuesta.
+  static Future<dynamic> _lrclib(String ruta, Map<String, String> params, void Function() red) async {
+    try {
+      final r = await _getJson(Uri.https('lrclib.net', '/api/$ruta', params), cabeceras: _cabLrclib);
+      red();
+      return r;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Iterable<Map<String, dynamic>> _fichas(dynamic crudo) =>
+      (crudo is List ? crudo : [crudo]).whereType<Map>().map((m) => Map<String, dynamic>.from(m));
+
+  /// Las fichas de LRCLIB que podrían ser esta canción, sin repetir (aún sin comprobar).
+  static Future<List<Map<String, dynamic>>> _candidatasLrclib(
+      Map<String, dynamic> pista, int dur, void Function() red) async {
+    final salida = <Map<String, dynamic>>[];
+    final vistas = <Object?>{};
+    void sumar(dynamic crudo) {
+      for (final c in _fichas(crudo)) {
+        if (vistas.add(c['id'] ?? c)) salida.add(c);
+      }
+    }
+
+    for (final f in ElegirLetra.consultas(pista).take(2)) {
+      final params = {'track_name': f.titulo, 'artist_name': f.artista};
+      if (dur > 0) {
+        final exacta = await _lrclib('get', {...params, 'duration': '$dur'}, red);
+        sumar(exacta);
+        if (exacta is Map && ElegirLetra.tieneTiempos(Map<String, dynamic>.from(exacta))) continue;
+      }
+      sumar(await _lrclib('search', params, red));
+      if (!salida.any(ElegirLetra.tieneTiempos)) {
+        sumar(await _lrclib('search', {'q': '${f.artista} ${f.titulo}'.trim()}, red));
+      }
+    }
+    return salida;
+  }
+
+  /// La letra que YouTube Music tiene para ese video exacto: con tiempos, o solo el texto.
+  static Future<({List<List<dynamic>> lineas, String texto, String fuente})> _letraYouTube(
+      String vid, void Function() red) async {
+    const nada = (lineas: <List<dynamic>>[], texto: '', fuente: '');
+    if (vid.isEmpty) return nada;
+    try {
+      final lid = (await _cola(videoId: vid, limite: 1)).letrasId;
+      red();
+      if (lid.isEmpty) return nada;
+      try {
+        final m = await _post('browse', {'browseId': lid}, cliente: 'movil');
+        final datos = _nav(m, [
+          'contents', 'elementRenderer', 'newElement', 'type', 'componentType', 'model',
+          'timedLyricsModel', 'lyricsData'
+        ]);
+        final crudas = _lista(_nav(datos, ['timedLyricsData']));
+        if (crudas.isNotEmpty && crudas.every((x) => x is Map && x['cueRange'] != null)) {
+          final lineas = <List<dynamic>>[
+            for (final x in crudas)
+              [
+                int.tryParse(_cadena(_nav(x, ['cueRange', 'startTimeMilliseconds']))) ?? 0,
+                _cadena(x['lyricLine'])
+              ]
+          ];
+          if (lineas.any((l) => '${l[1]}'.replaceAll('♪', '').trim().isNotEmpty)) {
+            final fuente = _cadena(_nav(datos, ['sourceMessage']));
+            return (
+              lineas: lineas,
+              texto: [for (final l in lineas) l[1]].join('\n'),
+              fuente: fuente.isEmpty ? 'YouTube Music' : fuente,
+            );
+          }
+        }
+      } catch (_) {} // sin tiempos: se pide el texto
+      final w = await _browse(lid);
+      final estante = _nav(w, ['contents', 'sectionListRenderer', 'contents', 0, 'musicDescriptionShelfRenderer']);
+      final texto = _texto(_nav(estante, ['description']));
+      final fuente = _texto(_nav(estante, ['footer']));
+      return (lineas: <List<dynamic>>[], texto: texto, fuente: fuente.isEmpty ? 'YouTube Music' : fuente);
+    } catch (_) {
+      return nada;
+    }
+  }
+
+  /// La canción de YouTube Music de la que sale este video (o archivo), con su letra y sus tiempos.
+  /// [texto]: la letra ya sabida, para no quedarse con otra canción.
+  static Future<({String videoId, double duracion, List<List<dynamic>> lineas, String texto, String fuente})?>
+      _cancionOficial(Map<String, dynamic> pista, double seg, String texto, void Function() red) async {
+    final vid = _cadena(pista['video_id']);
+    for (final f in ElegirLetra.consultas(pista).take(2)) {
+      List<Map<String, dynamic>> crudo;
+      try {
+        crudo = await buscar('${f.artista} ${f.titulo}'.trim(), filtro: 'canciones', limite: 10);
+        red();
+      } catch (_) {
+        continue;
+      }
+      double lejos(Map<String, dynamic> x) => seg <= 0 ? 0 : (segundos(x['duracion']) - seg).abs();
+      final buenas = [
+        for (final x in crudo)
+          if (_cadena(x['video_id']).isNotEmpty &&
+              _cadena(x['video_id']) != vid &&
+              ElegirLetra.esLaCancion({
+                'trackName': x['titulo'],
+                'artistName': [
+                  for (final z in _lista(x['artistas'])) if (z is Map) _cadena(z['nombre'])
+                ].join(', '),
+                'albumName': x['album'] is Map ? x['album']['nombre'] : '',
+              }, pista))
+            x
+      ]..sort((x, y) => lejos(x).compareTo(lejos(y)));
+      for (final x in buenas.take(2)) {
+        final l = await _letraYouTube(_cadena(x['video_id']), red);
+        if (l.lineas.isEmpty) continue;
+        if (texto.isNotEmpty && ElegirLetra.palabrasEnComun(l.texto, texto) < ElegirLetra.parecidoMin) continue;
+        return (
+          videoId: _cadena(x['video_id']), duracion: segundos(x['duracion']).toDouble(), lineas: l.lineas,
+          texto: l.texto, fuente: l.fuente,
+        );
+      }
+    }
+    return null;
+  }
 
   /// Letra de una pista: {sincronizada, lineas: [[ms, texto]...], texto, fuente}.
-  /// Primero LRCLIB (sincronizadas, gratis); si no, YouTube Music.
-  static Future<Map<String, dynamic>> letras(Map<String, dynamic> pista) async {
-    final titulo = _cadena(pista['titulo'])
-        .replaceAll(
-            RegExp(r'\s*[\(\[](official|video|audio|lyric|visualizer|letra)[^\)\]]*[\)\]]',
-                caseSensitive: false),
-            '')
-        .trim();
-    var artista = '';
-    final arts = _lista(pista['artistas']);
-    if (arts.isNotEmpty && arts.first is Map) artista = _cadena(arts.first['nombre']);
-    if (artista.isEmpty) artista = _cadena(pista['artista']);
-    final dur = segundos(pista['duracion']);
-    const cab = {'User-Agent': 'Caudal (reproductor)'};
+  ///
+  /// Tiene que ser la de esta canción (elegir_letra.dart) y sus tiempos, los del audio que suena:
+  ///  1. la que YouTube Music trae con tiempos para ese mismo video;
+  ///  2. la de la canción oficial de la que sale el video, si dura lo mismo. Si dura distinto, se queda
+  ///     en texto (y sus tiempos en `ajustables`) hasta que cotejo_audio.dart compare el sonido de las dos;
+  ///  3. la de LRCLIB con el mismo título, artista, versión y duración y, si se sabe el texto, con las
+  ///     mismas palabras;
+  ///  4. solo texto. Antes que enseñar la letra de otra canción, ninguna.
+  /// `ref` es el video al que pertenecen los tiempos de `ajustables`. [duracion]: la de verdad (la del
+  /// audio que suena), si se sabe. `sin_red` dice que no contestó nadie.
+  static Future<Map<String, dynamic>> letras(Map<String, dynamic> pista, {Duration? duracion}) async {
+    final seg = (duracion?.inMilliseconds ?? 0) > 0
+        ? duracion!.inMilliseconds / 1000
+        : segundos(pista['duracion']).toDouble();
+    var contesto = false;
+    void red() => contesto = true;
+    final yt = await _letraYouTube(_cadena(pista['video_id']), red);
+    if (yt.lineas.isNotEmpty) {
+      return {'sincronizada': true, 'lineas': yt.lineas, 'texto': yt.texto, 'fuente': yt.fuente};
+    }
+    final (of, fichas) = await (
+      _cancionOficial(pista, seg, yt.texto, red),
+      _candidatasLrclib(pista, seg.round(), red),
+    ).wait;
+    final ref = of == null ? const <String, dynamic>{} : {'ref': of.videoId, 'ajustables': of.lineas};
+    if (of != null && seg > 0 && (of.duracion - seg).abs() <= ElegirLetra.diferenciaOficial) {
+      return {'sincronizada': true, 'lineas': of.lineas, 'texto': of.texto, 'fuente': of.fuente, ...ref};
+    }
+    final bueno = yt.texto.isNotEmpty ? yt.texto : (of?.texto ?? '');
+    final e = ElegirLetra.elegir(fichas, pista, duracion: seg, textoBueno: bueno);
+    final con = e.con;
+    if (con != null) {
+      final lineas = lrcALineas(_cadena(con['syncedLyrics']));
+      // LRCLIB tiene fichas con la duración del video y los tiempos del disco, sin ajustar: si van igual
+      // que la canción oficial aunque el video dure distinto, no son de fiar
+      List<(int, String)> pares(List<List<dynamic>> l) => [for (final x in l) (x[0] as int, '${x[1]}')];
+      final c = of == null ? null : ElegirLetra.corrimiento(pares(lineas), pares(of.lineas));
+      if (lineas.isNotEmpty && (of == null || (c != null && c.abs() > 1))) {
+        return {
+          'sincronizada': true, 'lineas': lineas, 'texto': _cadena(con['plainLyrics']), 'fuente': 'LRCLIB', ...ref,
+        };
+      }
+    }
+    final texto = bueno.isNotEmpty ? bueno : (e.texto == null ? '' : ElegirLetra.textoDe(e.texto!));
+    final ajustables = e.otra == null ? const <List<dynamic>>[] : lrcALineas(_cadena(e.otra!['syncedLyrics']));
+    return {
+      'sincronizada': false,
+      'lineas': <List<dynamic>>[],
+      'texto': texto.trim(),
+      'fuente': texto.trim().isEmpty ? '' : (yt.texto.isNotEmpty ? yt.fuente : (of?.fuente ?? 'LRCLIB')),
+      if (ajustables.isNotEmpty) 'ajustables': ajustables,
+      ...ref,
+      if (!contesto) 'sin_red': true,
+    };
+  }
 
-    // 1) LRCLIB: letras sincronizadas, gratis y sin clave
-    if (titulo.isNotEmpty && artista.isNotEmpty) {
-      try {
-        final params = {'track_name': titulo, 'artist_name': artista};
-        if (dur > 0) params['duration'] = '$dur';
-        dynamic datos = await _getJson(Uri.https('lrclib.net', '/api/get', params), cabeceras: cab);
-        if (datos is! Map || datos.isEmpty) {
-          final crudo = await _getJson(Uri.https('lrclib.net', '/api/search', {'q': '$artista $titulo'}),
-              cabeceras: cab);
-          final candidatos = _lista(crudo).whereType<Map>().toList();
-          if (dur > 0) {
-            candidatos.sort((a, b) {
-              final da = ((a['duration'] is num ? a['duration'] as num : 0) - dur).abs();
-              final db = ((b['duration'] is num ? b['duration'] as num : 0) - dur).abs();
-              return da.compareTo(db);
-            });
-          }
-          datos = null;
-          for (final c in candidatos) {
-            if (_cadena(c['syncedLyrics']).isEmpty) continue;
-            // otra versión (en vivo, remix, con intro) más larga o corta: la letra se desfasaría
-            final d = c['duration'] is num ? c['duration'] as num : 0;
-            if (dur > 0 && d > 0 && (d - dur).abs() > _desfaseMaxLetra) continue;
-            datos = c;
-            break;
-          }
-          datos ??= candidatos.isNotEmpty ? candidatos.first : null;
-        }
-        if (datos is Map) {
-          final dDatos = datos['duration'] is num ? datos['duration'] as num : 0;
-          final casa = dur <= 0 || dDatos <= 0 || (dDatos - dur).abs() <= _desfaseMaxLetra;
-          if (_cadena(datos['syncedLyrics']).isNotEmpty && casa) {
-            return {
-              'sincronizada': true,
-              'lineas': lrcALineas(_cadena(datos['syncedLyrics'])),
-              'texto': _cadena(datos['plainLyrics']),
-              'fuente': 'LRCLIB',
-            };
-          }
-          if (_cadena(datos['plainLyrics']).isNotEmpty || _cadena(datos['syncedLyrics']).isNotEmpty) {
-            // solo texto (o con tiempos que no casan): antes de rendirse, ver si hay otra versión con tiempos
-            try {
-              final crudo = await _getJson(Uri.https('lrclib.net', '/api/search', {'q': '$artista $titulo'}),
-                  cabeceras: cab);
-              num durDe(Map c) => c['duration'] is num ? c['duration'] as num : 0;
-              final con = _lista(crudo).whereType<Map>().where((c) => _cadena(c['syncedLyrics']).isNotEmpty).toList();
-              if (dur > 0) con.sort((a, b) => (durDe(a) - dur).abs().compareTo((durDe(b) - dur).abs()));
-              if (con.isNotEmpty && (dur <= 0 || (durDe(con.first) - dur).abs() <= _desfaseMaxLetra)) {
-                return {
-                  'sincronizada': true,
-                  'lineas': lrcALineas(_cadena(con.first['syncedLyrics'])),
-                  'texto': _cadena(con.first['plainLyrics']),
-                  'fuente': 'LRCLIB',
-                };
-              }
-            } catch (_) {}
-            return {
-              'sincronizada': false,
-              'lineas': <List<dynamic>>[],
-              'texto': _cadena(datos['plainLyrics']),
-              'fuente': 'LRCLIB',
-            };
-          }
-        }
-      } catch (_) {}
+  /// Otras letras de LRCLIB para elegir a mano: primero las de esta canción, luego las que llevan
+  /// tiempos y las que duran parecido. Con [buscar], lo que la persona escribió.
+  static Future<List<Map<String, dynamic>>> letrasAlternativas(Map<String, dynamic> pista,
+      {Duration? duracion, String buscar = '', int limite = 12}) async {
+    final seg = (duracion?.inMilliseconds ?? 0) > 0
+        ? duracion!.inMilliseconds / 1000
+        : segundos(pista['duracion']).toDouble();
+    final formas = ElegirLetra.consultas(pista);
+    final candidatas = <Map<String, dynamic>>[];
+    final vistas = <Object?>{};
+    Future<void> pedir(Map<String, String> params) async {
+      final crudo = await _getJson(Uri.https('lrclib.net', '/api/search', params), cabeceras: _cabLrclib);
+      if (crudo == null) return;
+      for (final c in _fichas(crudo)) {
+        if (vistas.add(c['id'] ?? c)) candidatas.add(c);
+      }
     }
 
-    // 2) YouTube Music: con tiempos (cliente movil) o en texto plano
-    final vid = _cadena(pista['video_id']);
-    if (vid.isNotEmpty) {
-      try {
-        final c = await _cola(videoId: vid, limite: 1);
-        final lid = c.letrasId;
-        if (lid.isNotEmpty) {
-          try {
-            final m = await _post('browse', {'browseId': lid}, cliente: 'movil');
-            final datos = _nav(m, [
-              'contents', 'elementRenderer', 'newElement', 'type', 'componentType', 'model',
-              'timedLyricsModel', 'lyricsData'
-            ]);
-            final crudas = _lista(_nav(datos, ['timedLyricsData']));
-            if (crudas.isNotEmpty && crudas.every((x) => x is Map && x['cueRange'] != null)) {
-              final lineas = <List<dynamic>>[
-                for (final x in crudas)
-                  [
-                    int.tryParse(_cadena(_nav(x, ['cueRange', 'startTimeMilliseconds']))) ?? 0,
-                    _cadena(x['lyricLine'])
-                  ]
-              ];
-              final fuente = _cadena(_nav(datos, ['sourceMessage']));
-              return {
-                'sincronizada': true,
-                'lineas': lineas,
-                'texto': '',
-                'fuente': fuente.isEmpty ? 'YouTube Music' : fuente,
-              };
-            }
-          } catch (_) {}
-          final w = await _browse(lid);
-          final estante = _nav(w, [
-            'contents', 'sectionListRenderer', 'contents', 0, 'musicDescriptionShelfRenderer'
-          ]);
-          final texto = _texto(_nav(estante, ['description']));
-          if (texto.isNotEmpty) {
-            final fuente = _texto(_nav(estante, ['footer']));
-            return {
-              'sincronizada': false,
-              'lineas': <List<dynamic>>[],
-              'texto': texto,
-              'fuente': fuente.isEmpty ? 'YouTube Music' : fuente,
-            };
-          }
-        }
-      } catch (_) {}
+    if (buscar.trim().isNotEmpty) {
+      await pedir({'q': buscar.trim()});
+    } else {
+      for (final f in formas.take(2)) {
+        await pedir({'track_name': f.titulo, 'artist_name': f.artista});
+        await pedir({'q': '${f.artista} ${f.titulo}'.trim()});
+      }
     }
-    return {'sincronizada': false, 'lineas': <List<dynamic>>[], 'texto': '', 'fuente': ''};
+    double lejos(Map<String, dynamic> c) =>
+        seg <= 0 || c['duration'] is! num ? 0 : ((c['duration'] as num) - seg).abs().toDouble();
+    final datos = [
+      for (final (i, c) in candidatas.indexed)
+        (c, buscar.trim().isEmpty && ElegirLetra.esLaCancion(c, pista, formas) ? 0 : 1,
+            ElegirLetra.tieneTiempos(c) ? 0 : 1, lejos(c), i)
+    ]..sort((a, b) {
+        for (final d in [a.$2 - b.$2, a.$3 - b.$3, a.$4.compareTo(b.$4), a.$5 - b.$5]) {
+          if (d != 0) return d;
+        }
+        return 0;
+      });
+    final textos = <String>{};
+    return [
+      for (final (c, _, _, _, _) in datos)
+        if (ElegirLetra.textoDe(c).trim().isNotEmpty && textos.add('${c['syncedLyrics'] ?? ''}${ElegirLetra.textoDe(c)}'))
+          {
+            'titulo': _cadena(c['trackName']),
+            'artista': _cadena(c['artistName']),
+            'duracion': c['duration'] is num ? (c['duration'] as num).round() : 0,
+            'sincronizada': ElegirLetra.tieneTiempos(c),
+            'lineas': ElegirLetra.tieneTiempos(c) ? lrcALineas(_cadena(c['syncedLyrics'])) : <List<dynamic>>[],
+            'texto': ElegirLetra.textoDe(c).trim(),
+            'fuente': 'LRCLIB',
+          }
+    ].take(limite).toList();
   }
 
   // ------------------------------------------------------------ SponsorBlock

@@ -170,6 +170,7 @@ class EscenaEscritorio(QObject):
         self._aviso = None             # QLabel del aviso de pieza oculta (uno a la vez)
         self._anim_aviso = None
         self._timer_aviso = None
+        self._dialogo_letra = None     # «Diseño de letra» abierto desde la escena
         self._forzar_propia = False    # «Mi imagen» con imagen nueva: recrear el escenario
         self._escenario_negado = False # el fondo guardado es un escenario y se puso la carátula (sin donador)
         self._fondo_pendiente = None   # el fondo de donador que se tocó mientras se pregunta al servidor
@@ -229,7 +230,8 @@ class EscenaEscritorio(QObject):
         self._mostrar_piezas()
         if not self.solo_ver:
             self.ctx.avisar("Arrastra cualquier pieza para moverla y agrándala desde su esquina (o Ctrl+rueda). "
-                            "El botón de fondo de la barra elige videoclip, carátula o uno de los escenarios.")
+                            "El botón de fondo de la barra elige videoclip, carátula o uno de los escenarios. "
+                            "«Aa» (o la tecla L) cambia el diseño de la letra.")
         # solo en las ventanas de la escena (y el campo del buscador, que tiene el foco al escribir)
         for w in self._ventanas():
             w.installEventFilter(self)
@@ -267,6 +269,9 @@ class EscenaEscritorio(QObject):
             return True
         if tecla == Qt.Key_R and not en_buscador and not ev.modifiers():
             self.restablecer_piezas()
+            return True
+        if tecla == Qt.Key_L and not en_buscador and not ev.modifiers():
+            QTimer.singleShot(0, self.abrir_diseno_letra)
             return True
         if tecla == Qt.Key_Space and not en_buscador:
             self.r.alternar()
@@ -350,6 +355,8 @@ class EscenaEscritorio(QObject):
         t.pidio_otra_letra.connect(self._otra_letra)
         if hasattr(t, "pidio_traducir"):
             t.pidio_traducir.connect(self.alternar_traduccion)
+        if hasattr(t, "pidio_diseno"):
+            t.pidio_diseno.connect(self.abrir_diseno_letra)
         self._piezas["lista"].elegida.connect(self._elegir)
         for lado, rect in g["bordes"].items():
             b = BordeBrillo(lado)
@@ -367,6 +374,25 @@ class EscenaEscritorio(QObject):
                 continue                      # la persona la ocultó
             w.show()
             w.raise_()
+
+    # ------------------------------------------------------------ diseño de letra
+
+    def abrir_diseno_letra(self):
+        """«Aa» en la tarjeta o la tecla L: el selector de tipo de letra y estilo, a la izquierda para ver
+        cambiar la letra. Es hijo de la ventana de fondo (como las piezas): nunca queda detrás de ella."""
+        if not self.abierta or self.solo_ver or self._fondo is None:
+            return
+        from ..selector_letra import abrir_selector
+        self._dialogo_letra = abrir_selector(self.ctx, self._fondo, sin_marco=True,
+                                             area=self.pantalla_destino(util=True), lado="izquierda")
+
+    def _cerrar_diseno_letra(self):
+        d, self._dialogo_letra = self._dialogo_letra, None
+        try:
+            if d is not None:
+                d.close()
+        except RuntimeError:                # ya se había cerrado (y destruido) solo
+            pass
 
     # ------------------------------------------------------------ piezas a gusto
 
@@ -543,6 +569,7 @@ class EscenaEscritorio(QObject):
         self.abierta = False
         self._soltar_espera_donador()
         self._fondo_pendiente = None
+        self._cerrar_diseno_letra()
         self._reloj_letra.stop()
         self._quitar_aviso_ya()
         self._aviso = None                 # el QLabel muere con la ventana de fondo
@@ -885,6 +912,11 @@ class EscenaEscritorio(QObject):
         if not self.abierta or clave != self._lineas_clave:
             return
         from ..letra_viva import preparar_lineas
+        from ..sincronia_auto import en_duda, sin_tiempos
+        # tiempos de otra grabación: se ve como texto hasta que la sincronía la ajuste a esta
+        self._en_duda = datos if not self._desfase_letra() and en_duda(sincronia_de(self.ctx), self.r.actual, datos) else None
+        if self._en_duda is not None:
+            datos = sin_tiempos(datos)
         lineas, sinc = preparar_lineas(datos or {})
         letra = self._piezas["letra"]
         if not lineas:
@@ -894,9 +926,9 @@ class EscenaEscritorio(QObject):
         letra.poner_lineas(lineas, sinc)
         self._dur_letra = float((datos or {}).get("duracion") or 0)
         self._datos_letra = datos or {}
-        if sinc and not self._desfase_letra():
+        if (sinc or self._en_duda) and not self._desfase_letra():
             # Caudal escucha un tramo y la pone a tiempo (o cambia por la que cuadra): ui/sincronia_auto.py
-            sincronia_de(self.ctx).pedir(self.r.actual, datos)
+            sincronia_de(self.ctx).pedir(self.r.actual, self._en_duda or datos)
         self._lineas_actuales = [str((l or {}).get("texto") or "") if isinstance(l, dict) else str(l)
                                  for l in lineas]
         self._traducciones = None
@@ -1076,8 +1108,12 @@ class EscenaEscritorio(QObject):
             return
         datos = getattr(self, "_datos_letra", None) or {}
         accion = (res or {}).get("accion")
+        duda = getattr(self, "_en_duda", None)
+        if duda is not None and accion in ("bien", "corregir"):
+            self._llego_letra(self._lineas_clave, duda)
+            return
         if accion == "cambiar":
-            nueva = sincronia_de(self.ctx).letra_nueva(self.r.actual, datos.get("lineas"))
+            nueva = sincronia_de(self.ctx).letra_nueva(self.r.actual, (duda or datos).get("lineas"))
             if nueva:
                 self._llego_letra(self._lineas_clave, nueva[0])
             return

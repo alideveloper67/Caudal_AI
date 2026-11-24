@@ -151,13 +151,13 @@ DEFECTOS = {
     "segundo_plano": True,           # (antiguo) se sustituye por al_cerrar
     "al_cerrar": "preguntar",        # preguntar | bandeja | salir (con musica sonando)
     "escena_piezas": {},             # dónde y de qué tamaño puso cada pieza de la escena (o si la ocultó)
+    "letra_cotejo": {},              # dónde cae la letra en cada video, por el sonido (cotejo_audio)
     "letra_desfases": {},            # ajuste fino de la letra por canción (ms), con Ctrl+←/→ en la escena
     "letra_sincronia_auto": True,    # Caudal escucha un tramo y corrige la letra si va corrida (sincronia_letra.py)
     "letra_auto": {},                # lo que midió: «clave|modo|huella» -> ms (0 = cuadraba)
     "escena_fondo": "video",         # fondo de la escena de escritorio: video | ambiente
-    "estilo_letra": "clasica",       # cómo se pinta la letra en la escena: clasica | nitida | neon | simple
-    "fuente_letra": "predeterminada",  # tipo de letra de la letra: predeterminada | poppins | bebas | anton |
-                                       # pacifico | lobster | righteous | serif | bangers
+    "estilo_letra": "clasica",       # cómo se pinta la letra (escena, canción, karaoke): ui/estilo_letra.py
+    "fuente_letra": "predeterminada",  # tipo de letra de la letra: ui/tipografia_letra.py
     "mini_encima": True,             # el mini reproductor queda por encima de todo
     "letras_auto": False,            # abrir las letras al reproducir
     "vinilo_auto": False,            # abrir el modo vinilo al reproducir

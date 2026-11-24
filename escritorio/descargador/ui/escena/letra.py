@@ -6,13 +6,13 @@ con acento de color. Todo se dibuja con QPainter sobre fondo transparente."""
 import bisect
 import math
 import time
-import weakref
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QTimer
-from PySide6.QtGui import (QBrush, QColor, QFont, QFontMetrics, QFontMetricsF, QLinearGradient, QPainter,
-                           QPainterPath, QPen)
+from PySide6.QtGui import (QBrush, QColor, QFont, QFontMetrics, QFontMetricsF, QImage, QLinearGradient,
+                           QPainter, QPainterPath, QPen)
 from PySide6.QtWidgets import QWidget
 
+from .. import estilo_letra as estilos
 from .. import tipografia_letra
 from ..componentes import a_la_vista
 from .estilo import (BRILLO, DOMINANTE, SEGUNDO, TEXTO, TEXTO_2, TEXTO_3, acento_legible, fuente,
@@ -45,33 +45,33 @@ ALTO_LINEA_TRADUCCION = 1.4   # alto de la fila de la traducción, en veces su t
 #   "nitida":  sombra suave, borde oscuro, brillo y degradado
 #   "neon":    relleno blanco y resplandor fuerte del acento en la palabra que suena; las demás tenues
 #   "simple":  texto blanco plano; lo que no suena al 45 % de opacidad
-ESTILOS_LETRA = ("clasica", "nitida", "neon", "simple")
+#   "degradado", "contorno", "relieve", "marcador", "oro" y "vhs": ver ui/estilo_letra.py (cada palabra se
+#   pinta una vez en una imagen y luego solo se copia)
+ESTILOS_LETRA = estilos.ESTILOS
 OPACIDAD_TENUE_NEON = 0.5     # palabras que no suenan en el estilo neón
 OPACIDAD_TENUE_SIMPLE = 0.45  # palabras que no suenan en el estilo simple
-ESTILO_POR_DEFECTO = "clasica"
-_estilo_actual = ESTILO_POR_DEFECTO
-_vivas = weakref.WeakSet()    # letras creadas: se repintan al cambiar el estilo
+OPACIDAD_POR_CANTAR = 0.75    # contorno: las palabras que todavía no llegan, huecas
+DURACION_POR_CANTAR = 0.30    # s del fundido de esas palabras al cambiar de línea
+RELLENO_MIN, RELLENO_MAX = 0.18, 1.2   # s que tarda una palabra en rellenarse (contorno)
+DURACION_MARCADOR = 0.22      # s que tarda en pasar el resaltador por una palabra
+DURACION_GLITCH = 0.26        # s del temblor de una palabra al entrar (vhs)
+ESPERA_COLORES_MS = 260       # los colores de la carátula cambian en una transición: se espera a que paren
+ESTILO_POR_DEFECTO = estilos.POR_DEFECTO
 
 
 def normalizar_estilo(estilo):
     """El estilo pedido si es válido; si no, el clásico."""
-    return estilo if estilo in ESTILOS_LETRA else ESTILO_POR_DEFECTO
+    return estilos.normalizar(estilo)
 
 
 def estilo_letra():
     """Estilo con que se pintan ahora las letras."""
-    return _estilo_actual
+    return estilos.actual()
 
 
 def fijar_estilo_letra(estilo):
     """Cambia el estilo de todas las letras (las visibles se repintan al momento)."""
-    global _estilo_actual
-    _estilo_actual = normalizar_estilo(estilo)
-    for w in list(_vivas):
-        try:
-            w.poner_estilo(_estilo_actual)
-        except RuntimeError:          # el widget ya se destruyó
-            pass
+    estilos.fijar(estilo)
 
 
 # --------------------------------------------------------------------------- funciones puras
@@ -210,9 +210,12 @@ def _ease_out_cubic(t):
 
 class _Item:
     """Una palabra ya colocada: su trazo (en coordenadas del widget), su caja y su estilo."""
-    __slots__ = ("indice", "trazo", "rect", "fuerte", "contorno")
+    __slots__ = ("indice", "trazo", "rect", "fuerte", "contorno", "medida", "tam", "capas")
 
-    def __init__(self, indice, trazo, rect, fuerte, contorno):
+    def __init__(self, indice, trazo, rect, fuerte, contorno, medida=None, tam=0.0):
+        self.medida = medida          # alturas reales de su fila (para los estilos de ui/estilo_letra.py)
+        self.tam = tam                # tamaño de su letra
+        self.capas = {}               # capa -> (imagen, dónde va), ya pintadas
         self.indice = indice
         self.trazo = trazo
         self.rect = rect
@@ -257,8 +260,13 @@ class LetraCinetica(QWidget):
         self._timer = QTimer(self)
         self._timer.setInterval(33)     # 30 fps: de sobra para la entrada de las palabras
         self._timer.timeout.connect(self._tic)
-        self._estilo = _estilo_actual
-        _vivas.add(self)
+        self._estilo = estilos.actual()
+        self._colores_estilo = None   # colores con que están pintadas las palabras guardadas
+        self._t_colores = QTimer(self)
+        self._t_colores.setSingleShot(True)
+        self._t_colores.setInterval(ESPERA_COLORES_MS)
+        self._t_colores.timeout.connect(self._asentar_colores)
+        estilos.suscribir(self)
         tipografia_letra.suscribir(self)
 
     def sizeHint(self):
@@ -314,18 +322,23 @@ class LetraCinetica(QWidget):
         self.update()
 
     def poner_estilo(self, estilo):
-        """«clasica», «nitida», «neon» o «simple». Se aplica en vivo: la disposición se rehace
-        (el trazo cambia: nítida y neón lo simplifican)."""
+        """Uno de ESTILOS_LETRA. Se aplica en vivo: la disposición se rehace (el trazo cambia: casi todos
+        lo simplifican)."""
         estilo = normalizar_estilo(estilo)
         if estilo == self._estilo:
             return
         self._estilo = estilo
         self._cache.clear()
         self._prev = None
+        self._arrancar()
         self.update()
 
     def estilo(self):
         return self._estilo
+
+    def al_cambiar_estilo_letra(self):
+        """Se eligió otro estilo (en el selector o en Ajustes)."""
+        self.poner_estilo(estilos.actual())
 
     def al_cambiar_tipografia(self):
         """Otra tipografía mide distinto: se rehace la disposición (y los trozos si cambian)."""
@@ -353,7 +366,25 @@ class LetraCinetica(QWidget):
         self._dominante = QColor(dominante)
         self._segundo = QColor(segundo)
         self._brillo = QColor(brillo)
+        # llegan muchos seguidos (la paleta cambia con una transición): las palabras guardadas solo se
+        # vuelven a pintar cuando los colores se quedan quietos
+        if self._colores_estilo is not None:
+            self._t_colores.start()
         self.update()
+
+    def _colores_letra(self):
+        if self._colores_estilo is None:
+            self._asentar_colores()
+        return self._colores_estilo
+
+    def _asentar_colores(self):
+        nuevos = estilos.Colores(acento_legible(self._brillo), self._dominante, self._segundo)
+        if self._colores_estilo is None or nuevos.clave != self._colores_estilo.clave:
+            self._colores_estilo = nuevos
+            for disp in self._cache.values():
+                for it in disp.items:
+                    it.capas.clear()
+            self.update()
 
     def indice_actual(self):
         """Índice (en la lista original) de la línea que suena; -1 si no hay o no hay sincronía."""
@@ -399,6 +430,13 @@ class LetraCinetica(QWidget):
             return True
         if any(ahora - t0 < DURACION_ENTRADA for t0 in self._entradas.values()):
             return True
+        if self._estilo == "contorno" and self._indice >= 0:
+            # letras huecas que se rellenan (y las que aún no llegan, que aparecen con un fundido)
+            if ahora - self._t_linea < DURACION_POR_CANTAR:
+                return True
+            disp = self._disposicion(self._indice)
+            if any(ahora - t0 < self._relleno_s(disp, j) for j, t0 in self._entradas.items()):
+                return True
         if self._indice >= 0 and self._efectivas()[self._indice]["pausa"]:
             return True
         # el fundido de la traducción también necesita repintar mientras dura
@@ -519,13 +557,15 @@ class LetraCinetica(QWidget):
     def _medir(self, palabras, fuerte, tam):
         """(texto mostrado, es_fuerte, fuente, ascenso, descenso, ancho) de cada palabra."""
         medidas = []
+        caligrafia = tipografia_letra.actual() in tipografia_letra.SIN_MAYUSCULAS
         for k, palabra in enumerate(palabras):
             es = (k == fuerte)
             f = tipografia_letra.adaptar(
                 fuente_impacto(int(round(tam * FACTOR_FUERTE)) if es else int(round(tam))))
             m = QFontMetricsF(f)
-            texto = palabra.upper() if es else palabra
-            medidas.append((texto, es, f, m.ascent(), m.descent(), m.horizontalAdvance(texto)))
+            texto = palabra.upper() if es and not caligrafia else palabra
+            subida, bajada = tipografia_letra.subida_bajada(f)
+            medidas.append((texto, es, f, subida, bajada, m.horizontalAdvance(texto)))
         return medidas
 
     @staticmethod
@@ -608,6 +648,12 @@ class LetraCinetica(QWidget):
         separacion = tam * GAP_PALABRAS
         y = area.top() + max(0.0, (area.height() - bh) / 2.0)
         contorno_linea = (entrada["orig"] % 2 == 1)
+        marco = QRectF(area.left(), y, bw, bh)
+        con_capas = self._estilo in estilos.ESTILOS_CAPAS
+        # la clásica con las tipografías de siempre se pinta exactamente igual que siempre
+        como_siempre = self._estilo == "clasica" and tipografia_letra.actual() in tipografia_letra.DE_SIEMPRE
+        fina = tipografia_letra.actual() in tipografia_letra.FINAS
+        enlazada = tipografia_letra.actual() in tipografia_letra.ENLAZADAS
         items = []
         for fila in filas:
             asc = max(medidas[k][3] for k in fila)
@@ -616,11 +662,17 @@ class LetraCinetica(QWidget):
             for k in fila:
                 texto, es, f, _, _, ancho = medidas[k]
                 trazo = QPainterPath()
+                hueca = contorno_linea and not es and not fina     # (una fuente finísima no tiene hueco que enseñar)
+                if not como_siempre:
+                    trazo.setFillRule(Qt.WindingFill)    # en las letras enlazadas no quedan huecos donde se pisan
                 trazo.addText(QPointF(x, y + asc), f, texto)
-                if self._estilo in ("nitida", "neon"):
+                if self._estilo in ("nitida", "neon") or (hueca and enlazada and not con_capas and not como_siempre):
                     trazo = trazo.simplified()    # sin contornos solapados: el borde no raya el interior
                 rect = QRectF(x, y, ancho, asc + desc)
-                items.append(_Item(k, trazo, rect, es, contorno_linea and not es))
+                item = _Item(k, trazo, rect, es, hueca, tam=f.pixelSize())
+                if con_capas:
+                    item.medida = estilos.Medida(marco, y + asc, *estilos.alturas(f), estilos.grosor_borde(f))
+                items.append(item)
                 x += ancho + separacion
             y += asc + desc + tam * GAP_FILAS
         ms_palabras = []
@@ -645,11 +697,17 @@ class LetraCinetica(QWidget):
         estilo = self._estilo
         # la palabra que suena: la última que ha entrado de la línea actual (neón y simple)
         sonando = None
-        if entradas is not None and estilo in ("neon", "simple"):
+        con_capas = estilo in estilos.ESTILOS_CAPAS
+        if entradas is not None and estilo in ("neon", "simple", "marcador"):
             llegadas = [(entradas[it.indice], it.indice) for it in disp.items
                         if entradas.get(it.indice) is not None]
             if llegadas:
                 sonando = max(llegadas)[1]
+        if estilo == "marcador" and sonando is not None:
+            # el resaltador va detrás de TODAS las palabras: no puede tapar la fila de arriba
+            for it in disp.items:
+                if it.indice == sonando:
+                    self._pintar_resaltador(p, it, ahora - entradas[sonando], dy, opacidad)
         for it in disp.items:
             escala = 1.0
             dx = 0.0
@@ -657,6 +715,9 @@ class LetraCinetica(QWidget):
             if entradas is not None:
                 t0 = entradas.get(it.indice)
                 if t0 is None:
+                    if estilo == "contorno":      # la que viene se ve hueca, esperando su turno
+                        espera = OPACIDAD_POR_CANTAR * min(1.0, (ahora - self._t_linea) / DURACION_POR_CANTAR)
+                        self._pintar_capa(p, it, "base", 0.0, dy, opacidad * espera)
                     continue                      # aún no ha llegado su instante
                 t = (ahora - t0) / DURACION_ENTRADA
                 if t < 1.0:
@@ -664,6 +725,10 @@ class LetraCinetica(QWidget):
                     escala = 1.25 - 0.25 * e
                     dx = 30.0 * (1.0 - e)
                     alfa = 1.0 - (1.0 - max(0.0, t)) ** 2
+                    if estilo == "contorno":      # ya se veía hueca en su sitio: solo un pequeño latido
+                        escala, dx, alfa = 1.0 + 0.07 * math.sin(math.pi * max(0.0, t)), 0.0, 1.0
+                    elif estilo == "marcador":    # el resaltador llega por la izquierda; la palabra, quieta
+                        escala, dx = 1.0, 0.0
             if alfa <= 0.0:
                 continue
             # destello al entrar (nítida): la palabra nace con un brillo que se apaga en la transición
@@ -673,6 +738,10 @@ class LetraCinetica(QWidget):
                 if t0 is not None:
                     destello = max(0.0, 1.0 - (ahora - t0) / (DURACION_ENTRADA * 1.6))
             es_sonando = it.indice == sonando
+            if con_capas:
+                desde = None if entradas is None else ahora - entradas[it.indice]
+                self._pintar_con_capas(p, disp, it, es_sonando, desde, escala, dx, dy, opacidad * alfa)
+                continue
             tenue = 1.0
             if estilo == "neon" and not es_sonando:
                 tenue = OPACIDAD_TENUE_NEON
@@ -685,9 +754,12 @@ class LetraCinetica(QWidget):
             p.scale(escala, escala)
             p.translate(-c.x(), -c.y())
             if estilo == "nitida":
-                _pintar_palabra(p, it, disp.tam, color_fuerte, destello)
+                if destello > 0.02:
+                    _pintar_palabra(p, it, disp.tam, color_fuerte, destello)
+                else:
+                    self._pintar_guardada(p, it, "nitida", disp.tam, color_fuerte, escala, False)
             elif estilo == "neon":
-                _pintar_palabra_neon(p, it, disp.tam, color_fuerte, es_sonando)
+                self._pintar_guardada(p, it, "neon", disp.tam, color_fuerte, escala, es_sonando)
             elif estilo == "simple":
                 p.setPen(Qt.NoPen)
                 p.setBrush(QColor(255, 255, 255))
@@ -701,6 +773,135 @@ class LetraCinetica(QWidget):
                 p.setBrush(color_fuerte if it.fuerte else TEXTO)
                 p.drawPath(it.trazo)
             p.restore()
+
+    def _relleno_s(self, disp, j):
+        """Segundos que tarda en rellenarse la palabra j (contorno): hasta que entra la siguiente."""
+        ms = disp.ms_palabras
+        if j + 1 < len(ms):
+            return max(RELLENO_MIN, min(RELLENO_MAX, (ms[j + 1] - ms[j]) / 1000.0))
+        return 0.45
+
+    def _capa(self, it, capa):
+        """La imagen de una palabra en una capa; se pinta la primera vez que hace falta."""
+        capa = estilos.capa_real(self._estilo, capa)
+        dpr = self.devicePixelRatioF() or 1.0
+        hecha = it.capas.get(capa)
+        if hecha is None or hecha[0].devicePixelRatio() != dpr:
+            hecha = estilos.imagen_capa(it.trazo, it.tam, self._estilo, capa, self._colores_letra(),
+                                        it.medida, dpr)
+            it.capas[capa] = hecha
+        return hecha
+
+    def _resaltador(self, it, desde):
+        """(cuánto avanzó 0..1, la pastilla ahora mismo) del resaltador de una palabra."""
+        u = _ease_out_cubic(desde / DURACION_MARCADOR)
+        r = estilos.rect_pastilla(it.trazo.boundingRect(), it.medida, it.tam)
+        r.setWidth(r.width() * u)
+        return u, r
+
+    def _pintar_resaltador(self, p, it, desde, dy, opacidad):
+        _u, r = self._resaltador(it, desde)
+        antes = p.opacity()
+        p.setOpacity(antes * opacidad)
+        estilos.pintar_pastilla(p, r.translated(0, round(dy)), self._colores_letra(), it.tam)
+        p.setOpacity(antes)
+
+    def _pintar_capa(self, p, it, capa, dx, dy, opacidad, hasta=None, desde_x=None):
+        """Copia la imagen de la palabra en su sitio (entera, hasta la x `hasta` o desde la x `desde_x`)."""
+        img, en = self._capa(it, capa)
+        antes = p.opacity()
+        p.setOpacity(antes * opacidad)
+        en = QPointF(round(en.x() + dx), round(en.y() + dy))
+        if desde_x is not None:
+            p.save()
+            p.setClipRect(QRectF(desde_x + dx, en.y(), img.width(), img.height()))
+            p.drawImage(en, img)
+            p.restore()
+        elif hasta is None:
+            p.drawImage(en, img)
+        else:
+            estilos.dibujar_hasta(p, img, en, hasta + dx, it.tam * 0.10)
+        p.setOpacity(antes)
+
+    def _pintar_con_capas(self, p, disp, it, es_sonando, desde, escala, dx, dy, opacidad):
+        """Una palabra de los estilos de ui/estilo_letra.py. `desde`: segundos desde que entró (None = la
+        línea que ya se va)."""
+        estilo = self._estilo
+        p.save()
+        if abs(escala - 1.0) > 0.001:
+            p.setRenderHint(QPainter.SmoothPixmapTransform, True)
+            c = it.rect.center()
+            p.translate(c.x() + dx, c.y() + dy)
+            p.scale(escala, escala)
+            p.translate(-c.x(), -c.y())
+            dx = dy = 0.0
+        if estilo == "marcador":
+            if es_sonando and desde is not None:
+                # el texto se vuelve oscuro por donde ya pasó el resaltador
+                u, r = self._resaltador(it, desde)
+                if u < 1.0:
+                    self._pintar_capa(p, it, "base", dx, dy, opacidad, desde_x=r.right())
+                self._pintar_capa(p, it, "viva", dx, dy, opacidad, None if u >= 1 else r.right())
+            else:
+                self._pintar_capa(p, it, "reposo", dx, dy, opacidad)
+        elif estilo == "contorno" and desde is not None:
+            u = min(1.0, max(0.0, desde / self._relleno_s(disp, it.indice)))
+            if u < 1.0:
+                self._pintar_capa(p, it, "base", dx, dy, opacidad)
+            caja = it.trazo.boundingRect()
+            self._pintar_capa(p, it, "viva", dx, dy, opacidad,
+                              None if u >= 1 else caja.left() + caja.width() * u)
+        elif estilo == "vhs" and desde is not None and desde < DURACION_GLITCH:
+            self._pintar_temblor(p, it, dx, dy, opacidad, 1.0 - max(0.0, desde) / DURACION_GLITCH)
+        else:
+            self._pintar_capa(p, it, "viva", dx, dy, opacidad)
+        p.restore()
+
+    def _pintar_temblor(self, p, it, dx, dy, opacidad, fuerza):
+        """VHS: al entrar, la palabra llega cortada en franjas corridas que se van juntando."""
+        img, en = self._capa(it, "viva")
+        dpr = img.devicePixelRatio()
+        w, h = img.width() / dpr, img.height() / dpr
+        franjas = 6
+        alto = h / franjas
+        antes = p.opacity()
+        p.setOpacity(antes * opacidad)
+        for i in range(franjas):
+            corrida = math.sin(i * 2.4 + it.indice * 1.7 + fuerza * 9.0) * it.tam * 0.16 * fuerza
+            p.drawImage(QRectF(en.x() + dx + corrida, en.y() + dy + i * alto, w, alto), img,
+                        QRectF(0, i * alto * dpr, w * dpr, alto * dpr))
+        p.setOpacity(antes)
+
+    def _pintar_guardada(self, p, it, estilo, tam, color, escala, sonando):
+        """Nítida y neón: la palabra quieta se pinta una vez en una imagen (sus trazos anchos son caros) y
+        luego solo se copia; mientras se agranda o se achica al entrar se pinta al vuelo, nítida."""
+        def pintar(q):
+            if estilo == "nitida":
+                _pintar_palabra(q, it, tam, color)
+            else:
+                _pintar_palabra_neon(q, it, tam, color, sonando)
+        if abs(escala - 1.0) > 0.001:
+            pintar(p)
+            return
+        dpr = self.devicePixelRatioF() or 1.0
+        clave = (estilo, color.rgb(), sonando, dpr)
+        hecha = it.capas.get(clave)
+        if hecha is None:
+            margen = math.ceil(16 * max(0.5, tam / 60.0) + 4)
+            caja = it.trazo.boundingRect().adjusted(-margen, -margen, margen, margen).toAlignedRect()
+            img = QImage(max(1, int(caja.width() * dpr)), max(1, int(caja.height() * dpr)),
+                         QImage.Format_ARGB32_Premultiplied)
+            img.setDevicePixelRatio(dpr)
+            img.fill(Qt.transparent)
+            q = QPainter(img)
+            q.setRenderHint(QPainter.Antialiasing, True)
+            q.translate(-caja.topLeft())
+            pintar(q)
+            q.end()
+            hecha = (img, QPointF(caja.topLeft()))
+            it.capas = {k: v for k, v in it.capas.items() if k[1] == clave[1]}     # otro color: fuera lo viejo
+            it.capas[clave] = hecha
+        p.drawImage(hecha[1], hecha[0])
 
     def _pintar_pausa(self, p, disp, ahora, dy, opacidad, color):
         """Tres puntos que laten en secuencia."""
@@ -757,7 +958,7 @@ class LetraCinetica(QWidget):
             return
         p.save()
         p.setFont(f)
-        if self._estilo == "nitida":
+        if self._estilo == "nitida" or self._estilo in estilos.ESTILOS_CAPAS:
             p.setOpacity(alfa / 255.0)
             _texto_legible(p, rect, Qt.AlignLeft | Qt.AlignVCenter, texto, QColor(255, 236, 200),
                            f.pixelSize() or 18)
@@ -806,7 +1007,7 @@ class LetraCinetica(QWidget):
             # línea siguiente, en pequeño; si es pausa o vacía, no se muestra nada
             sig = self._indice + 1
             if 0 <= sig < len(ef) and not ef[sig]["pausa"] and ef[sig]["texto"].strip():
-                nitida = self._estilo == "nitida"
+                nitida = self._estilo == "nitida" or self._estilo in estilos.ESTILOS_CAPAS
                 f = fuente(16, QFont.DemiBold) if nitida else fuente(15)
                 p.setFont(f)
                 if not nitida:

@@ -32,6 +32,31 @@ class SesionMedios {
   static web.MediaSession? get _sesion =>
       (web.window.navigator as JSObject).has('mediaSession') ? web.window.navigator.mediaSession : null;
 
+  /// Al volver a la página, si una canción de YouTube sonaba y el bloqueo la paró.
+  static void Function()? alPararYouTube;
+  static bool _vigilando = false;
+  static bool _sonabaYouTube = false;
+
+  static void _vigilarVista() {
+    if (_vigilando) return;
+    _vigilando = true;
+    web.document.addEventListener('visibilitychange', ((web.Event _) {
+      final r = _r;
+      if (r == null || !esTelefono) return;
+      final youtube = r.fuente?.esYouTubeWeb ?? false;
+      if (oculta) {
+        _sonabaYouTube = youtube && (r.estado == EstadoRepro.sonando || r.estado == EstadoRepro.cargando);
+        return;
+      }
+      if (!_sonabaYouTube) return;
+      _sonabaYouTube = false;
+      // un momento, por si el reproductor de YouTube retoma solo
+      Timer(const Duration(milliseconds: 900), () {
+        if (_r?.estado != EstadoRepro.sonando) alPararYouTube?.call();
+      });
+    }).toJS);
+  }
+
   /// Una cuenta nueva trae otro reproductor: se suelta el anterior.
   static void enganchar(Reproductor r) {
     final viejo = _r;
@@ -44,6 +69,7 @@ class SesionMedios {
     r.addListener(_publicar);
     r.posicion.addListener(_publicarPosicion);
     _botones();
+    _vigilarVista();
     _publicar();
   }
 

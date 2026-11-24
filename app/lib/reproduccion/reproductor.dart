@@ -8,6 +8,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 
 import '../nucleo/ajustes.dart';
 import '../nucleo/catalogo.dart';
+import '../nucleo/musica_libre.dart';
 import '../nucleo/coleccion.dart';
 import '../nucleo/eq_avanzado.dart';
 import '../nucleo/mezcla_dj.dart';
@@ -16,6 +17,8 @@ import '../nucleo/recomendador.dart';
 import '../nucleo/ritmo.dart';
 import '../nucleo/red.dart';
 import '../nucleo/sonoridad.dart';
+import '../nucleo/cotejo_audio.dart';
+import '../nucleo/letras_cache.dart';
 import '../nucleo/streams.dart';
 import '../nucleo/transiciones.dart';
 import '../nucleo/version.dart' show versionApp;
@@ -283,6 +286,11 @@ class Reproductor extends ChangeNotifier {
     _a = _nuevoMotor();
     _b = _nuevoMotor();
     _iniciarVigia();
+    // la letra se elige por la duración del audio que suena, no por la anunciada
+    LetrasCache.i
+      ..vincular(coleccion)
+      ..duracionReal = ((clave) => '${actual?['clave']}' == clave ? duracion.value : null)
+      ..cotejador = kIsWeb ? null : _cotejarLetra;
     volumen = ajustes.entero('volumen').toDouble();
     velocidad = ajustes.decimal('velocidad');
     aleatorio = ajustes.sino('aleatorio');
@@ -937,6 +945,8 @@ class Reproductor extends ChangeNotifier {
     await _cargar(pista);
     if (conRadio && '${pista['video_id'] ?? ''}'.isNotEmpty && _autoplay) {
       _pedirRadio(pista);
+    } else if (conRadio && _autoplay && MusicaLibre.es(pista)) {
+      unawaited(_pedirRadioLibre(pista));
     }
   }
 
@@ -1185,8 +1195,7 @@ class Reproductor extends ChangeNotifier {
   }
 
   /// ¿Suena en el navegador con el teléfono bloqueado? (todo menos YouTube)
-  bool _suenaEnReposo(Json p) =>
-      '${p['archivo'] ?? ''}'.isNotEmpty || '${p['video_id'] ?? ''}'.isEmpty || coleccion.estaDescargada(p);
+  bool _suenaEnReposo(Json p) => suenaBloqueada(p) || coleccion.estaDescargada(p);
 
   /// La próxima de la cola que suena con el teléfono bloqueado. Si no hay, la cola queda como estaba.
   Json? _siguienteEnReposo() {
@@ -1291,6 +1300,8 @@ class Reproductor extends ChangeNotifier {
         await _seguirConDescargadas();
       } else if (_autoplay && '${actual!['video_id'] ?? ''}'.isNotEmpty) {
         _pedirRadio(actual!, ySeguir: true);
+      } else if (_autoplay && MusicaLibre.es(actual)) {
+        await _pedirRadioLibre(actual!, ySeguir: true);
       } else {
         await detener();
       }
@@ -1334,6 +1345,29 @@ class Reproductor extends ChangeNotifier {
       return secuencia.first;
     }
     return null;
+  }
+
+  bool _buscandoLibre = false;
+
+  /// Música libre (Audius): más canciones parecidas detrás, para que no pare.
+  Future<void> _pedirRadioLibre(Json pista, {bool ySeguir = false}) async {
+    if (_buscandoLibre) return;
+    _buscandoLibre = true;
+    final gen = _gen;
+    try {
+      final nuevas = [
+        for (final p in await MusicaLibre.parecidas(pista, sin: {for (final x in secuencia) '${x['clave']}'}))
+          {...p, '_auto': true}
+      ];
+      // mientras se buscaban pudo elegirse otra cosa: no se le pega nada detrás
+      if (!secuencia.any((x) => identical(x, pista))) return;
+      secuencia.addAll(nuevas);
+      original.addAll(nuevas);
+      notifyListeners();
+      if (ySeguir && gen == _gen) nuevas.isEmpty ? await detener() : await siguiente();
+    } finally {
+      _buscandoLibre = false;
+    }
   }
 
   Future<void> _pedirRadio(Json pista, {bool ySeguir = false}) async {
@@ -1661,6 +1695,10 @@ class Reproductor extends ChangeNotifier {
   void _prepararExtras(int gen) {
     final pista = actual;
     if (pista == null) return;
+    // la última de la cola: lo que sigue se pide ya, con tiempo (no al terminar, con la pantalla apagada)
+    if (_autoplay && MusicaLibre.es(pista) && proximas.isEmpty && pos + 1 >= secuencia.length && repetir == 'no') {
+      unawaited(_pedirRadioLibre(pista));
+    }
     final vid = '${pista['video_id'] ?? ''}';
     final saltar = ajustes.sino('sponsorblock');
     if (vid.isNotEmpty && (saltar || _dj)) {
@@ -1816,6 +1854,26 @@ class Reproductor extends ChangeNotifier {
 
   /// En el navegador de un teléfono no se funde: allí el volumen no se puede tocar y
   /// con la pantalla apagada los relojes van a tirones.
+  /// Para poner la letra a tiempo: compara lo que suena con la canción oficial [ref].
+  Future<List<TramoCotejo>?> _cotejarLetra(Map<String, dynamic> pista, String ref) async {
+    // que primero suene bien lo que se pidió: la red es para la música
+    for (var i = 0; i < 20 && '${actual?['clave']}' == '${pista['clave']}' && estado == EstadoRepro.cargando; i++) {
+      await Future<void>.delayed(const Duration(milliseconds: 500));
+    }
+    final f = fuente;
+    final mia = '${actual?['clave']}' == '${pista['clave']}' && f != null && f.archivo.isNotEmpty ? f.archivo : '';
+    final vid = '${pista['video_id'] ?? ''}';
+    if (mia.isEmpty && vid.isEmpty) return null;
+    // la pista más ligera y solo los primeros minutos; un segundo intento por si el enlace ya no vale
+    for (var i = 0; i < 2; i++) {
+      final suena = mia.isNotEmpty ? mia : (await streams.resolver(vid, video: false, calidad: 'ahorro', intento: i)).url;
+      final otra = (await streams.resolver(ref, video: false, calidad: 'ahorro', intento: i)).url;
+      final r = await CotejoAudio.cotejar(suena, otra);
+      if (r != null) return r;
+    }
+    return null;
+  }
+
   bool get _puedeFundir => !kIsWeb || !(SesionMedios.esTelefono || SesionMedios.oculta);
 
   void _alDuracion(_Motor m, Duration d) {

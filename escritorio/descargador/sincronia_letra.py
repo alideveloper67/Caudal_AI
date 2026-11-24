@@ -216,7 +216,7 @@ def _cargar_modelo():
         return _modelo
 
 
-def _leer_audio(fuente, desde, largo, exe=None):
+def _leer_audio(fuente, desde, largo, exe=None, hz=16000):
     """El tramo de la canción como audio de 16 kHz mono (lo que pide el reconocedor), con ffmpeg sin
     ventana y con la prioridad más baja: es la misma fuente que suena (archivo o stream)."""
     import subprocess
@@ -241,13 +241,13 @@ def _leer_audio(fuente, desde, largo, exe=None):
     if desde > 0:
         cmd += ["-ss", f"{desde:.2f}"]
     cmd += ["-t", f"{largo:.2f}", "-i", origen, "-vn", "-sn", "-dn",
-            "-ac", "1", "-ar", "16000", "-f", "f32le", "-"]
+            "-ac", "1", "-ar", str(hz), "-f", "f32le", "-"]
     banderas = getattr(subprocess, "CREATE_NO_WINDOW", 0) | getattr(subprocess, "IDLE_PRIORITY_CLASS", 0)
     try:
         r = subprocess.run(cmd, capture_output=True, timeout=60, creationflags=banderas)
     except (OSError, subprocess.SubprocessError):
         return None
-    if r.returncode != 0 or len(r.stdout) < 16000 * 4 * 5:      # menos de 5 s: no sirve
+    if r.returncode != 0 or len(r.stdout) < hz * 4 * 5:      # menos de 5 s: no sirve
         return None
     return np.frombuffer(r.stdout, dtype=np.float32).copy()
 

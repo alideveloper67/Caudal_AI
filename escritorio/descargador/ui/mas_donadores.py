@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (QCheckBox, QDialog, QFrame, QHBoxLayout, QLabel, 
 
 from .. import social as S
 from ..hilos import en_segundo_plano
-from ..premium_datos import TEXTO_MASCOTA, url_mascota
+from ..premium_datos import TEXTO_MASCOTA, texto_estilos_escena, url_mascota
 from .canje_pase import boton_codigo
 from .donar import boton_donar
 from .estilos import C
@@ -136,8 +136,8 @@ class SeccionMasDonadores(QFrame):
         # ---- letra con efectos
         self.fila_letra = _Fila("Letra con efectos a pantalla completa",
                                 "Solo el verso que suena, enorme, con animaciones al entrar cada línea y un "
-                                "resplandor con los colores de la carátula. Cuatro estilos: Resplandor, Ola, "
-                                "Neón y Cine. También desde el botón del visualizador o con Ctrl+Shift+Y.")
+                                f"resplandor con los colores de la carátula. {texto_estilos_escena()}. "
+                                "También desde el botón del visualizador o con Ctrl+Shift+Y.")
         self.bt_letra = QPushButton("Abrir con lo que suena")
         self.bt_letra.setCursor(Qt.PointingHandCursor)
         self.bt_letra.clicked.connect(self._abrir_letra)

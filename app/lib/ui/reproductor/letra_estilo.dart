@@ -245,7 +245,7 @@ class _LineaActivaKaraokeState extends State<LineaActivaKaraoke> with SingleTick
   @override
   void didUpdateWidget(covariant LineaActivaKaraoke old) {
     super.didUpdateWidget(old);
-    if (old.inicio != widget.inicio || old.fin != widget.fin) {
+    if (old.inicio != widget.inicio || old.fin != widget.fin || old.adelanto != widget.adelanto) {
       _c.stop();
       _c.value = 0;
       _sincronizar();

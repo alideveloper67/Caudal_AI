@@ -167,6 +167,37 @@ def test_otra_letra_y_me_gusta(app, ctx):
     assert ctx.coleccion.me_gusta("abc123")
 
 
+def test_diseno_de_letra_desde_la_escena(app, ctx):
+    """«Aa» en la tarjeta y la tecla L abren el selector, hijo de la ventana de fondo (nunca detrás de ella)."""
+    from PySide6.QtCore import Qt
+    from PySide6.QtTest import QTest
+    from descargador.ui import estilo_letra, selector_letra, tipografia_letra
+    from descargador.ui.escena.ventana import escena_de
+    e = escena_de(ctx)
+    e.abrir()
+    try:
+        e._piezas["tarjeta"].pidio_diseno.emit()
+        d = selector_letra.dialogo_abierto()
+        assert d is not None and d.parentWidget() is e._fondo and d.isWindow()
+        assert d not in e._ventanas()
+        d.selector.muestra_estilo("relieve").click()
+        d.selector.muestra_fuente("russo").click()
+        assert e._piezas["letra"].estilo() == "relieve" and ctx.ajustes["estilo_letra"] == "relieve"
+        assert ctx.ajustes["fuente_letra"] == "russo"
+        QTest.keyClick(d, Qt.Key_Escape)
+        assert _esperar(app, lambda: selector_letra.dialogo_abierto() is None)
+        assert e.abierta                                   # Esc cerró el selector, no la escena
+        QTest.keyClick(e._piezas["letra"], Qt.Key_L)
+        assert _esperar(app, lambda: selector_letra.dialogo_abierto() is not None)
+        e.cerrar()                                         # al cerrar la escena se va con ella
+        assert _esperar(app, lambda: selector_letra.dialogo_abierto() is None)
+        e.abrir_diseno_letra()                             # con la escena cerrada no hace nada
+        assert selector_letra.dialogo_abierto() is None
+    finally:
+        estilo_letra.fijar("clasica")
+        tipografia_letra.fijar("predeterminada")
+
+
 def test_colores_llegan_a_todas_las_piezas(app, ctx):
     from descargador.ui.escena.ventana import escena_de
     e = escena_de(ctx)

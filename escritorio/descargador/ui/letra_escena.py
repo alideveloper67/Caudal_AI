@@ -11,6 +11,11 @@ Parte de lo que ya hay: la letra viva (`letra_viva.LienzoLetra`: letra, tiempos,
     · Ola: las palabras entran una a una, con un pequeño rebote;
     · Neón: parpadea como un letrero al encenderse y queda brillando;
     · Cine: aparece letra a letra, con letra de cine y mucho aire;
+    · Zoom: llega de golpe, enorme, y se clava en su sitio;
+    · Máquina: se escribe tecla a tecla, con su cursor;
+    · Lluvia: las letras caen y rebotan;
+    · Giro: cada palabra entra girando;
+- con el tipo de letra elegido en «Diseño de letra» (la predeterminada deja a cada estilo la suya);
 - detrás del verso, un resplandor que respira con los colores de la carátula (y late al entrar cada verso);
 - lo ya cantado se tiñe poco a poco (como el karaoke).
 
@@ -30,6 +35,7 @@ from PySide6.QtWidgets import QMenu, QPushButton, QWidget
 
 from ..paleta_caratula import colores_de
 from ..premium_datos import DETALLE_ESCENA, ESTILOS_ESCENA, NOMBRES_ESCENA, estilo_escena_valido
+from . import tipografia_letra
 from .componentes import a_la_vista
 from .karaoke import LienzoKaraoke
 from .letra_viva import FPS_DORMIDO, FPS_SONANDO, partir
@@ -37,11 +43,21 @@ from .vista_grande import BOTON, VistaGrande, ahorrando
 
 AJUSTE_ESTILO = "letra_escena_estilo"
 # lo que tarda en entrar un verso (s) según el estilo; la salida del anterior es igual para todos
-DURACION = {"resplandor": 0.6, "ola": 0.5, "neon": 0.75, "cine": 0.4}
+DURACION = {"resplandor": 0.6, "ola": 0.5, "neon": 0.75, "cine": 0.4, "zoom": 0.5, "maquina": 0.03,
+            "lluvia": 0.75, "giro": 0.55}
 SALIDA = 0.45
 PASO_OLA = 0.075        # retraso entre palabras
 PASO_CINE_MAX = 0.045   # retraso máximo entre letras (las líneas largas van más deprisa)
 CINE_TOTAL = 1.3        # una línea de cine termina de aparecer, como mucho, en este tiempo
+PASO_MAQUINA_MAX = 0.055   # segundos entre teclas
+MAQUINA_TOTAL = 1.4
+PASO_LLUVIA_MAX = 0.035
+LLUVIA_TOTAL = 1.5
+PASO_GIRO = 0.085
+GRADOS_GIRO = 75.0
+ESCALA_ZOOM = 2.3
+POR_PALABRAS = ("ola", "giro")
+POR_LETRAS = ("cine", "maquina", "lluvia")
 
 
 # ------------------------------------------------------------------ cuentas (sin Qt, se prueban solas)
@@ -72,12 +88,68 @@ def parpadeo_neon(t):
     return 0.85 + 0.15 * _lim((t - 0.42) / 0.3)
 
 
-def unidades_de(estilo, texto):
-    """En qué piezas entra un verso: palabras (ola), letras (cine) o el verso entero (los demás)."""
-    estilo = estilo_escena_valido(estilo)
+def bote(x):
+    """Cae y rebota cada vez menos hasta quedarse quieto (0 arriba, 1 en el suelo)."""
+    x = _lim(x)
+    n, d = 7.5625, 2.75
+    if x < 1 / d:
+        return n * x * x
+    if x < 2 / d:
+        x -= 1.5 / d
+        return n * x * x + 0.75
+    if x < 2.5 / d:
+        x -= 2.25 / d
+        return n * x * x + 0.9375
+    x -= 2.625 / d
+    return n * x * x + 0.984375
+
+
+def golpe(x):
+    """La escala del zoom: enorme, se clava un poco de más y vuelve a su tamaño."""
+    x = _lim(x)
+    if x < 0.36:
+        u = x / 0.36
+        return ESCALA_ZOOM + (0.93 - ESCALA_ZOOM) * (u * u * (3 - 2 * u))
+    u = (x - 0.36) / 0.64
+    return 1.0 - 0.07 * math.cos(u * math.pi * 1.5) * (1 - u)
+
+
+def paso_de(estilo, n):
+    """Segundos entre una pieza y la siguiente."""
+    n = max(1, int(n))
     if estilo == "ola":
-        return texto.split()
+        return PASO_OLA
+    if estilo == "giro":
+        return PASO_GIRO
     if estilo == "cine":
+        return min(PASO_CINE_MAX, max(0.0, CINE_TOTAL - DURACION["cine"]) / n)
+    if estilo == "maquina":
+        return min(PASO_MAQUINA_MAX, MAQUINA_TOTAL / n)
+    if estilo == "lluvia":
+        return min(PASO_LLUVIA_MAX, (LLUVIA_TOTAL - DURACION["lluvia"]) / n)
+    return 0.0
+
+
+def giro_de(estilo, t, i):
+    """Grados que le faltan a la pieza `i` para quedar derecha (solo en «Giro»)."""
+    if estilo != "giro":
+        return 0.0
+    x = (t - i * PASO_GIRO) / DURACION["giro"]
+    return (1 - rebote(x)) * GRADOS_GIRO * (-1 if i % 2 == 0 else 1)
+
+
+def letras_escritas(t, n):
+    """Cuántas letras lleva escritas la máquina a los `t` segundos."""
+    paso = paso_de("maquina", n)
+    return max(0, min(n, int(t / paso) + 1)) if t > 0 and paso > 0 else 0
+
+
+def unidades_de(estilo, texto):
+    """En qué piezas entra un verso: palabras (ola, giro), letras (cine, máquina, lluvia) o el verso entero."""
+    estilo = estilo_escena_valido(estilo)
+    if estilo in POR_PALABRAS:
+        return texto.split()
+    if estilo in POR_LETRAS:
         return [c for c in texto if not c.isspace()]
     return [texto]
 
@@ -99,6 +171,26 @@ def entrada(estilo, t, n):
                  1.0) for i in range(n)]
     if estilo == "neon":
         return [(parpadeo_neon(t), 0.0, 0.97 + 0.03 * suave(t / DURACION["neon"]))]
+    if estilo == "zoom":
+        x = t / DURACION["zoom"]
+        return [(_lim(x * 3.2), 0.0, golpe(x))]
+    if estilo == "maquina":
+        paso = paso_de(estilo, n)
+        return [(_lim((t - i * paso) / DURACION["maquina"]), 0.0, 1.0) for i in range(n)]
+    if estilo == "lluvia":
+        paso = paso_de(estilo, n)
+        salida = []
+        for i in range(n):
+            # no caen en fila: cada letra se adelanta o se atrasa un poco
+            x = (t - i * paso - ((i * 37) % 11) * 0.012) / DURACION["lluvia"]
+            salida.append((suave(x * 2.4), (1 - bote(x)) * 1.5, 1.0))
+        return salida
+    if estilo == "giro":
+        salida = []
+        for i in range(n):
+            x = (t - i * PASO_GIRO) / DURACION["giro"]
+            salida.append((suave(x * 1.8), (1 - suave(x)) * 0.25, 0.55 + 0.45 * suave(x)))
+        return salida
     a = suave(t / DURACION["resplandor"])
     return [(a, (1 - a) * 0.45, 0.9 + 0.1 * a)]
 
@@ -107,11 +199,11 @@ def termino_entrada(estilo, t, n):
     """¿Ya entró todo el verso? (para dejar de pedir cuadros fluidos)."""
     estilo = estilo_escena_valido(estilo)
     n = max(1, int(n))
-    if estilo == "ola":
-        return t >= (n - 1) * PASO_OLA + DURACION["ola"]
-    if estilo == "cine":
-        paso = min(PASO_CINE_MAX, max(0.0, CINE_TOTAL - DURACION["cine"]) / n)
-        return t >= (n - 1) * paso + DURACION["cine"]
+    if estilo in POR_PALABRAS or estilo in POR_LETRAS:
+        extra = 0.12 if estilo == "lluvia" else 0.0        # lo que se atrasa cada gota
+        return t >= (n - 1) * paso_de(estilo, n) + DURACION[estilo] + extra
+    if estilo == "zoom":
+        return t >= DURACION["zoom"]
     if estilo == "neon":
         return t >= 0.75
     return t >= DURACION["resplandor"]
@@ -143,6 +235,10 @@ class LienzoEscena(LienzoKaraoke):
         self._despertar()
         self.update()
 
+    def al_cambiar_tipografia(self):
+        self._halos = {}
+        super().al_cambiar_tipografia()
+
     def _poner_lineas(self, lineas, sincronizada, mensaje, esperando=False):
         super()._poner_lineas(lineas, sincronizada, mensaje, esperando)
         self._anterior = -1
@@ -159,11 +255,12 @@ class LienzoEscena(LienzoKaraoke):
             f.setWeight(QFont.Normal)
             f.setLetterSpacing(QFont.PercentageSpacing, 112)
         else:
-            f = QFont("Segoe UI")
-            f.setPixelSize(int(tam))
-            f.setWeight(QFont.Black if self.estilo in ("resplandor", "ola") else QFont.Bold)
-            f.setLetterSpacing(QFont.PercentageSpacing, 104 if self.estilo == "neon" else 97)
-        return f
+            maquina = self.estilo == "maquina"
+            f = QFont("Consolas" if maquina else "Segoe UI")
+            f.setPixelSize(int(tam * (0.92 if maquina else 1.0)))
+            f.setWeight(QFont.Bold if self.estilo in ("neon", "maquina") else QFont.Black)
+            f.setLetterSpacing(QFont.PercentageSpacing, {"neon": 104, "maquina": 100}.get(self.estilo, 97))
+        return tipografia_letra.adaptar(f)      # la tipografía elegida (o la de cada estilo, si es la de siempre)
 
     # ----------------------------------------------------------- animación
     def _cuadro(self):
@@ -278,7 +375,7 @@ class LienzoEscena(LienzoKaraoke):
 
     def _halo(self, k, filas, f, fm, color):
         """El brillo alrededor de un verso: se pinta una vez (caminos de texto con trazos gruesos) y se guarda."""
-        clave = (k, self.estilo, f.pixelSize(), self.width(), color.name())
+        clave = (k, self.estilo, f.family(), f.pixelSize(), self.width(), color.name())
         hecho = self._halos.get(clave)
         if hecho is not None:
             return hecho
@@ -291,6 +388,7 @@ class LienzoEscena(LienzoKaraoke):
         q = QPainter(img)
         q.setRenderHint(QPainter.Antialiasing)
         ruta = QPainterPath()
+        ruta.setFillRule(Qt.WindingFill)
         for n, fila in enumerate(filas):
             x = (ancho - fm.horizontalAdvance(fila)) / 2
             ruta.addText(QPointF(x, margen + n * alto_fila + fm.ascent()), f, fila)
@@ -320,9 +418,23 @@ class LienzoEscena(LienzoKaraoke):
         if t is not None:
             n_total = len(unidades_de(self.estilo, self._texto(k)))
             fases = entrada(self.estilo, t, n_total)
-            brillo = fases[0][0] if self.estilo in ("neon", "resplandor") else suave(t / 0.6)
+            if self.estilo in ("neon", "resplandor", "zoom"):
+                brillo = fases[0][0]
+            elif self.estilo in ("maquina", "lluvia", "giro"):
+                # el halo se enciende cuando ya están casi todas: antes dejaría ver el verso que aún no llega
+                dura = (n_total - 1) * paso_de(self.estilo, n_total) + DURACION[self.estilo]
+                brillo = suave((t - 0.65 * dura) / max(0.25, 0.6 * dura))
+            else:
+                brillo = suave(t / 0.6)
         else:
             fases, brillo = None, 1.0
+        p.save()
+        if self.estilo == "zoom" and fases is not None and fases[0][2] != 1.0:
+            # todo el verso (sus filas y su halo) crece a la vez, desde el centro
+            p.translate(self.width() / 2, cy)
+            p.scale(fases[0][2], fases[0][2])
+            p.translate(-self.width() / 2, -cy)
+            fases = [(fases[0][0], 0.0, 1.0)]
         img, margen = self._halo(k, filas, f, fm, color_halo)
         p.save()
         p.setOpacity(_lim(alfa_total * brillo * (0.75 + 0.25 * self._pulso)))
@@ -344,8 +456,9 @@ class LienzoEscena(LienzoKaraoke):
             for texto, x, letras_antes in piezas:
                 if fases is not None:
                     a, sube, esc = fases[min(indice, len(fases) - 1)]
+                    giro = giro_de(self.estilo, t, indice)
                 else:
-                    a, sube, esc = 1.0, 0.0, 1.0
+                    a, sube, esc, giro = 1.0, 0.0, 1.0, 0.0
                 indice += 1
                 if a <= 0.01:
                     continue
@@ -363,23 +476,57 @@ class LienzoEscena(LienzoKaraoke):
                 p.setOpacity(_lim(a * alfa_total))
                 ancho_pieza = fm.horizontalAdvance(texto)
                 p.translate(x + ancho_pieza / 2, y - sube * tam)
+                if giro:
+                    centro = fm.ascent() * 0.36          # gira sobre el centro de la palabra, no sobre su pie
+                    p.translate(0, -centro)
+                    p.rotate(giro)
+                    p.translate(0, centro)
                 p.scale(esc, esc)
                 p.translate(-ancho_pieza / 2, 0)
                 p.setPen(pluma)
                 p.drawText(QPointF(0, 0), texto)
                 p.restore()
             antes += len(fila) + 1
+        if self.estilo == "maquina" and t is not None:
+            self._pintar_cursor(p, filas, fm, y0, alto_fila, t, alfa_total)
+        p.restore()
+
+    def _pintar_cursor(self, p, filas, fm, y0, alto_fila, t, alfa):
+        """El cursor de la máquina: detrás de la última letra escrita; al acabar, parpadea."""
+        n = sum(1 for fila in filas for c in fila if not c.isspace())
+        escritas = letras_escritas(t, n)
+        if escritas >= n and int(t / 0.45) % 2:
+            return
+        fila_n, x = 0, 0.0
+        quedan = escritas
+        for fila_n, fila in enumerate(filas):
+            hay = sum(1 for c in fila if not c.isspace())
+            if quedan <= hay or fila_n == len(filas) - 1:
+                hasta = 0
+                while hasta < len(fila) and quedan > 0:
+                    quedan -= 0 if fila[hasta].isspace() else 1
+                    hasta += 1
+                x = (self.width() - fm.horizontalAdvance(fila)) / 2 + fm.horizontalAdvance(fila[:hasta])
+                break
+            quedan -= hay
+        alto = fm.ascent() * 0.86
+        pie = y0 + fila_n * alto_fila + fm.ascent()
+        p.save()
+        p.setOpacity(_lim(alfa * 0.9))
+        p.fillRect(QRectF(x + alto * 0.07, pie - alto * 0.92, max(3.0, alto * 0.09), alto * 1.04),
+                   self._colores()[0].lighter(170))
+        p.restore()
 
     def _piezas(self, fila, fm, x0):
         """[(texto, x, letras antes en la fila)] para pintar la fila pieza a pieza según el estilo."""
-        if self.estilo == "ola":
+        if self.estilo in POR_PALABRAS:
             salida, pos = [], 0
             for palabra in fila.split(" "):
                 if palabra:
                     salida.append((palabra, x0 + fm.horizontalAdvance(fila[:pos]), pos))
                 pos += len(palabra) + 1
             return salida
-        if self.estilo == "cine":
+        if self.estilo in POR_LETRAS:
             return [(c, x0 + fm.horizontalAdvance(fila[:i]), i) for i, c in enumerate(fila) if c != " "]
         return [(fila, x0, 0)]
 
@@ -480,8 +627,8 @@ class PaginaLetraEscena(VistaGrande):
         self._pintar_boton_estilo()
 
     def keyPressEvent(self, e):
-        # 1-4 cambian de estilo sin abrir el menú
-        if Qt.Key_1 <= e.key() <= Qt.Key_4:
+        # 1-8 cambian de estilo sin abrir el menú
+        if Qt.Key_1 <= e.key() < Qt.Key_1 + len(ESTILOS_ESCENA):
             self.elegir_estilo(ESTILOS_ESCENA[e.key() - Qt.Key_1])
             return
         super().keyPressEvent(e)

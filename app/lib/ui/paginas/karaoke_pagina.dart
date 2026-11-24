@@ -15,13 +15,12 @@ import '../../reproduccion/frenos.dart';
 import '../../reproduccion/reproductor.dart';
 import '../reproductor/fondo_ambiente.dart';
 import '../reproductor/letra_aspecto.dart';
-import '../reproductor/linea_karaoke.dart';
 import '../reproductor/mascota_vida.dart';
 import '../reproductor/paleta_portada.dart';
 import '../premium/letra_escena.dart';
 import '../servicios.dart';
 import '../tema.dart';
-import 'reproductor_pagina.dart' show desfaseDeLetra, avisoDesfaseLetra, letraDeCancion, lineasDeLetra;
+import 'reproductor_pagina.dart' show BotonDisenoLetra, BotonSincronia, avisoDesfaseLetra, desfaseDeLetra, letraCambiada, letraDeCancion, lineasDeLetra, momentoDeVerso;
 
 class KaraokePagina extends StatefulWidget {
   const KaraokePagina({super.key, required this.pista, this.letra});
@@ -74,7 +73,7 @@ class _KaraokePaginaState extends State<KaraokePagina> {
       _r = _s!.reproductor
         ..addListener(_alCambiarCancion)
         ..posicion.addListener(_alAvanzar);
-      avisoDesfaseLetra.addListener(_alAvanzar);
+      avisoDesfaseLetra.addListener(_alCorregir);
     }
   }
 
@@ -83,7 +82,7 @@ class _KaraokePaginaState extends State<KaraokePagina> {
     final r = _r;
     r?.removeListener(_alCambiarCancion);
     r?.posicion.removeListener(_alAvanzar);
-    avisoDesfaseLetra.removeListener(_alAvanzar);
+    avisoDesfaseLetra.removeListener(_alCorregir);
     // la voz vuelve sola al salir: nadie quiere sorpresas en la siguiente canción
     if (r != null) {
       try {
@@ -125,6 +124,13 @@ class _KaraokePaginaState extends State<KaraokePagina> {
       _poner(null);
     });
     _cargarLetra(nueva);
+  }
+
+  void _alCorregir() {
+    final l = letraCambiada('${_pista['clave']}', _letra);
+    if (l != null && _letra != null && mounted) setState(() => _poner(l));
+    _alAvanzar();
+    if (mounted) setState(() {});
   }
 
   void _alAvanzar() {
@@ -198,6 +204,7 @@ class _KaraokePaginaState extends State<KaraokePagina> {
           SafeArea(
             child: Column(children: [
               _cabecera(context, r, pal),
+              if (_ls.isNotEmpty) _herramientas(),
               Expanded(child: _cuerpo(context, r, pal)),
               _pie(context, r, pal, sonando),
             ]),
@@ -234,6 +241,13 @@ class _KaraokePaginaState extends State<KaraokePagina> {
     );
   }
 
+  /// Corregir la letra y elegir su diseño, sin salir.
+  Widget _herramientas() => Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+        BotonSincronia(pista: _pista, letra: _letra, compacto: true),
+        const SizedBox(width: 8),
+        const BotonDisenoLetra(compacto: true),
+      ]);
+
   Widget _cuerpo(BuildContext context, Reproductor r, PaletaPortada pal) {
     final l = _letra;
     if (l == null) return const Center(child: CircularProgressIndicator(color: Colors.white));
@@ -250,6 +264,8 @@ class _KaraokePaginaState extends State<KaraokePagina> {
       return SingleChildScrollView(
         padding: const EdgeInsets.fromLTRB(24, 8, 24, 24),
         child: Column(children: [
+          _herramientas(),
+          const SizedBox(height: 10),
           const Text('Esta letra no trae tiempos, por eso no avanza sola.',
               textAlign: TextAlign.center, style: TextStyle(fontSize: 13, color: Color(0xCCFFFFFF))),
           const SizedBox(height: 14),
@@ -264,7 +280,9 @@ class _KaraokePaginaState extends State<KaraokePagina> {
         _toque = DateTime.now();
         return false;
       },
-      child: LayoutBuilder(
+      child: ValueListenableBuilder<LetraAspecto>(
+        valueListenable: LetraAspecto.actual,
+        builder: (context, aspecto, _) => LayoutBuilder(
         builder: (context, c) => ListView.builder(
           controller: _scroll,
           padding: EdgeInsets.symmetric(vertical: c.maxHeight * 0.45, horizontal: 20),
@@ -273,31 +291,31 @@ class _KaraokePaginaState extends State<KaraokePagina> {
             final d = _actual < 0 ? i + 1 : (i - _actual);
             final esta = d == 0;
             final texto = _ls[i].$2.trim().isEmpty ? '♪' : _ls[i].$2;
-            final estilo = LetraAspecto.actual.value.conFuente(TextStyle(
+            final estilo = TextStyle(
               fontSize: esta ? grande : grande * 0.72,
               fontWeight: FontWeight.w900,
               height: 1.2,
               letterSpacing: -0.4,
               color: Colors.white,
-            ));
+            );
             final opacidad = esta ? 1.0 : (d.abs() == 1 ? 0.55 : (d.abs() == 2 ? 0.34 : 0.2));
             Widget linea;
             if (esta && texto != '♪') {
               final inicio = _ls[i].$1;
               final siguiente = i + 1 < _ls.length ? _ls[i + 1].$1 : inicio + 5000;
               final fin = inicio + (siguiente - inicio).clamp(600, 1500 + texto.length * 85);
-              linea = LineaKaraoke(
-                  texto: texto, estilo: estilo, inicio: inicio, fin: fin, r: r,
-                  hecho: Color.lerp(Colors.white, pal.acento, 0.55)!, falta: const Color(0x99FFFFFF),
-                  alineacion: TextAlign.center);
+              linea = LineaLetraActiva(
+                  aspecto: aspecto, texto: texto, estilo: estilo, inicio: inicio, fin: fin, r: r, acento: pal.acento,
+                  hecho: Color.lerp(Colors.white, pal.acento, 0.55)!, porVenir: const Color(0x99FFFFFF),
+                  adelanto: 250 + desfaseDeLetra('${_pista['clave']}'), alinear: TextAlign.center);
             } else {
-              linea = Text(texto, textAlign: TextAlign.center, style: estilo);
+              linea = LineaLetra(aspecto: aspecto, texto: texto, estilo: estilo, alinear: TextAlign.center);
             }
             return GestureDetector(
               key: _llaves[i],
               behavior: HitTestBehavior.opaque,
               onTap: () {
-                r.buscar(Duration(milliseconds: _ls[i].$1));
+                r.buscar(momentoDeVerso(_ls[i].$1, '${_pista['clave']}'));
               },
               child: Padding(
                 padding: const EdgeInsets.symmetric(vertical: 9),
@@ -311,6 +329,7 @@ class _KaraokePaginaState extends State<KaraokePagina> {
               ),
             );
           },
+        ),
         ),
       ),
     );

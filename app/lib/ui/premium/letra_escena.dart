@@ -1,6 +1,6 @@
 // Letra con efectos (donadores): solo el verso que suena, enorme y en el centro, con una entrada
-// animada por línea y un resplandor con los colores de la carátula. Cuatro estilos: Resplandor, Ola,
-// Neón y Cine. El anterior se apaga arriba y el siguiente asoma pequeño abajo.
+// animada por línea y un resplandor con los colores de la carátula. Estilos: Resplandor, Ola, Neón, Cine,
+// Zoom, Máquina, Lluvia y Giro. El anterior se apaga arriba y el siguiente asoma pequeño abajo.
 //
 // Parte del modo karaoke: usa la misma letra (su caché, el desfase de «Sincronía»), el mismo fondo
 // animado de la carátula y su paleta. La parte que se ve ([EscenaLetraVista]) no depende del
@@ -19,9 +19,10 @@ import '../../nucleo/premium.dart';
 import '../../nucleo/premium_letras.dart';
 import '../../reproduccion/frenos.dart';
 import '../../reproduccion/reproductor.dart';
-import '../paginas/reproductor_pagina.dart' show desfaseDeLetra, avisoDesfaseLetra, letraDeCancion, lineasDeLetra;
+import '../paginas/reproductor_pagina.dart' show BotonDisenoLetra, BotonSincronia, avisoDesfaseLetra, desfaseDeLetra, letraCambiada, letraDeCancion, lineasDeLetra;
 import '../reproductor/fondo_ambiente.dart';
 import '../reproductor/letra_aspecto.dart';
+import '../reproductor/letra_disenos.dart';
 import '../reproductor/letra_estilo.dart';
 import '../reproductor/paleta_portada.dart';
 import '../servicios.dart';
@@ -99,7 +100,7 @@ class _LetraEscenaPaginaState extends State<LetraEscenaPagina> {
       _r = Caudal.leer(context).reproductor
         ..addListener(_alCambiarCancion)
         ..posicion.addListener(_alAvanzar);
-      avisoDesfaseLetra.addListener(_alAvanzar);
+      avisoDesfaseLetra.addListener(_alCorregir);
     }
   }
 
@@ -108,7 +109,7 @@ class _LetraEscenaPaginaState extends State<LetraEscenaPagina> {
     Premium.i.removeListener(_vigilarPremium);
     _r?.removeListener(_alCambiarCancion);
     _r?.posicion.removeListener(_alAvanzar);
-    avisoDesfaseLetra.removeListener(_alAvanzar);
+    avisoDesfaseLetra.removeListener(_alCorregir);
     super.dispose();
   }
 
@@ -147,6 +148,12 @@ class _LetraEscenaPaginaState extends State<LetraEscenaPagina> {
       _poner(null);
     });
     _cargarLetra(nueva);
+  }
+
+  void _alCorregir() {
+    final l = letraCambiada('${_pista['clave']}', _letra);
+    if (l != null && _letra != null && mounted) setState(() => _poner(l));
+    _alAvanzar();
   }
 
   void _alAvanzar() {
@@ -193,7 +200,10 @@ class _LetraEscenaPaginaState extends State<LetraEscenaPagina> {
             child: Column(children: [
               _cabecera(context),
               SelectorEstiloLetra(estilo: _estilo, alElegir: _elegir, acento: pal.acento),
-              Expanded(child: _cuerpo(pal)),
+              _herramientas(),
+              const SizedBox(height: 14),
+              Expanded(child: ValueListenableBuilder<LetraAspecto>(
+                  valueListenable: LetraAspecto.actual, builder: (_, _, _) => _cuerpo(pal))),
               _pie(r, pal, sonando),
             ]),
           ),
@@ -221,6 +231,12 @@ class _LetraEscenaPaginaState extends State<LetraEscenaPagina> {
           const SizedBox(width: 48),
         ]),
       );
+
+  Widget _herramientas() => Row(mainAxisAlignment: MainAxisAlignment.center, children: [
+        BotonSincronia(pista: _pista, letra: _letra, compacto: true),
+        const SizedBox(width: 8),
+        const BotonDisenoLetra(compacto: true),
+      ]);
 
   Widget _cuerpo(PaletaPortada pal) {
     final l = _letra;
@@ -258,7 +274,7 @@ class _LetraEscenaPaginaState extends State<LetraEscenaPagina> {
       );
 }
 
-/// Los cuatro estilos, para elegir con un toque.
+/// Los estilos, para elegir con un toque.
 class SelectorEstiloLetra extends StatelessWidget {
   const SelectorEstiloLetra({super.key, required this.estilo, required this.alElegir, this.acento = oroDonador});
 
@@ -278,6 +294,8 @@ class SelectorEstiloLetra extends StatelessWidget {
                 label: Text(Cosmeticos.nombresEstiloLetra[e]!),
                 selected: e == estilo,
                 selectedColor: acento.withValues(alpha: 0.35),
+                labelStyle: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700),
+                checkmarkColor: Colors.white,
                 onSelected: (_) => alElegir(e),
               ),
             ),
@@ -410,6 +428,16 @@ class _VersoEscenaState extends State<VersoEscena> with SingleTickerProviderStat
         child: AnimatedBuilder(animation: _c, builder: (_, _) => _pintar(_c.value)),
       );
 
+  /// Un trozo del verso, con el diseño elegido en «Aa» (o el blanco con brillo de siempre).
+  Widget _trozo(String texto, TextStyle base, List<Shadow> brillo, {TextAlign alinear = TextAlign.center}) {
+    final a = LetraAspecto.actual.value;
+    if (a.enCapas) return TextoDiseno(diseno: a.estilo, texto: texto, estilo: base, acento: widget.paleta.acento, alinear: alinear);
+    return Stack(children: [
+      ContornoLetra(texto: texto, alinear: alinear, estilo: base),
+      Text(texto, textAlign: alinear, style: base.copyWith(shadows: a.simple ? null : brillo)),
+    ]);
+  }
+
   Widget _pintar(double t) {
     // con la tipografía elegida en Ajustes › Letra
     final base = LetraAspecto.actual.value.conFuente(TextStyle(
@@ -434,10 +462,7 @@ class _VersoEscenaState extends State<VersoEscena> with SingleTickerProviderStat
                   opacity: p,
                   child: Transform.translate(
                     offset: Offset(0, widget.tamano * 0.7 * (1 - sube)),
-                    child: Stack(children: [
-                      ContornoLetra(texto: palabras[k], estilo: base),
-                      Text(palabras[k], style: base.copyWith(shadows: _brillo(0.35 + 0.65 * p))),
-                    ]),
+                    child: _trozo(palabras[k], base, _brillo(0.35 + 0.65 * p), alinear: TextAlign.start),
                   ),
                 );
               }),
@@ -494,6 +519,86 @@ class _VersoEscenaState extends State<VersoEscena> with SingleTickerProviderStat
         return sigma < 0.05
             ? texto
             : ImageFiltered(imageFilter: ImageFilter.blur(sigmaX: sigma, sigmaY: sigma), child: texto);
+      case 'zoom':
+        // entra enorme y cae en su sitio con un golpe; el brillo estalla al llegar
+        final e = Curves.easeOutExpo.transform(t);
+        final golpe = math.sin(math.pi * ((t - 0.25) / 0.75).clamp(0.0, 1.0));
+        return Opacity(
+          opacity: (t * 3).clamp(0.0, 1.0),
+          child: Transform.scale(
+            scale: 2.1 - 1.1 * e - 0.03 * golpe,
+            child: _trozo(widget.texto, base, _brillo(0.5 + 0.7 * golpe)),
+          ),
+        );
+      case 'maquina':
+        // letra a letra con su cursor; lo que falta ocupa su sitio para que nada salte
+        final letras = widget.texto.characters;
+        final van = (letras.length * (t / 0.9).clamp(0.0, 1.0)).floor();
+        final puesto = letras.take(van).toString();
+        final estilo = base.copyWith(fontWeight: FontWeight.w700);
+        return Stack(children: [
+          Text.rich(
+            TextSpan(children: [
+              TextSpan(text: puesto, style: TextStyle(shadows: _brillo(0.45))),
+              TextSpan(
+                  text: letras.skip(van).toString(),
+                  style: const TextStyle(color: Colors.transparent)),
+            ]),
+            textAlign: TextAlign.center,
+            style: estilo,
+          ),
+          if (t < 1) Positioned.fill(child: CustomPaint(painter: _Cursor(puesto, widget.texto, estilo, widget.paleta.acento,
+              MediaQuery.textScalerOf(context), DefaultTextStyle.of(context).style))),
+        ]);
+      case 'lluvia':
+        // las letras caen una a una y rebotan; se agrupan por palabras para no partirlas
+        final palabras = EscenaLetra.palabras(widget.texto);
+        final total = palabras.fold<int>(0, (n, w) => n + w.characters.length);
+        var k = 0;
+        return Wrap(
+          alignment: WrapAlignment.center,
+          spacing: widget.tamano * 0.28,
+          children: [
+            for (final w in palabras)
+              Row(mainAxisSize: MainAxisSize.min, children: [
+                for (final l in w.characters)
+                  Builder(builder: (_) {
+                    final p = EscenaLetra.pieza(t, k++, total, solape: 0.93);
+                    return Opacity(
+                      opacity: (p * 4).clamp(0.0, 1.0),
+                      child: Transform.translate(
+                        offset: Offset(0, -widget.tamano * 1.6 * (1 - EscenaLetra.rebote(p))),
+                        child: _trozo(l, base, _brillo(0.5 * p), alinear: TextAlign.start),
+                      ),
+                    );
+                  }),
+              ]),
+          ],
+        );
+      case 'giro':
+        // cada palabra gira sobre sí misma como una tarjeta hasta quedar de frente
+        final palabras = EscenaLetra.palabras(widget.texto);
+        return Wrap(
+          alignment: WrapAlignment.center,
+          spacing: widget.tamano * 0.28,
+          children: [
+            for (var k = 0; k < palabras.length; k++)
+              Builder(builder: (_) {
+                final p = EscenaLetra.pieza(t, k, palabras.length);
+                final e = Curves.easeOutBack.transform(p);
+                return Opacity(
+                  opacity: (p * 2).clamp(0.0, 1.0),
+                  child: Transform(
+                    alignment: Alignment.center,
+                    transform: Matrix4.identity()
+                      ..setEntry(3, 2, 0.0016)
+                      ..rotateX((1 - e) * math.pi / 2),
+                    child: _trozo(palabras[k], base, _brillo(0.35 + 0.5 * p), alinear: TextAlign.start),
+                  ),
+                );
+              }),
+          ],
+        );
       default: // resplandor
         final e = Curves.easeOutCubic.transform(t);
         final pulso = 1 + 0.35 * math.sin(math.pi * t);
@@ -503,13 +608,39 @@ class _VersoEscenaState extends State<VersoEscena> with SingleTickerProviderStat
             offset: Offset(0, widget.tamano * 0.6 * (1 - e)),
             child: Transform.scale(
               scale: 0.94 + 0.06 * e,
-              child: Stack(children: [
-                ContornoLetra(texto: widget.texto, alinear: TextAlign.center, estilo: base),
-                Text(widget.texto, textAlign: TextAlign.center, style: base.copyWith(shadows: _brillo(e * pulso))),
-              ]),
+              child: _trozo(widget.texto, base, _brillo(e * pulso)),
             ),
           ),
         );
     }
   }
+}
+
+/// El cursor de «Máquina», justo después de la última letra puesta.
+class _Cursor extends CustomPainter {
+  _Cursor(this.puesto, this.texto, this.estilo, this.color, this.escala, this.heredado);
+  final String puesto, texto;
+  final TextStyle estilo, heredado;
+  final Color color;
+  final TextScaler escala;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final tp = TextPainter(
+      text: TextSpan(text: texto, style: heredado.merge(estilo)),
+      textAlign: TextAlign.center,
+      textDirection: TextDirection.ltr,
+      textScaler: escala,
+    )..layout(minWidth: size.width, maxWidth: size.width);
+    final o = tp.getOffsetForCaret(TextPosition(offset: puesto.length), Rect.zero);
+    final alto = tp.preferredLineHeight;
+    canvas.drawRRect(
+        RRect.fromRectAndRadius(
+            Rect.fromLTWH(o.dx + alto * 0.04, o.dy + alto * 0.14, alto * 0.07, alto * 0.72), Radius.circular(alto * 0.03)),
+        Paint()..color = color);
+    tp.dispose();
+  }
+
+  @override
+  bool shouldRepaint(_Cursor old) => old.puesto != puesto || old.color != color;
 }

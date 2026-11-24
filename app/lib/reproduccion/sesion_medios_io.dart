@@ -4,6 +4,7 @@ class SesionMedios {
   SesionMedios._();
 
   static void enganchar(Reproductor r) {}
+  static void Function()? alPararYouTube;
 
   /// ¿La página no se ve? (pantalla apagada u otra app delante)
   static bool get oculta => false;

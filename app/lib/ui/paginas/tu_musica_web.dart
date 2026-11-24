@@ -7,6 +7,7 @@ import '../comunes.dart';
 import '../servicios.dart';
 import '../tema.dart';
 import 'importar_archivos_hoja.dart';
+import 'musica_libre_pagina.dart';
 
 /// La pestaña «Descargar» en el navegador: la música propia que se guarda aquí
 /// (suena sin internet y con el teléfono bloqueado) y el camino a la app.
@@ -112,6 +113,16 @@ class _TuMusicaWebState extends State<TuMusicaWeb> {
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(color: C.superficie2, borderRadius: BorderRadius.circular(14)),
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                const Text('¿No tienes archivos?', style: estiloTituloSeccion),
+                const SizedBox(height: 6),
+                const Text('Hay miles de canciones libres que también suenan con el celular bloqueado.', style: estiloSecundario),
+                const SizedBox(height: 12),
+                FilledButton.icon(
+                  onPressed: () => MusicaLibrePagina.abrir(context),
+                  icon: const Icon(Icons.phonelink_lock_rounded),
+                  label: const Text('Ver música que suena bloqueada'),
+                ),
+                const SizedBox(height: 22),
                 const Text('¿Quieres bajar canciones y videos de un enlace?', style: estiloTituloSeccion),
                 const SizedBox(height: 6),
                 const Text('El navegador no puede: eso lo hace la app de Caudal, con esta misma cuenta.',

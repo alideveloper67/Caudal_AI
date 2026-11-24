@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
 import '../../coche/ejecutar_atajo.dart';
+import '../../nucleo/musica_libre.dart';
 import '../../nucleo/catalogo.dart';
 import '../../nucleo/coleccion.dart';
 import '../comunes.dart';
@@ -184,6 +185,8 @@ class _BuscarPaginaState extends State<BuscarPagina> with AutomaticKeepAliveClie
       final Object r;
       if (filtro == 'todo') {
         r = await Catalogo.buscarTodo(consulta);
+      } else if (filtro == 'libre') {
+        r = await MusicaLibre.buscar(consulta);
       } else {
         r = [
           for (final e in await Catalogo.buscar(consulta, filtro: filtro, limite: 40))
@@ -276,7 +279,8 @@ class _BuscarPaginaState extends State<BuscarPagina> with AutomaticKeepAliveClie
                         scrollDirection: Axis.horizontal,
                         child: Row(children: [
                           for (final (clave, texto) in const [('todo', 'Todo'), ('canciones', 'Canciones'),
-                            ('videos', 'Videos'), ('albumes', 'Álbumes'), ('artistas', 'Artistas'), ('listas', 'Listas')])
+                            ('videos', 'Videos'), ('albumes', 'Álbumes'), ('artistas', 'Artistas'), ('listas', 'Listas'),
+                            if (kIsWeb) ('libre', 'Suena bloqueado')])
                             Pildora(texto: texto, activa: _filtro == clave, alPulsar: () => _elegirFiltro(clave)),
                         ]),
                       ),
@@ -383,6 +387,7 @@ class _BuscarPaginaState extends State<BuscarPagina> with AutomaticKeepAliveClie
             for (var i = 0; i < pistas.length && i < 5; i++)
               Entrada(indice: turno + i, child: FilaPista(pista: pistas[i], alPulsar: () => s.reproducirPista(context, pistas[i]))),
           ],
+          if (kIsWeb) _LibreEnBusqueda(key: ValueKey('libre|$_consulta'), consulta: _consulta, alVerMas: () => _elegirFiltro('libre')),
           const SizedBox(height: Esp.xl),
           for (final (i, sec) in secciones.where((x) => x['filtro'] != 'canciones').indexed) ...[
             Entrada(indice: turno + 3 + i, child: Carrusel(titulo: '${sec['titulo']}',
@@ -399,7 +404,7 @@ class _BuscarPaginaState extends State<BuscarPagina> with AutomaticKeepAliveClie
           textoAccion: 'Ver en Todo', iconoAccion: Icons.travel_explore_rounded, alAccion: () => _elegirFiltro('todo'));
     }
     final clave = PageStorageKey('buscar|$_consulta|$_filtro');
-    if (_filtro == 'canciones' || _filtro == 'videos') {
+    if (_filtro == 'canciones' || _filtro == 'videos' || _filtro == 'libre') {
       return Escalonado(
         clave: _estado(),
         child: ListView.builder(
@@ -407,7 +412,11 @@ class _BuscarPaginaState extends State<BuscarPagina> with AutomaticKeepAliveClie
           padding: const EdgeInsets.only(top: 4, bottom: espacioInferior),
           itemCount: lista.length,
           itemBuilder: (_, i) => Entrada(indice: i,
-              child: FilaPista(pista: lista[i], alPulsar: () => s.reproducirPista(context, lista[i]))),
+              child: FilaPista(pista: lista[i], alPulsar: () => _filtro == 'libre'
+                  // toda la lista a la cola: sigue sola con el celular bloqueado
+                  ? s.reproductor.reproducirLista(lista, inicio: i, modo: 'audio',
+                      contexto: {'tipo': 'seleccion', 'id': 'musica_libre', 'titulo': _consulta})
+                  : s.reproducirPista(context, lista[i]))),
         ),
       );
     }
@@ -566,5 +575,43 @@ class _Principal extends StatelessWidget {
         ),
       )),
     );
+  }
+}
+
+/// En «Todo»: las primeras que suenan con el celular bloqueado (versión web).
+class _LibreEnBusqueda extends StatefulWidget {
+  const _LibreEnBusqueda({super.key, required this.consulta, required this.alVerMas});
+  final String consulta;
+  final VoidCallback alVerMas;
+
+  @override
+  State<_LibreEnBusqueda> createState() => _LibreEnBusquedaState();
+}
+
+class _LibreEnBusquedaState extends State<_LibreEnBusqueda> {
+  List<Json> _lista = const [];
+
+  @override
+  void initState() {
+    super.initState();
+    MusicaLibre.buscar(widget.consulta, limite: 12).then((l) {
+      if (mounted) setState(() => _lista = l);
+    }, onError: (_) {});
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_lista.isEmpty) return const SizedBox.shrink();
+    final s = Caudal.leer(context);
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      const SizedBox(height: 22),
+      TituloSeccion('Suenan con el celular bloqueado', alPulsarMas: widget.alVerMas),
+      for (var i = 0; i < _lista.length && i < 4; i++)
+        FilaPista(
+          pista: _lista[i],
+          alPulsar: () => s.reproductor.reproducirLista(_lista, inicio: i, modo: 'audio',
+              contexto: {'tipo': 'seleccion', 'id': 'musica_libre', 'titulo': widget.consulta}),
+        ),
+    ]);
   }
 }

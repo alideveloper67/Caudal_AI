@@ -2,14 +2,14 @@
 """Tipo de letra (tipografía) con que se pinta la letra de las canciones: la escena de escritorio,
 la letra viva y el karaoke. Ajuste «fuente_letra» (mismas claves que en Android).
 
-Las fuentes vienen en `descargador/fuentes_letra/` (licencia OFL, ver OFL.txt) y se cargan con
+Las fuentes vienen en `descargador/fuentes_letra/` (licencias libres, ver LICENCIAS.txt) y se cargan con
 QFontDatabase la primera vez que se piden. Si una no carga, se usa la predeterminada sin error."""
 
 import sys
 import weakref
 from pathlib import Path
 
-from PySide6.QtGui import QFont, QFontDatabase
+from PySide6.QtGui import QFont, QFontDatabase, QFontMetricsF
 
 POR_DEFECTO = "predeterminada"
 
@@ -24,7 +24,44 @@ FUENTES = {
     "righteous": ("Righteous", ("Righteous-Regular.ttf",), QFont.Normal),
     "serif": ("DM Serif Display", ("DMSerifDisplay-Regular.ttf",), QFont.Normal),
     "bangers": ("Bangers", ("Bangers-Regular.ttf",), QFont.Normal),
+    "lilita": ("Lilita One", ("LilitaOne-Regular.ttf",), QFont.Normal),
+    "titan": ("Titan One", ("TitanOne-Regular.ttf",), QFont.Normal),
+    "bungee": ("Bungee", ("Bungee-Regular.ttf",), QFont.Normal),
+    "russo": ("Russo One", ("RussoOne-Regular.ttf",), QFont.Normal),
+    "audiowide": ("Audiowide", ("Audiowide-Regular.ttf",), QFont.Normal),
+    "monoton": ("Monoton", ("Monoton-Regular.ttf",), QFont.Normal),
+    "abril": ("Abril Fatface", ("AbrilFatface-Regular.ttf",), QFont.Normal),
+    "shrikhand": ("Shrikhand", ("Shrikhand-Regular.ttf",), QFont.Normal),
+    "staatliches": ("Staatliches", ("Staatliches-Regular.ttf",), QFont.Normal),
+    "marker": ("Permanent Marker", ("PermanentMarker-Regular.ttf",), QFont.Normal),
+    "kaushan": ("Kaushan Script", ("KaushanScript-Regular.ttf",), QFont.Normal),
+    "vibes": ("Great Vibes", ("GreatVibes-Regular.ttf",), QFont.Normal),
+    "elite": ("Special Elite", ("SpecialElite-Regular.ttf",), QFont.Normal),
+    "pixel": ("Press Start 2P", ("PressStart2P-Regular.ttf",), QFont.Normal),
+    "limelight": ("Limelight", ("Limelight-Regular.ttf",), QFont.Normal),
+    "caveat": ("Caveat Brush", ("CaveatBrush-Regular.ttf",), QFont.Normal),
+    "ops": ("Black Ops One", ("BlackOpsOne-Regular.ttf",), QFont.Normal),
+    "courgette": ("Courgette", ("Courgette-Regular.ttf",), QFont.Normal),
 }
+
+# las que ya estaban antes de ampliar la colección
+DE_SIEMPRE = ("predeterminada", "poppins", "bebas", "anton", "pacifico", "lobster", "righteous", "serif", "bangers")
+# cuánto se agranda o achica cada fuente para que todas se vean de un tamaño parecido (las que no
+# están aquí van tal cual)
+FACTORES = {"titan": 0.92, "bungee": 0.80, "russo": 0.93, "audiowide": 0.88, "monoton": 0.82,
+            "shrikhand": 0.92, "staatliches": 1.12, "marker": 0.92, "kaushan": 1.06, "vibes": 1.30,
+            "elite": 0.94, "pixel": 0.62, "limelight": 0.90, "caveat": 1.18, "ops": 0.88}
+# de trazo tan fino (o tan junto) que un borde encima las empasta: se pintan con bordes finos y sin hueco
+FINAS = ("monoton", "vibes")
+# aire de más entre palabras (en tamaños de letra) para las que traen un espacio casi invisible
+ESPACIO_PALABRAS = {"monoton": 0.30, "vibes": 0.06}
+# de letras que se pisan al enlazarse: para dibujar solo su contorno hay que unirlas antes
+ENLAZADAS = ("pacifico", "lobster", "bangers", "kaushan", "vibes", "courgette")
+# de caligrafía: una palabra entera en mayúsculas no se lee, así que la palabra fuerte no se pasa a mayúsculas
+SIN_MAYUSCULAS = ("vibes", "kaushan", "courgette")
+# aire de más (subida, bajada) en tamaños de letra, para las que declaran menos alto del que ocupan
+AIRE = {"pixel": (0.10, 0.30), "elite": (0.22, 0.04), "vibes": (0.06, 0.06), "titan": (0.08, 0.06),
+        "lilita": (0.06, 0.04)}
 
 _familias = {}                 # clave -> familia ya cargada (o None si no se pudo)
 _actual = POR_DEFECTO
@@ -84,7 +121,25 @@ def adaptar(f, clave=None):
     peso = FUENTES[clave][2]
     if peso is not None:
         g.setWeight(peso)
+    if clave in ESPACIO_PALABRAS and g.pixelSize() > 0:
+        g.setWordSpacing(g.pixelSize() * FACTORES.get(clave, 1.0) * ESPACIO_PALABRAS[clave])
+    factor = FACTORES.get(clave, 1.0)
+    if factor != 1.0:
+        if g.pixelSize() > 0:
+            g.setPixelSize(max(1, int(round(g.pixelSize() * factor))))
+        elif g.pointSizeF() > 0:
+            g.setPointSizeF(max(1.0, g.pointSizeF() * factor))
     return g
+
+
+def subida_bajada(f, clave=None):
+    """(subida, bajada) de una fila escrita con `f` (ya adaptada): lo que declara la fuente, más el aire que
+    le falta a las que se salen de su propia caja."""
+    clave = normalizar(_actual if clave is None else clave)
+    m = QFontMetricsF(f)
+    mas_sube, mas_baja = AIRE.get(clave, (0.0, 0.0))
+    px = f.pixelSize() if f.pixelSize() > 0 else 0
+    return m.ascent() + mas_sube * px, m.descent() + mas_baja * px
 
 
 def actual():

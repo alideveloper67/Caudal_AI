@@ -261,7 +261,7 @@ class ServicioAudio extends BaseAudioHandler with SeekHandler {
       _letraPedida = _ultimaClave;
       unawaited(_cargarLetra(Map<String, dynamic>.from(p)));
     }
-    final t = _letra.alMoverse(r.posicion.value);
+    final t = _letra.alMoverse(r.posicion.value, desfaseMs: LetrasCache.i.desfase(_ultimaClave));
     if (t != null) _subtitulo(t);
   }
 
@@ -271,7 +271,7 @@ class ServicioAudio extends BaseAudioHandler with SeekHandler {
       final l = await LetrasCache.i.obtener(p);
       if (l == null || clave != _ultimaClave) return;
       _letra.ponerLetra(clave, lineasConTiempo(l));
-      final t = _letra.alMoverse(r.posicion.value);
+      final t = _letra.alMoverse(r.posicion.value, desfaseMs: LetrasCache.i.desfase(clave));
       if (t != null) _subtitulo(t);
     } catch (_) {
       // sin letra, el subtítulo se queda como estaba

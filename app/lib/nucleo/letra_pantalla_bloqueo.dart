@@ -158,7 +158,7 @@ class LetraEnBloqueo {
 
   void _alMoverse() {
     if (!activa.value || _lineas.isEmpty) return;
-    final ms = _posicion?.value.inMilliseconds ?? 0;
+    final ms = (_posicion?.value.inMilliseconds ?? 0) + LetrasCache.i.desfase(_clave);
     final i = LetraBloqueo.indiceEn(_lineas, ms);
     if (i == _indice && _puesta) return;
     _indice = i;

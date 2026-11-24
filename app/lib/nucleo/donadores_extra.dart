@@ -134,8 +134,21 @@ class EscenaLetra {
         'ola' => Duration(milliseconds: 420 + 90 * _palabras(texto).length.clamp(1, 12)),
         'cine' => Duration(milliseconds: 500 + 22 * texto.length.clamp(1, 60)),
         'neon' => const Duration(milliseconds: 700),
+        'zoom' => const Duration(milliseconds: 520),
+        'maquina' => Duration(milliseconds: 200 + 34 * texto.length.clamp(1, 60)),
+        'lluvia' => Duration(milliseconds: 620 + 20 * texto.length.clamp(1, 60)),
+        'giro' => Duration(milliseconds: 480 + 90 * _palabras(texto).length.clamp(1, 12)),
         _ => const Duration(milliseconds: 650),
       };
+
+  /// La caída con rebote de «Lluvia»: 0 arriba, 1 en su sitio.
+  static double rebote(double t) {
+    const n = 7.5625, d = 2.75;
+    if (t < 1 / d) return n * t * t;
+    if (t < 2 / d) return n * (t -= 1.5 / d) * t + 0.75;
+    if (t < 2.5 / d) return n * (t -= 2.25 / d) * t + 0.9375;
+    return n * (t -= 2.625 / d) * t + 0.984375;
+  }
 
   static List<String> _palabras(String t) => t.trim().split(RegExp(r'\s+')).where((w) => w.isNotEmpty).toList();
 

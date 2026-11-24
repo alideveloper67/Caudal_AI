@@ -162,6 +162,28 @@ def test_la_letra_es_mas_grande_que_en_la_pagina_de_letra(app, pagina):
     normal.deleteLater()
 
 
+def test_el_karaoke_usa_el_estilo_y_abre_el_diseno(app, pagina):
+    from descargador.ui import estilo_letra, selector_letra
+    w = pagina
+    abrir(app, w, 13.5)
+    lc = w.lienzo
+    try:
+        for estilo in estilo_letra.ESTILOS:
+            estilo_letra.fijar(estilo)
+            bombear(app, 0.05)
+            img = QImage(lc.size(), QImage.Format_RGB32)
+            lc.render(img)
+            assert (len(lc._capas) > 0) == (estilo != "clasica")
+        w.bt_diseno.click()
+        d = selector_letra.dialogo_abierto()
+        assert d is not None and d.parentWidget() is w.window()
+        d.close()
+        botones = [w.bt_traducir, w.bt_efectos, w.bt_diseno, w.bt_completa, w.bt_cerrar]
+        assert not any(a.geometry().right() >= b.geometry().left() for a, b in zip(botones, botones[1:]))
+    finally:
+        estilo_letra.fijar("clasica")
+
+
 def test_va_con_la_musica_y_se_llena_fila_por_fila(app, pagina):
     w = pagina
     abrir(app, w, 12.2)

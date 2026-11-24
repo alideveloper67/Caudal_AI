@@ -219,6 +219,31 @@ def test_los_errores_quedan_en_fallos_log(tmp_path):
         sys.excepthook, threading.excepthook = antes_hook, antes_hilo
 
 
+@pytest.mark.parametrize("ancho", [1500, 1100, 900, 760, 620, 480, 400])
+def test_la_cabecera_no_se_desborda(app, pagina, ancho):
+    pag, ctx, _ = pagina
+    ctx.reproductor.actual = dict(ctx.reproductor.actual, titulo="Un título de canción larguísimo " * 4)
+    ctx.reproductor.pista_cambio.emit(ctx.reproductor.actual)
+    pag.resize(ancho, 600)
+    bombear(app, 0.1)
+    botones = [b for b in pag.botones_cabecera if not b.isHidden()]
+    assert pag.bt_diseno in botones
+    for b in botones:
+        assert b.text() and b.geometry().right() <= pag.width() and b.geometry().left() >= 0
+        assert b.width() >= b.minimumSizeHint().width()          # el texto del botón cabe entero
+    assert not any(a.geometry().right() >= b.geometry().left() for a, b in zip(botones, botones[1:]))
+    assert pag.et_titulo.isHidden() or pag.et_titulo.geometry().right() < botones[0].geometry().left()
+
+
+def test_el_boton_diseno_abre_el_selector(app, pagina):
+    from descargador.ui import selector_letra
+    pag, ctx, _ = pagina
+    pag.bt_diseno.click()
+    d = selector_letra.dialogo_abierto()
+    assert d is not None and d.parentWidget() is pag.window()
+    d.close()
+
+
 def test_estilo_exclusivo_de_la_tarjeta_pide_donar_y_luego_se_usa_al_guardar(app, pagina, monkeypatch):
     from descargador.ui import letra_viva as L
     pag, ctx, carpeta = pagina

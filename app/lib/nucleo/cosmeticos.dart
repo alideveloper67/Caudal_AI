@@ -55,8 +55,11 @@ class Cosmeticos {
   }
 
   /// Estilos de la letra con efectos (las mismas claves que el escritorio).
-  static const estilosLetra = ['resplandor', 'ola', 'neon', 'cine'];
-  static const nombresEstiloLetra = {'resplandor': 'Resplandor', 'ola': 'Ola', 'neon': 'Neón', 'cine': 'Cine'};
+  static const estilosLetra = ['resplandor', 'ola', 'neon', 'cine', 'zoom', 'maquina', 'lluvia', 'giro'];
+  static const nombresEstiloLetra = {
+    'resplandor': 'Resplandor', 'ola': 'Ola', 'neon': 'Neón', 'cine': 'Cine',
+    'zoom': 'Zoom', 'maquina': 'Máquina', 'lluvia': 'Lluvia', 'giro': 'Giro',
+  };
   static String estiloLetra(Object? v) {
     final t = '${v ?? ''}'.trim().toLowerCase();
     return estilosLetra.contains(t) ? t : estilosLetra.first;

@@ -68,6 +68,9 @@ const _extensiones = {
 /// * Reproductor de YouTube del navegador: «YouTube» (no da más datos).
 CalidadSonido? calidadDe(Fuente? f, {bool enVideo = false}) {
   if (f == null) return null;
+  if (f.url.startsWith('https://api.audius.co/')) {
+    return const CalidadSonido('Audius', 'Música libre de Audius');
+  }
   if (f.local) {
     final ext = f.archivo.contains('.') ? f.archivo.split('.').last.toLowerCase() : '';
     final c = _extensiones[ext];

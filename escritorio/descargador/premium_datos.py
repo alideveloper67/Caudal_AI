@@ -204,12 +204,25 @@ def leer_pared(datos):
 
 
 # la letra a pantalla completa con efectos: estilos (las mismas claves que en el teléfono)
-ESTILOS_ESCENA = ("resplandor", "ola", "neon", "cine")
-NOMBRES_ESCENA = {"resplandor": "Resplandor", "ola": "Ola", "neon": "Neón", "cine": "Cine"}
+ESTILOS_ESCENA = ("resplandor", "ola", "neon", "cine", "zoom", "maquina", "lluvia", "giro")
+NOMBRES_ESCENA = {"resplandor": "Resplandor", "ola": "Ola", "neon": "Neón", "cine": "Cine", "zoom": "Zoom",
+                  "maquina": "Máquina", "lluvia": "Lluvia", "giro": "Giro"}
 DETALLE_ESCENA = {"resplandor": "Cada verso sube con un brillo de los colores de la carátula",
                   "ola": "Las palabras entran una a una, como una ola",
                   "neon": "El verso se enciende como un letrero de neón",
-                  "cine": "Letra a letra, como los créditos de una película"}
+                  "cine": "Letra a letra, como los créditos de una película",
+                  "zoom": "El verso llega de golpe, enorme, y se queda en su sitio",
+                  "maquina": "Se escribe tecla a tecla, con su cursor",
+                  "lluvia": "Las letras caen y rebotan hasta quedarse quietas",
+                  "giro": "Cada palabra entra girando"}
+_NUMEROS = {4: "Cuatro", 5: "Cinco", 6: "Seis", 7: "Siete", 8: "Ocho", 9: "Nueve", 10: "Diez"}
+
+
+def texto_estilos_escena():
+    """«Ocho estilos: Resplandor, Ola, … y Giro»: los que hay de verdad."""
+    nombres = [NOMBRES_ESCENA[k] for k in ESTILOS_ESCENA]
+    cuantos = _NUMEROS.get(len(nombres), str(len(nombres)))
+    return f"{cuantos} estilos: {', '.join(nombres[:-1])} y {nombres[-1]}"
 
 
 def estilo_escena_valido(v):

@@ -16,6 +16,7 @@ import '../nucleo/premium.dart';
 import '../nucleo/resumen_anual.dart' show esTemporadaDelResumen;
 import '../nucleo/tarjeta_lista.dart';
 import '../nucleo/version.dart';
+import '../reproduccion/jugador.dart' show LienzoVideoWeb;
 import '../reproduccion/reproductor.dart';
 import '../reproduccion/retomar.dart' show avisoRetomado;
 import '../reproduccion/sesion_medios.dart';
@@ -29,6 +30,8 @@ import 'novedades/presentacion_mascotas.dart';
 import 'paginas/acceso.dart';
 import 'paginas/mensajes_pagina.dart';
 import 'paginas/modo_gamer_pagina.dart';
+import 'paginas/musica_libre_pagina.dart';
+import 'paginas/segundo_plano_hoja.dart';
 import 'paginas/modos_escucha_pagina.dart';
 import 'paginas/que_suena_pagina.dart';
 import 'paginas/resumen.dart';
@@ -93,6 +96,9 @@ class _ArmazonState extends State<Armazon> {
     super.didChangeDependencies();
     final s = Caudal.leer(context);
     s.irAPestana = _ir;
+    SesionMedios.alPararYouTube = () {
+      if (mounted) unawaited(_avisoYouTubeParado());
+    };
     s.abrirEnPestana = (pagina) =>
         _navegadores[_pestana].currentState?.push(MaterialPageRoute(builder: (_) => pagina));
     // las listas compartidas donde soy colaborador salen en «Añadir a una lista»
@@ -255,19 +261,26 @@ class _ArmazonState extends State<Armazon> {
   Future<void> _avisoWebEnTelefono() async {
     if (!kIsWeb || !SesionMedios.esTelefono) return;
     final p = await SharedPreferences.getInstance();
-    if (p.getBool('aviso_web_reposo') == true || !mounted) return;
-    await p.setBool('aviso_web_reposo', true);
+    if (p.getBool('aviso_web_bloqueado') == true || !mounted) return;
+    await p.setBool('aviso_web_bloqueado', true);
     if (!mounted) return;
     await showDialog<void>(
       context: context,
       builder: (ctx) => AlertDialog(
         title: const Text('Estás en el navegador'),
-        content: const SingleChildScrollView(child: Text('Con el teléfono bloqueado aquí sigue sonando tu música y la '
-            'de la comunidad. Las canciones de YouTube se pausan: YouTube no las deja sonar sin verse. '
-            'Para esas, abre el «Modo reposo» arriba en el reproductor, que deja la pantalla '
-            'encendida y casi negra, o instala la app de Caudal con esta misma cuenta.')),
+        content: const SingleChildScrollView(child: Text('Con el teléfono bloqueado sigue sonando lo que lleva el icono del candado: '
+            'la música libre de «Suena bloqueado», tu música y la de la comunidad. Las canciones de YouTube se pausan: '
+            'YouTube no las deja sonar sin verse. '
+            'Para esas, toca «Segundo plano» arriba en el reproductor, o instala la app de Caudal con esta misma cuenta.')),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Seguir en el navegador')),
+          TextButton(
+            onPressed: () {
+              Navigator.pop(ctx);
+              _abrirEnPestana(const MusicaLibrePagina());
+            },
+            child: const Text('Ver música que suena bloqueada'),
+          ),
           FilledButton(
             onPressed: () {
               Navigator.pop(ctx);
@@ -278,6 +291,33 @@ class _ArmazonState extends State<Armazon> {
         ],
       ),
     );
+  }
+
+  bool _avisadoParado = false;
+
+  /// Al desbloquear, si YouTube se paró: por qué y qué sí suena (una vez cada vez que se abre la web).
+  Future<void> _avisoYouTubeParado() async {
+    if (_avisadoParado) return;
+    _avisadoParado = true;
+    // está en pausa: se aparta su recuadro para que no tape el aviso
+    LienzoVideoWeb.ocultar(true);
+    final que = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('YouTube se pausó al bloquear'),
+        content: const Text('YouTube no deja sonar sus canciones con el celular bloqueado. Lo que lleva el icono del '
+            'candado sí sigue sonando.'),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Entendido')),
+          TextButton(onPressed: () => Navigator.pop(ctx, 'libre'), child: const Text('Ver qué sí suena')),
+          FilledButton(onPressed: () => Navigator.pop(ctx, 'plano'), child: const Text('Seguir en segundo plano')),
+        ],
+      ),
+    );
+    LienzoVideoWeb.ocultar(false);
+    if (!mounted) return;
+    if (que == 'libre') _abrirEnPestana(const MusicaLibrePagina());
+    if (que == 'plano') await mostrarSegundoPlano(context, Caudal.leer(context).reproductor.actual);
   }
 
   /// Cuentas de antes de los términos (o con una versión vieja, o sin los
@@ -512,6 +552,8 @@ class _BarraLateral extends StatelessWidget {
           item(Icons.library_music_outlined, Icons.library_music_rounded, kIsWeb ? 'Comunidad' : 'Música de la comunidad', false,
               () => alAbrir(MenuComunidad.pantalla(3, context))),
           if (kIsWeb) ...[
+            item(Icons.phonelink_lock_rounded, Icons.phonelink_lock_rounded, 'Suena bloqueado', false,
+                () => alAbrir(const MusicaLibrePagina())),
             item(Icons.group_add_outlined, Icons.group_add_rounded, 'Amigos y solicitudes', false,
                 () => alAbrir(MenuComunidad.pantalla(2, context))),
             item(Icons.cloud_upload_outlined, Icons.cloud_upload_rounded, 'Subir mi música', false,

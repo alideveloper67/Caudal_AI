@@ -169,6 +169,7 @@ class Fuente {
   /// Lo que se muestra en la insignia de calidad.
   String get insignia {
     if (url.startsWith('web:')) return 'TU MÚSICA';
+    if (url.startsWith('https://api.audius.co/')) return 'AUDIUS';
     if (local) return kIsWeb && url.startsWith('http') ? 'COMUNIDAD' : 'EN EL TELÉFONO';
     if (url.startsWith('yt:')) return 'YOUTUBE';
     if (alto > 0) {

@@ -14,7 +14,7 @@ import hashlib
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
-from .. import sincronia_letra
+from .. import cotejo_audio, sincronia_letra
 from ..hilos import en_segundo_plano
 
 MAX_GUARDADOS = 800
@@ -32,6 +32,46 @@ def clave_pista(p):
     return p.get("clave") or p.get("video_id") or p.get("archivo") or p.get("url") or ""
 
 
+def sin_tiempos(datos):
+    """La misma letra, como texto corrido (cuando sus tiempos son de otra grabación y aún no se ajustaron)."""
+    d = dict(datos or {})
+    texto = d.get("texto") or "\n".join(tx for _ms, tx in d.get("lineas") or [])
+    d.update(sincronizada=False, lineas=[], texto=texto)
+    return d
+
+
+def en_duda(sinc, p, datos):
+    """¿Los tiempos son de una grabación que dura distinto y todavía no se ajustaron a esta?"""
+    return bool((datos or {}).get("otra_duracion")) and not sinc.medida(p, datos.get("lineas"))
+
+
+def verificar(lineas, fuente, duracion, alternativas, datos=None, misma=False, voz=True):
+    """Trabajo de fondo: primero se compara el sonido con el de la canción de la que son los tiempos (exacto
+    y sin entender la voz); si no se puede, se escucha lo que se canta (sincronia_letra).
+
+    misma: lo que suena ES esa grabación (nada que comparar). voz: hay reconocedor de voz."""
+    ref = (datos or {}).get("ref")
+    if ref and misma:
+        return {"accion": "bien", "desfase_ms": 0, "datos": None, "detalle": "los tiempos son de esta grabación"}
+    if ref and datos.get("ref_lineas"):
+        try:
+            tramos = cotejo_audio.cotejar(fuente, ref)
+        except Exception:  # noqa: BLE001  (sin numpy, sin red…: se escucha)
+            tramos = None
+        if tramos:
+            return dict(poner_tramos(datos, tramos), tramos=tramos)
+    if not voz:
+        return {"accion": "nada", "desfase_ms": 0, "datos": None, "detalle": "sin reconocedor de voz"}
+    return sincronia_letra.verificar(lineas, fuente, duracion, alternativas)
+
+
+def poner_tramos(datos, tramos):
+    d = dict(datos, lineas=cotejo_audio.colocar(datos["ref_lineas"], tramos), sincronizada=True)
+    for k in ("otra_duracion", "ref", "ref_lineas"):
+        d.pop(k, None)
+    return {"accion": "cambiar", "desfase_ms": 0, "datos": d, "detalle": f"cotejo {tramos}"}
+
+
 class SincroniaAuto(QObject):
     listo = Signal(str, object)        # (clave de la pista, resultado de verificar)
 
@@ -45,8 +85,7 @@ class SincroniaAuto(QObject):
     # ----------------------------------------------------------- lo que consultan las vistas
     def activa(self):
         try:
-            return bool(self.ctx.ajustes["letra_sincronia_auto"]) and not self._modelo_falla \
-                and sincronia_letra.disponible()
+            return bool(self.ctx.ajustes["letra_sincronia_auto"])
         except Exception:  # noqa: BLE001
             return False
 
@@ -97,16 +136,17 @@ class SincroniaAuto(QObject):
             return
         if not self.activa():
             return
-        self._intentar(p, list(datos["lineas"]), alternativas, REINTENTOS_FUENTE)
+        self._intentar(p, list(datos["lineas"]), alternativas, REINTENTOS_FUENTE, datos)
 
-    def _intentar(self, p, lineas, alternativas, quedan):
+    def _intentar(self, p, lineas, alternativas, quedan, datos=None):
         r = self.ctx.reproductor
         if clave_pista(r.actual) != clave_pista(p):
             return                       # ya suena otra cosa
         sonando = r.fuente_sonando() if hasattr(r, "fuente_sonando") else None
         if sonando is None:
             if quedan > 0:
-                QTimer.singleShot(1500, self, lambda: self._intentar(p, lineas, alternativas, quedan - 1))
+                QTimer.singleShot(1500, self, lambda: self._intentar(p, lineas, alternativas, quedan - 1,
+                                                                          datos))
             return
         modo, fuente = sonando
         k = self._clave(p, modo, lineas)
@@ -119,14 +159,49 @@ class SincroniaAuto(QObject):
                 return                   # ya medida en otra sesión
         except Exception:  # noqa: BLE001
             pass
+        kc = self._clave_cotejo(p, modo, datos)
+        tramos = self._cotejo_guardado(kc)
+        if tramos:
+            self._llego(k, clave_pista(p), poner_tramos(datos, tramos))
+            return
         self._en_curso.add(k)
         dur = float(getattr(r, "_duracion", 0) or (p.get("duracion") or 0))
         if alternativas is None:
             from .. import catalogo
             alternativas = (lambda q=dict(p): catalogo.letras_alternativas(q))
-        en_segundo_plano(sincronia_letra.verificar, lineas, fuente, dur, alternativas,
-                         ok=lambda res, k=k, c=clave_pista(p): self._llego(k, c, res),
+        misma = modo == "audio" and bool(datos) and bool(p.get("video_id")) and datos.get("ref") == p.get("video_id")
+        voz = not self._modelo_falla and sincronia_letra.disponible()
+        if not voz and not (datos or {}).get("ref"):
+            self._en_curso.discard(k)
+            return
+        en_segundo_plano(verificar, lineas, fuente, dur, alternativas, datos, misma, voz,
+                         ok=lambda res, k=k, kc=kc, c=clave_pista(p): (self._guardar_cotejo(kc, res), self._llego(k, c, res)),
                          error=lambda e, k=k: self._fallo(k, e), dueno=self)
+
+    @staticmethod
+    def _clave_cotejo(p, modo, datos):
+        ref = (datos or {}).get("ref")
+        return f"{clave_pista(p)}|{modo}|cotejo:{ref}" if ref else ""
+
+    def _cotejo_guardado(self, kc):
+        try:
+            t = (self.ctx.ajustes["letra_cotejo"] or {}).get(kc) if kc else None
+            return [(float(a), float(b)) for a, b in t] if t else None
+        except Exception:  # noqa: BLE001
+            return None
+
+    def _guardar_cotejo(self, kc, res):
+        if not kc or not (res or {}).get("tramos"):
+            return
+        try:
+            tabla = dict(self.ctx.ajustes["letra_cotejo"] or {})
+            tabla[kc] = [list(x) for x in res["tramos"]]
+            while len(tabla) > MAX_GUARDADOS:
+                tabla.pop(next(iter(tabla)))
+            self.ctx.ajustes["letra_cotejo"] = tabla
+            self.ctx.ajustes.guardar()
+        except Exception:  # noqa: BLE001
+            pass
 
     def _llego(self, k, clave, res):
         self._en_curso.discard(k)

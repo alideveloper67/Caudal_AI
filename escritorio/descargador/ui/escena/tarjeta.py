@@ -7,7 +7,7 @@ carátula, textos, corazón y progreso) se pinta en un QPixmap en caché, al tam
 y multiplicado por devicePixelRatio, que solo se rehace cuando cambian datos, portada,
 colores, me gusta, progreso, tamaño o dpr. Cada cuadro se dibuja ese pixmap con una
 transformación de perspectiva; el reflejo, el halo y las píldoras "Otra letra" y "Traducir" se
-dibujan en vivo.
+dibujan en vivo. La tercera píldora, "Aa", abre el diseño de letra.
 """
 
 import math
@@ -16,7 +16,7 @@ import time
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (QBrush, QColor, QFont, QFontMetrics, QImage, QLinearGradient, QPainter,
                            QPainterPath, QPen, QPixmap, QTransform)
-from PySide6.QtWidgets import QWidget
+from PySide6.QtWidgets import QToolTip, QWidget
 
 from .. import iconos
 from ..componentes import a_la_vista
@@ -33,8 +33,9 @@ LADO = ANCHO - 2 * PAD                  # carátula cuadrada: 272
 RADIO_PORTADA = 16.0
 HUECO = 14                              # separación entre la tarjeta y la píldora
 ALTO_PILDORA, ANCHO_PILDORA = 30, 140
-SEPARACION_PILDORAS = 8                 # hueco entre "Otra letra" y "Traducir"
-ANCHO_PAR_PILDORAS = 2 * ANCHO_PILDORA + SEPARACION_PILDORAS   # 288: el par va centrado
+ANCHO_PILDORA_DISENO = 46               # la de "Aa" (diseño de letra)
+SEPARACION_PILDORAS = 8                 # hueco entre píldoras
+ANCHO_PILDORAS = 2 * ANCHO_PILDORA + ANCHO_PILDORA_DISENO + 2 * SEPARACION_PILDORAS   # 342: van centradas
 DIAM_CORAZON = 34
 
 MAX_ANG = 10.0                          # inclinación máxima con el ratón (grados)
@@ -76,11 +77,12 @@ def _sub(R):
 
 
 class TarjetaCancion(QWidget):
-    """Tarjeta de la canción que suena. Emite pidio_otra_letra, pidio_traducir y pidio_me_gusta
-    al hacer clic."""
+    """Tarjeta de la canción que suena. Emite pidio_otra_letra, pidio_traducir, pidio_diseno y
+    pidio_me_gusta al hacer clic."""
 
     pidio_otra_letra = Signal()
     pidio_traducir = Signal()
+    pidio_diseno = Signal()
     pidio_me_gusta = Signal()
 
     def __init__(self, parent=None):
@@ -116,7 +118,7 @@ class TarjetaCancion(QWidget):
         self._flota = 0.0
         self._raton = None              # QPointF dentro del widget, o None si no hay ratón
         self._encima = False
-        self._pildora_bajo_raton = None  # 0 = "Otra letra", 1 = "Traducir", None = ninguna
+        self._pildora_bajo_raton = None  # 0 = "Otra letra", 1 = "Traducir", 2 = "Aa", None = ninguna
         self._t0 = time.monotonic()
         self._ultimo = self._t0
 
@@ -194,6 +196,10 @@ class TarjetaCancion(QWidget):
         """Píldora "Traducir", ya escalada, en coordenadas del widget y sin inclinación."""
         return self._a_widget(self._pildora_diseno(1))
 
+    def rect_boton_diseno(self):
+        """Píldora "Aa" (diseño de letra), ya escalada, en coordenadas del widget y sin inclinación."""
+        return self._a_widget(self._pildora_diseno(2))
+
     def rect_corazon(self):
         """Corazón, ya escalado, en coordenadas del widget y sin inclinación."""
         x_t, y_t = self._origen()
@@ -224,17 +230,19 @@ class TarjetaCancion(QWidget):
         return QRectF(ox + r.x() * f, oy + r.y() * f, r.width() * f, r.height() * f)
 
     def _pildora_diseno(self, indice):
-        """Píldora en el espacio de diseño (con la flotación): 0 = "Otra letra", 1 = "Traducir".
-        El par va centrado bajo la tarjeta, separado por SEPARACION_PILDORAS. Como todo se escala
+        """Píldora en el espacio de diseño (con la flotación): 0 = "Otra letra", 1 = "Traducir", 2 = "Aa".
+        Van centradas bajo la tarjeta, separadas por SEPARACION_PILDORAS. Como todo se escala
         con el mismo factor, la separación y el no solapamiento se mantienen a cualquier tamaño."""
         x_t, y_t = self._origen()
-        x0 = (ANCHO_SUG - ANCHO_PAR_PILDORAS) / 2
+        x0 = (ANCHO_SUG - ANCHO_PILDORAS) / 2
         x = x0 + indice * (ANCHO_PILDORA + SEPARACION_PILDORAS)
-        return QRectF(x, y_t + ALTO + HUECO, ANCHO_PILDORA, ALTO_PILDORA)
+        ancho = ANCHO_PILDORA_DISENO if indice == 2 else ANCHO_PILDORA
+        return QRectF(x, y_t + ALTO + HUECO, ancho, ALTO_PILDORA)
 
     def _pildora_en(self, pos):
         """Índice de la píldora bajo pos (en coordenadas del widget), o None."""
-        for indice, rect in enumerate((self.rect_boton_letra(), self.rect_boton_traducir())):
+        for indice, rect in enumerate((self.rect_boton_letra(), self.rect_boton_traducir(),
+                                       self.rect_boton_diseno())):
             if rect.contains(pos):
                 return indice
         return None
@@ -416,6 +424,11 @@ class TarjetaCancion(QWidget):
             p.fillPath(camino, fondo)
         if self._pildora_bajo_raton == indice:
             p.fillPath(camino, QColor(255, 255, 255, 36))
+        if icono_nombre is None:              # solo texto, centrado ("Aa")
+            p.setFont(fuente(15, QFont.Bold))
+            p.setPen(TEXTO)
+            p.drawText(r, Qt.AlignCenter, texto)
+            return
         f = fuente(12, QFont.DemiBold)
         ancho_txt = QFontMetrics(f).horizontalAdvance(texto)
         icono = iconos.pixmap(icono_nombre, 14, "#ffffff")
@@ -434,6 +447,7 @@ class TarjetaCancion(QWidget):
             fondo.setAlpha(89)
         texto = "Original" if self._traduccion_activa else "Traducir"
         self._pintar_pildora(p, 1, texto, "idioma", fondo)
+        self._pintar_pildora(p, 2, "Aa", None)
 
     def paintEvent(self, _evento):
         f = self._factor()
@@ -506,6 +520,10 @@ class TarjetaCancion(QWidget):
         if bajo_raton != self._pildora_bajo_raton:
             self._pildora_bajo_raton = bajo_raton
             self.update()
+            if bajo_raton == 2:
+                QToolTip.showText(evento.globalPosition().toPoint(), "Diseño de letra (L)", self)
+            else:
+                QToolTip.hideText()
         if bajo_raton is not None or self.rect_corazon().contains(pos):
             self.setCursor(Qt.PointingHandCursor)
         else:
@@ -534,6 +552,10 @@ class TarjetaCancion(QWidget):
                 return
             if indice == 1:
                 self.pidio_traducir.emit()
+                evento.accept()
+                return
+            if indice == 2:
+                self.pidio_diseno.emit()
                 evento.accept()
                 return
         super().mousePressEvent(evento)

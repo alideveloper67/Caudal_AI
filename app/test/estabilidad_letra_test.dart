@@ -120,9 +120,9 @@ void main() {
       expect(pac.fontWeight, FontWeight.w400);
       expect(pac.height, greaterThan(1.3));
     });
-    test('las claves son únicas y hay 4 estilos y 9 tipos de letra', () {
-      expect(LetraAspecto.estilos.map((e) => e.clave).toSet().length, 4);
-      expect(LetraAspecto.fuentes.map((e) => e.clave).toSet().length, 9);
+    test('las claves son únicas y hay 10 estilos y 27 tipos de letra', () {
+      expect(LetraAspecto.estilos.map((e) => e.clave).toSet().length, 10);
+      expect(LetraAspecto.fuentes.map((e) => e.clave).toSet().length, 27);
     });
 
     for (final e in LetraAspecto.estilos) {

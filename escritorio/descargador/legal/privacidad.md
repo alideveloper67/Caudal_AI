@@ -67,6 +67,7 @@ Para funcionar, Caudal se apoya en estos servicios. Algunos están fuera del Per
 - **Supabase** (cuentas, base de datos y almacén de archivos): guarda tu cuenta, tu biblioteca, tu historial, tus mensajes, tus amistades, tu foto de perfil y la música que subes.
 - **Google (Acceso con Google)**: solo si eliges entrar con tu cuenta de Google; ver punto 2.
 - **YouTube / YouTube Music** (Google): de ahí sale la música y los videos. Al reproducir o buscar, tu dispositivo se conecta con ellos.
+- **Audius**: música libre de artistas independientes («Suena bloqueado», en la versión web). Al abrir esa sección, buscar en ella o reproducirla, tu dispositivo se conecta con los servidores de Audius, que reciben tu dirección IP y lo que buscas o escuchas allí; no se envía tu usuario ni ningún dato de tu cuenta. Caudal no guarda el audio. Política de privacidad de Audius: https://audius.co/legal/privacy-policy
 - **LRCLIB**: letras de canciones (se envía el título y el artista).
 - **Google Translate y MyMemory**: traducción de letras (se envía solo el texto de la letra).
 - **SponsorBlock**: saltar partes sin música (se envía el identificador del video).

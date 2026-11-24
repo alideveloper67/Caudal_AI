@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../nucleo/calidad_sonido.dart';
 import '../nucleo/catalogo.dart';
 import '../nucleo/coleccion.dart' show Json;
+import '../nucleo/musica_libre.dart';
 import 'comunes.dart';
 import 'paginas/cola_hoja.dart';
 import 'reproductor/hueco_video_web.dart';
@@ -134,7 +135,9 @@ class _Sonando extends StatelessWidget {
               Text(
                 (r.fuente?.esYouTubeWeb ?? false)
                     ? 'Con el reproductor de YouTube, que elige la calidad.'
-                    : '${calidad.etiqueta} · ${(r.fuente?.url ?? '').startsWith('web:') ? 'guardada en este navegador' : 'música de la comunidad'}',
+                    : MusicaLibre.es(p)
+                        ? 'Música libre de Audius. Los derechos son de ${p['artista']}.'
+                        : '${calidad.etiqueta} · ${(r.fuente?.url ?? '').startsWith('web:') ? 'guardada en este navegador' : 'música de la comunidad'}',
                 style: estiloSecundario,
               ),
             ]),

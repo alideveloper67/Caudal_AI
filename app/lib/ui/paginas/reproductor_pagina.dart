@@ -7,6 +7,7 @@ import 'package:flutter/foundation.dart' show ValueListenable, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../nucleo/ajustes.dart';
 import '../../nucleo/catalogo.dart';
@@ -15,6 +16,7 @@ import '../../nucleo/coleccion.dart';
 import '../../nucleo/estilo_reproductor.dart';
 import '../../nucleo/fondo_app.dart';
 import '../../nucleo/mascota_app.dart';
+import '../../nucleo/musica_libre.dart';
 import '../../nucleo/premium.dart';
 import '../../nucleo/premium_letras.dart';
 import '../../nucleo/ritmo.dart';
@@ -40,6 +42,8 @@ import '../reproductor/insignia_calidad.dart';
 import '../reproductor/paleta_portada.dart';
 import '../reproductor/personalizar_hoja.dart';
 import '../reproductor/letra_aspecto.dart';
+import '../reproductor/letra_correccion.dart';
+import '../reproductor/selector_letra.dart';
 import '../reproductor/portada_deslizable.dart';
 import '../reproductor/tarjetas_compartir.dart';
 import '../reproductor/vinilo.dart';
@@ -52,7 +56,7 @@ import 'compartir_letra.dart';
 import 'karaoke_pagina.dart';
 import 'mezclador_ajustes.dart';
 import 'mezclador_pagina.dart';
-import 'modo_reposo_pagina.dart';
+import 'segundo_plano_hoja.dart';
 import 'sonido.dart';
 
 class ReproductorPagina extends StatefulWidget {
@@ -355,9 +359,9 @@ class _ReproductorPaginaState extends State<ReproductorPagina> with SingleTicker
                         ),
                         if (Jugador.esWeb && SesionMedios.esTelefono)
                           IconButton(
-                            tooltip: 'Modo reposo',
-                            icon: const Icon(Icons.screen_lock_portrait_rounded),
-                            onPressed: () => ModoReposoPagina.abrir(context),
+                            tooltip: 'Segundo plano',
+                            icon: const Icon(Icons.phonelink_lock_rounded),
+                            onPressed: () => mostrarSegundoPlano(context, p),
                           ),
                         if (!_conRecuadro(r))
                           IconButton(
@@ -436,7 +440,10 @@ class _ReproductorPaginaState extends State<ReproductorPagina> with SingleTicker
                                       const SizedBox(width: 8),
                                       ValueListenableBuilder<PaletaPortada>(
                                         valueListenable: _vista,
-                                        builder: (_, pal, _) => InsigniaCalidad(calidad: cal, color: pal.acento),
+                                        builder: (_, pal, _) => GestureDetector(
+                                          onTap: MusicaLibre.es(p) ? () => launchUrl(Uri.parse('${p['enlace']}')) : null,
+                                          child: InsigniaCalidad(calidad: cal, color: pal.acento),
+                                        ),
                                       ),
                                     ],
                                   ]),
@@ -877,6 +884,10 @@ List<(int, String)> lineasDeLetra(Map<String, dynamic> l) => _lineas(l);
 int desfaseDeLetra(String clave) => _desfaseDe(clave);
 Listenable get avisoDesfaseLetra => _desfaseCambio;
 
+/// Dónde está en la canción el verso de [ms], con la letra ya puesta a tiempo.
+Duration momentoDeVerso(int ms, String clave) =>
+    Duration(milliseconds: (ms - _desfaseDe(clave)).clamp(0, 1 << 31));
+
 /// El boton redondo de play/pausa: el icono se transforma y el boton se
 /// hunde un poco bajo el dedo.
 class _BotonGrande extends StatelessWidget {
@@ -951,40 +962,24 @@ class _VideoEnLinea extends StatelessWidget {
 
 // ---------------------------------------------------------------- letra
 
-final Map<String, Map<String, dynamic>> _cacheLetras = {};
+int _desfaseDe(String clave) => LetrasCache.i.desfase(clave);
+Listenable get _desfaseCambio => LetrasCache.i.cambios;
 
-/// Cuánto se adelanta (+) o se atrasa (-) la letra de cada canción, en ms. Lo mueve
-/// el botón «Sincronía» cuando una letra llega corrida; vale mientras la app está abierta.
-final Map<String, int> _desfasesLetra = {};
-class _AvisoDesfase extends ChangeNotifier {
-  void avisar() => notifyListeners();
-}
+const _sinLetra = <String, dynamic>{'texto': '', 'lineas': <dynamic>[]};
 
-final _AvisoDesfase _desfaseCambio = _AvisoDesfase();
-int _desfaseDe(String clave) => _desfasesLetra[clave] ?? 0;
-
+/// La letra de [p]: la ya guardada en el teléfono (sale al instante y sin internet) o la de internet.
 Future<Map<String, dynamic>> _letraDe(Json p) async {
-  final clave = '${p['clave']}';
-  final hecho = _cacheLetras[clave];
-  if (hecho != null) return hecho;
-  // la letra ya vista se guardó en el teléfono: sale al instante y también sin internet
   try {
     await LetrasCache.i.listo().timeout(const Duration(seconds: 2));
   } catch (_) {}
-  final guardada = LetrasCache.i.de(clave);
-  if (guardada != null) {
-    final g = Map<String, dynamic>.from(guardada);
-    _cacheLetras[clave] = g;
-    return g;
-  }
-  final l = Map<String, dynamic>.from(await Catalogo.letras(p));
-  final vacia = (l['lineas'] as List? ?? const []).isEmpty && '${l['texto'] ?? ''}'.isEmpty;
   // una letra vacía puede ser un fallo de red: no se guarda, se vuelve a intentar
-  if (!vacia) {
-    _cacheLetras[clave] = l;
-    LetrasCache.i.guardar(clave, l); // también queda en el teléfono (búsqueda y pantalla de bloqueo)
-  }
-  return l;
+  return await LetrasCache.i.obtener(p) ?? _sinLetra;
+}
+
+/// La letra de [clave] si ya no es la que se está viendo (la persona eligió otra).
+Map<String, dynamic>? letraCambiada(String clave, Map<String, dynamic>? vista) {
+  final l = LetrasCache.i.de(clave);
+  return l == null || identical(l, vista) ? null : l;
 }
 
 List<(int, String)> _lineas(Map<String, dynamic> l) => [
@@ -1005,6 +1000,23 @@ class _TarjetaLetra extends StatefulWidget {
 class _TarjetaLetraState extends State<_TarjetaLetra> {
   Map<String, dynamic>? _l;
   String _clave = '';
+
+  @override
+  void initState() {
+    super.initState();
+    LetrasCache.i.cambios.addListener(_otraLetra);
+  }
+
+  @override
+  void dispose() {
+    LetrasCache.i.cambios.removeListener(_otraLetra);
+    super.dispose();
+  }
+
+  void _otraLetra() {
+    final l = letraCambiada(_clave, _l);
+    if (l != null && _l != null && mounted) setState(() => _l = l);
+  }
 
   void _cargar() {
     final clave = '${widget.pista['clave']}';
@@ -1048,9 +1060,11 @@ class _TarjetaLetraState extends State<_TarjetaLetra> {
             const Text('Letra', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 16)),
             const Spacer(),
             if (hay) ...[
-              BotonSincronia(clave: '${widget.pista['clave']}', compacto: true),
+              BotonSincronia(pista: widget.pista, letra: l, compacto: true),
               const SizedBox(width: 6),
               const BotonTraducir(compacto: true),
+              const SizedBox(width: 6),
+              const BotonDisenoLetra(compacto: true),
               const SizedBox(width: 4),
               BotonKaraoke(pista: widget.pista, letra: l),
             ],
@@ -1062,8 +1076,7 @@ class _TarjetaLetraState extends State<_TarjetaLetra> {
             child: l == null
                 ? const Center(child: CircularProgressIndicator(color: Colors.white))
                 : !hay
-                    ? const Center(child: Text('No hay letra para esta canción.',
-                        style: TextStyle(fontWeight: FontWeight.w700)))
+                    ? _BuscarLetra(pista: widget.pista)
                     : IgnorePointer(
                         // la letra se desvanece por arriba y por abajo en vez de cortarse
                         // (dos velos del color de la tarjeta: sin capas extra que componer)
@@ -1107,6 +1120,12 @@ class _LetraCompletaState extends State<LetraCompleta> {
   void initState() {
     super.initState();
     _letra = widget.letra;
+    LetrasCache.i.cambios.addListener(_otraLetra);
+  }
+
+  void _otraLetra() {
+    final l = letraCambiada('${_pista['clave']}', _letra);
+    if (l != null && _letra != null && mounted) setState(() => _letra = l);
   }
 
   @override
@@ -1117,6 +1136,7 @@ class _LetraCompletaState extends State<LetraCompleta> {
 
   @override
   void dispose() {
+    LetrasCache.i.cambios.removeListener(_otraLetra);
     _r?.removeListener(_cambioDeCancion);
     super.dispose();
   }
@@ -1146,7 +1166,7 @@ class _LetraCompletaState extends State<LetraCompleta> {
     // la línea que suena ahora, para que la tarjeta empiece por ella
     var actual = 0;
     if (con.isNotEmpty && _r != null) {
-      final ms = _r!.posicion.value.inMilliseconds + 250;
+      final ms = _r!.posicion.value.inMilliseconds + 250 + _desfaseDe('${_pista['clave']}');
       for (var k = 0; k < con.length; k++) {
         if (con[k].$1 <= ms) actual = k;
       }
@@ -1175,10 +1195,6 @@ class _LetraCompletaState extends State<LetraCompleta> {
               icon: const Icon(Icons.ios_share_rounded),
             ),
           if (hayLineas) BotonKaraoke(pista: _pista, letra: l, grande: true),
-          BotonSincronia(clave: '${_pista['clave']}'),
-          const SizedBox(width: 8),
-          const BotonTraducir(),
-          const SizedBox(width: 12),
         ],
       ),
       body: Padding(
@@ -1186,15 +1202,23 @@ class _LetraCompletaState extends State<LetraCompleta> {
         child: l == null
             ? const Center(child: CircularProgressIndicator(color: Colors.white))
             : !hayLineas && !hayTexto
-                ? const Center(
-                    child: Text('No hay letra para esta canción.',
-                        style: TextStyle(fontWeight: FontWeight.w700, fontSize: 18)))
+                ? _BuscarLetra(pista: _pista)
                 : Column(crossAxisAlignment: CrossAxisAlignment.stretch, children: [
+                    SingleChildScrollView(
+                      scrollDirection: Axis.horizontal,
+                      child: Row(children: [
+                        BotonSincronia(pista: _pista, letra: l),
+                        const SizedBox(width: 8),
+                        const BotonTraducir(),
+                        const SizedBox(width: 8),
+                        const BotonDisenoLetra(),
+                      ]),
+                    ),
+                    const SizedBox(height: 10),
                     if (!hayLineas)
-                      const Padding(
-                        padding: EdgeInsets.only(bottom: 8),
-                        child: Text('Esta letra no trae tiempos, por eso no avanza sola.',
-                            style: TextStyle(fontSize: 13, color: Color(0xCCFFFFFF))),
+                      Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: _AvisoSinTiempos(clave: '${_pista['clave']}'),
                       ),
                     Expanded(
                       child: _VistaLetra(
@@ -1394,7 +1418,7 @@ class _VistaLetraState extends State<_VistaLetra> {
             final siguiente = i + 1 < _ls.length ? _ls[i + 1].$1 : inicio + 5000;
             final fin = inicio + (siguiente - inicio).clamp(600, 1500 + texto.length * 85);
             linea = LineaLetraActiva(aspecto: aspecto, texto: texto, estilo: estilo, inicio: inicio, fin: fin,
-                r: _r!, porVenir: _porVenir, acento: widget.acento);
+                r: _r!, porVenir: _porVenir, acento: widget.acento, adelanto: 250 + _desfaseDe(widget.clave));
           } else {
             // el color de cada estado (cantada / por venir / activa) se anima como antes, 260 ms
             linea = LineaLetra(aspecto: aspecto, texto: texto, estilo: estilo, activa: estado == 0,
@@ -1402,7 +1426,7 @@ class _VistaLetraState extends State<_VistaLetra> {
           }
           return GestureDetector(
             key: _llaves[i],
-            onTap: () => _r?.buscar(Duration(milliseconds: _ls[i].$1)),
+            onTap: () => _r?.buscar(momentoDeVerso(_ls[i].$1, widget.clave)),
             child: Padding(
               padding: EdgeInsets.symmetric(vertical: widget.compacta ? 6 : 8),
               // la que suena crece apenas; es solo pintura, no mueve las demas
@@ -1425,83 +1449,24 @@ class _VistaLetraState extends State<_VistaLetra> {
   }
 }
 
-/// «Sincronía»: si la letra llega adelantada o atrasada, se corrige a mano de medio en medio segundo.
+/// «Corregir»: si la letra va corrida o es de otra canción, aquí se arregla.
 class BotonSincronia extends StatelessWidget {
-  const BotonSincronia({super.key, required this.clave, this.compacto = false});
-  final String clave;
+  const BotonSincronia({super.key, required this.pista, required this.letra, this.compacto = false});
+  final Json pista;
+  final Map<String, dynamic>? letra;
   final bool compacto;
-
-  void _abrir(BuildContext context) {
-    showModalBottomSheet<void>(
-      context: context,
-      useRootNavigator: true,
-      builder: (ctx) => ListenableBuilder(
-        listenable: _desfaseCambio,
-        builder: (ctx, _) {
-          final ms = _desfaseDe(clave);
-          void mover(int d) {
-            final n = (ms + d).clamp(-10000, 10000);
-            if (n == 0) {
-              _desfasesLetra.remove(clave);
-            } else {
-              _desfasesLetra[clave] = n;
-            }
-            _desfaseCambio.avisar();
-          }
-
-          return SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 4, 20, 18),
-              child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.start, children: [
-                const Text('Sincronía de la letra', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w900)),
-                const SizedBox(height: 4),
-                const Text('Si la letra va por delante de la voz, atrásala. Si va por detrás, adelántala.',
-                    style: estiloSecundario),
-                const SizedBox(height: 14),
-                Row(children: [
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: () => mover(500),
-                      icon: const Icon(Icons.fast_rewind_rounded),
-                      label: const Text('Atrasar 0,5 s'),
-                    ),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 14),
-                    child: Text(ms == 0 ? 'Normal' : '${ms > 0 ? '+' : ''}${(ms / 1000).toStringAsFixed(1)} s',
-                        style: const TextStyle(fontWeight: FontWeight.w900)),
-                  ),
-                  Expanded(
-                    child: OutlinedButton.icon(
-                      onPressed: () => mover(-500),
-                      icon: const Icon(Icons.fast_forward_rounded),
-                      label: const Text('Adelantar 0,5 s'),
-                    ),
-                  ),
-                ]),
-                if (ms != 0)
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: TextButton(onPressed: () => mover(-ms), child: const Text('Volver a lo normal')),
-                  ),
-              ]),
-            ),
-          );
-        },
-      ),
-    );
-  }
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
         listenable: _desfaseCambio,
         builder: (context, _) {
-          final activo = _desfaseDe(clave) != 0;
+          final activo = LetrasCache.i.desfasePropio('${pista['clave']}') != 0;
+          final tinta = activo ? const Color(0xFF06070A) : Colors.white;
           return Tooltip(
-            message: 'Ajustar la sincronía de la letra',
+            message: 'Corregir la letra o su sincronía',
             child: GestureDetector(
               behavior: HitTestBehavior.opaque,
-              onTap: () => _abrir(context),
+              onTap: () => mostrarCorregirLetra(context, pista, letra),
               child: Container(
                 padding: EdgeInsets.symmetric(horizontal: compacto ? 8 : 12, vertical: compacto ? 4 : 6),
                 decoration: BoxDecoration(
@@ -1509,16 +1474,76 @@ class BotonSincronia extends StatelessWidget {
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Row(mainAxisSize: MainAxisSize.min, children: [
-                  Icon(Icons.av_timer_rounded, size: compacto ? 15 : 18,
-                      color: activo ? const Color(0xFF06070A) : Colors.white),
+                  Icon(Icons.av_timer_rounded, size: compacto ? 15 : 18, color: tinta),
                   const SizedBox(width: 5),
-                  Text('Sincronía', style: TextStyle(fontSize: compacto ? 12 : 14, fontWeight: FontWeight.w800,
-                      color: activo ? const Color(0xFF06070A) : Colors.white)),
+                  Text('Corregir', style: TextStyle(fontSize: compacto ? 12 : 14, fontWeight: FontWeight.w800, color: tinta)),
                 ]),
               ),
             ),
           );
         },
+      );
+}
+
+/// «Aa»: el tipo de letra y el diseño, sin salir de la canción.
+class BotonDisenoLetra extends StatelessWidget {
+  const BotonDisenoLetra({super.key, this.compacto = false});
+  final bool compacto;
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+        button: true,
+        label: 'Diseño de la letra',
+        excludeSemantics: true,
+        child: Tooltip(
+          message: 'Diseño de la letra',
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => mostrarDisenoLetra(context),
+            child: Container(
+              padding: EdgeInsets.symmetric(horizontal: compacto ? 9 : 12, vertical: compacto ? 4 : 6),
+              decoration: BoxDecoration(
+                color: Colors.white.withValues(alpha: 0.16), borderRadius: BorderRadius.circular(20)),
+              child: Text('Aa', style: TextStyle(fontSize: compacto ? 12 : 14, fontWeight: FontWeight.w900)),
+            ),
+          ),
+        ),
+      );
+}
+
+/// Por qué esta letra no avanza sola (o que se está arreglando).
+class _AvisoSinTiempos extends StatelessWidget {
+  const _AvisoSinTiempos({required this.clave});
+  final String clave;
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+        listenable: _desfaseCambio,
+        builder: (_, _) => Text(
+            LetrasCache.i.midiendo(clave)
+                ? 'Poniendo la letra a tiempo…'
+                : lineasConTiempo({'lineas': LetrasCache.i.de(clave)?['ajustables']}).isNotEmpty
+                    ? 'Sus tiempos son de otra versión: toca «Corregir» para ajustarla.'
+                    : 'Esta letra no trae tiempos, por eso no avanza sola.',
+            style: const TextStyle(fontSize: 13, color: Color(0xCCFFFFFF))),
+      );
+}
+
+/// Sin letra: se puede buscar a mano.
+class _BuscarLetra extends StatelessWidget {
+  const _BuscarLetra({required this.pista});
+  final Json pista;
+
+  @override
+  Widget build(BuildContext context) => Center(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          const Text('No hay letra para esta canción.', style: TextStyle(fontWeight: FontWeight.w700)),
+          TextButton(
+            onPressed: () => elegirOtraLetra(context, pista),
+            style: TextButton.styleFrom(foregroundColor: Colors.white),
+            child: const Text('Buscarla', style: TextStyle(decoration: TextDecoration.underline)),
+          ),
+        ]),
       );
 }
 

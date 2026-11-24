@@ -245,6 +245,24 @@ def test_clic_en_traducir_emite_solo_traducir(app):
     assert cuenta == {"letra": 0, "traducir": 1, "gusta": 0}
 
 
+def test_clic_en_aa_pide_el_diseno_de_letra(app):
+    w = _tarjeta(app)
+    w.poner(PISTA)
+    cuenta = {"letra": 0, "traducir": 0, "diseno": 0}
+    w.pidio_otra_letra.connect(lambda: cuenta.__setitem__("letra", cuenta["letra"] + 1))
+    w.pidio_traducir.connect(lambda: cuenta.__setitem__("traducir", cuenta["traducir"] + 1))
+    w.pidio_diseno.connect(lambda: cuenta.__setitem__("diseno", cuenta["diseno"] + 1))
+    for ancho, alto in ((360, 520), (180, 260), (540, 780)):
+        w.resize(ancho, alto)
+        app.processEvents()
+        w._timer.stop()
+        r = w.rect_boton_diseno()
+        assert not r.intersects(w.rect_boton_traducir()) and r.right() <= w.width() and r.left() >= 0
+        QTest.mouseClick(w, Qt.LeftButton, Qt.NoModifier, r.center().toPoint())
+    assert cuenta == {"letra": 0, "traducir": 0, "diseno": 3}
+    assert not _render(w).isNull()
+
+
 def test_clic_en_otra_letra_no_emite_traducir(app):
     w = _tarjeta(app)
     w.poner(PISTA)

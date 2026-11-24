@@ -60,7 +60,7 @@ class _LineaKaraokeState extends State<LineaKaraoke> with SingleTickerProviderSt
   @override
   void didUpdateWidget(covariant LineaKaraoke old) {
     super.didUpdateWidget(old);
-    if (old.inicio != widget.inicio || old.fin != widget.fin) {
+    if (old.inicio != widget.inicio || old.fin != widget.fin || old.adelanto != widget.adelanto) {
       _c.stop();
       _c.value = 0;
       _sincronizar();

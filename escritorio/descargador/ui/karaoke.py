@@ -217,6 +217,13 @@ class PaginaKaraoke(VistaGrande):
         self.bt_efectos.setFocusPolicy(Qt.NoFocus)
         self.bt_efectos.clicked.connect(self._abrir_efectos)
         self.fila_cab.insertWidget(2, self.bt_efectos, 0, Qt.AlignVCenter)
+        self.bt_diseno = QPushButton("Diseño")
+        self.bt_diseno.setToolTip("Elegir el tipo de letra y el estilo con que se ve la letra")
+        self.bt_diseno.setCursor(Qt.PointingHandCursor)
+        self.bt_diseno.setStyleSheet(BOTON)
+        self.bt_diseno.setFocusPolicy(Qt.NoFocus)
+        self.bt_diseno.clicked.connect(self._abrir_diseno)
+        self.fila_cab.insertWidget(3, self.bt_diseno, 0, Qt.AlignVCenter)
         # el estado de la mascota sigue a la letra (cada línea nueva cambia entre cantar y tararear)
         # método ligado (no lambda): al destruirse la página Qt lo desconecta solo y no se llama
         # sobre un objeto ya borrado («Internal C++ object (PaginaKaraoke) already deleted»)
@@ -236,6 +243,10 @@ class PaginaKaraoke(VistaGrande):
         self.mascota.raise_()
         self.cabecera.raise_()
         self.pie.raise_()
+
+    def _abrir_diseno(self):
+        from .selector_letra import abrir_selector
+        abrir_selector(self.ctx, self)
 
     def _abrir_efectos(self):
         v = getattr(self.ctx, "ventana", None)

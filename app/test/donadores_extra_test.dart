@@ -138,7 +138,7 @@ void main() {
     });
 
     test('estilos de la letra: claves del escritorio y un valor por defecto', () {
-      expect(Cosmeticos.estilosLetra, ['resplandor', 'ola', 'neon', 'cine']);
+      expect(Cosmeticos.estilosLetra, ['resplandor', 'ola', 'neon', 'cine', 'zoom', 'maquina', 'lluvia', 'giro']);
       expect(Cosmeticos.estiloLetra('NEON'), 'neon');
       expect(Cosmeticos.estiloLetra('raro'), 'resplandor');
     });

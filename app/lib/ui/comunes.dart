@@ -6,8 +6,10 @@ import 'dart:ui' as ui;
 
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/gestures.dart' show kTouchSlop;
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart';
 
+import '../nucleo/musica_libre.dart';
 import '../nucleo/coleccion.dart';
 import '../reproduccion/reproductor.dart';
 import 'plataforma.dart';
@@ -196,7 +198,13 @@ class FilaPista extends StatelessWidget {
                       style: estiloTituloFila.copyWith(color: actual ? C.acento : C.texto)),
                   const SizedBox(height: 3),
                   Row(children: [
-                    if (descargada) ...[
+                    if (kIsWeb) ...[
+                      if (descargada || suenaBloqueada(pista)) ...[
+                        Icon(Icons.phonelink_lock_rounded, size: 14, color: C.acento,
+                            semanticLabel: 'Suena con el celular bloqueado'),
+                        const SizedBox(width: 4),
+                      ],
+                    ] else if (descargada) ...[
                       Icon(Icons.download_for_offline_rounded, size: 14, color: C.acento),
                       const SizedBox(width: 4),
                     ],

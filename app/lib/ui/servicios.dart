@@ -7,6 +7,11 @@ import 'package:share_plus/share_plus.dart';
 import '../nucleo/gamer_control.dart';
 import '../nucleo/ajustes.dart';
 import '../nucleo/catalogo.dart';
+import '../nucleo/musica_libre.dart';
+import '../reproduccion/sesion_medios.dart';
+import 'paginas/musica_libre_pagina.dart';
+import 'paginas/segundo_plano_hoja.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../nucleo/coleccion.dart';
 import '../nucleo/cuentas.dart';
 import '../nucleo/descargas.dart';
@@ -408,6 +413,16 @@ class Servicios {
               if (enlace.isNotEmpty)
                 _opcion(Icons.share_rounded, 'Compartir', () => hacer(() => SharePlus.instance
                     .share(ShareParams(text: '${pista['titulo']} — ${pista['artista']}\n$enlace')))),
+              if (kIsWeb && SesionMedios.esTelefono && vid.isNotEmpty && !suenaBloqueada(pista))
+                _opcion(Icons.smartphone_rounded, 'Escuchar en segundo plano',
+                    () => hacer(() => mostrarSegundoPlano(context, pista))),
+              if (kIsWeb && !suenaBloqueada(pista))
+                _opcion(Icons.phonelink_lock_rounded, 'Buscar una versión que suene bloqueada',
+                    () => hacer(() => _abrir(context, MusicaLibrePagina(
+                        busqueda: '${pista['titulo'] ?? ''} ${pista['artista'] ?? ''}'.trim())))),
+              if (MusicaLibre.es(pista))
+                _opcion(Icons.open_in_new_rounded, 'Ver en Audius',
+                    () => hacer(() => launchUrl(Uri.parse('${pista['enlace'] ?? 'https://audius.co'}')))),
               if (pista['descarga_id'] != null)
                 _opcion(Icons.delete_outline_rounded, kIsWeb ? 'Borrar de este navegador' : 'Borrar del teléfono',
                     () => hacer(() => _borrarDescarga(context, pista))),
