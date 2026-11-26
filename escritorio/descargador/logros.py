@@ -22,6 +22,8 @@ import time
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 
+from . import disco
+
 PLATAFORMA = "windows"
 VITRINA_MAX = 3
 DIAS_GUARDADOS = 400
@@ -222,11 +224,8 @@ class Logros:
         if not self.archivo:
             return
         try:
-            tmp = str(self.archivo) + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(self.datos(), f, ensure_ascii=False)
-            os.replace(tmp, self.archivo)
-        except OSError:
+            disco.escribir(self.archivo, json.dumps(self.datos(), ensure_ascii=False))
+        except (OSError, TypeError, ValueError):
             pass
 
     def _avisar(self):

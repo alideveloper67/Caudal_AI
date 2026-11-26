@@ -42,6 +42,10 @@ class SinConexion(ErrorNube):
     pass
 
 
+class SesionCaducada(ErrorNube):
+    """El servidor dijo de verdad que esta sesión ya no vale (la única razón para pedir entrar otra vez)."""
+
+
 def correo_de(usuario):
     return f"{usuario.strip().lower()}@{DOMINIO}"
 
@@ -261,12 +265,29 @@ def canjear_google(codigo, verificador):
     return Sesion.desde_respuesta(r.json())
 
 
+def sesion_invalida(estado, cuerpo):
+    """¿La respuesta dice que la sesión guardada ya no vale? (mismas reglas que en la app)."""
+    if estado not in (400, 401, 403):
+        return False
+    t = str(cuerpo or "").lower()
+    return ("invalid_grant" in t or "refresh_token_not_found" in t or "session_not_found" in t
+            or "user_not_found" in t
+            or ("refresh" in t and any(x in t for x in ("not found", "invalid", "revoked", "already used"))))
+
+
 def renovar(refresh_token):
     r = _peticion("POST", "/auth/v1/token?grant_type=refresh_token",
                   json={"refresh_token": refresh_token})
     if r.status_code >= 300:
-        raise _traducir(r)
-    return Sesion.desde_respuesta(r.json())
+        # solo «esta sesión ya no vale» la cierra. El servidor caído (5xx), demasiadas peticiones (429) o un
+        # wifi que contesta su propia página: se sigue sin conexión, nunca se echa a nadie
+        if sesion_invalida(r.status_code, r.text):
+            raise SesionCaducada("La sesión guardada caducó. Vuelve a iniciar sesión.")
+        raise SinConexion("El servidor de cuentas no pudo responder ahora. Se sigue sin conexión.")
+    try:
+        return Sesion.desde_respuesta(r.json())
+    except (ValueError, KeyError, TypeError) as e:
+        raise SinConexion("El servidor de cuentas no pudo responder ahora. Se sigue sin conexión.") from e
 
 
 class _CuerpoConAvance:
@@ -305,6 +326,7 @@ class Sesion:
         self.refresh = refresh
         self.expira = expira
         self.metadatos = metadatos or {}
+        self.al_renovar = None          # f(): guardar el token nuevo (lo pone cuentas.py)
         self._cerrojo = threading.Lock()
 
     @classmethod
@@ -319,6 +341,13 @@ class Sesion:
             if time.time() > self.expira - 120:
                 nueva = renovar(self.refresh)
                 self.access, self.refresh, self.expira = nueva.access, nueva.refresh, nueva.expira
+                # el token viejo ya no vale: el nuevo se guarda AQUÍ. Antes esperaba a la siguiente
+                # sincronización y, si Caudal se cerraba antes, la próxima vez pedía iniciar sesión
+                if self.al_renovar is not None:
+                    try:
+                        self.al_renovar()
+                    except Exception:  # noqa: BLE001 - sin poder escribir, al menos esta vez funciona
+                        pass
             return self.access
 
     # --- atajos para la API de datos (PostgREST)
@@ -379,6 +408,7 @@ class Sesion:
 
     def salir(self):
         try:
-            _peticion("POST", "/auth/v1/logout", token=self.access)
+            # solo este equipo: sin «scope=local», Supabase cierra la cuenta en todos (teléfono incluido)
+            _peticion("POST", "/auth/v1/logout?scope=local", token=self.access)
         except ErrorNube:
             pass

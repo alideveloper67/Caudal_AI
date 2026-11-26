@@ -23,6 +23,10 @@ CLAVE_SALTOS = "saltos"
 CLAVE_DESCUBRE = "descubre_dia"
 CLAVE_GUSTOS = "gustos"          # copia local de los artistas favoritos de la cuenta
 CLAVE_PARA_TI = "gustos_inicio"
+CLAVE_PARECIDOS = "artistas_parecidos"
+SEMILLAS_PARECIDOS = 8           # de cuántos de tus artistas se miran los parecidos
+MAX_PARECIDOS = 20
+TOPE_POR_SEMILLA = 4             # de un solo artista tuyo no salen más (salvo que otro también los señale)
 ULTIMAS = 50                     # no se repite lo de las últimas ~50 reproducciones
 MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto",
          "septiembre", "octubre", "noviembre", "diciembre"]
@@ -674,6 +678,93 @@ def similares(col, pista):
     if pista.get("miniatura"):
         m["miniatura"] = pista["miniatura"]
     return m
+
+
+def _tus_artistas(col):
+    """[(id, nombre, peso)] de más a menos, y las claves de todos los que ya conoces.
+
+    Cuenta lo que más suena (cada repetición pesa menos que la anterior), los me gusta y los elegidos."""
+    peso, nombre, conocidos = {}, {}, set()
+
+    def sumar(p, cuanto):
+        for i, a in enumerate(p.get("artistas") or []):
+            if not isinstance(a, dict):
+                continue
+            conocidos.update(claves_artista(a.get("id"), a.get("nombre")))
+            if a.get("id"):
+                peso[a["id"]] = peso.get(a["id"], 0.0) + (cuanto if i == 0 else cuanto * 0.5)
+                nombre.setdefault(a["id"], a.get("nombre") or "")
+    for k, p in enumerate(col.mas_escuchadas(120, 120)):
+        sumar(p, 1.0 + 2.0 / (1 + k / 12))
+    for p in col.lista_me_gusta(limite=150):
+        sumar(p, 1.0)
+    for p in col.escuchado_hace_poco(60):
+        sumar(p, 0.6)
+    for x in leer_gustos(col):
+        conocidos.update(claves_artista(x.get("id"), x.get("nombre")))
+        if x.get("id"):
+            peso[x["id"]] = peso.get(x["id"], 0.0) + 4.0
+            nombre.setdefault(x["id"], x.get("nombre") or "")
+    for g in col.guardados("artista"):
+        conocidos.update(claves_artista(g.get("id"), g.get("titulo")))
+    # el mismo artista puede venir con dos fichas (la suya y la de un sello): cuenta como uno
+    junto, ficha = {}, {}
+    for i, n in sorted(peso.items(), key=lambda x: -x[1]):
+        k = nombre[i].strip().lower()
+        if k:
+            junto[k] = junto.get(k, 0.0) + n
+            ficha.setdefault(k, i)
+    orden = sorted(junto.items(), key=lambda x: -x[1])
+    return [(ficha[k], nombre[ficha[k]], n) for k, n in orden], conocidos
+
+
+def artistas_parecidos(col, ahora=None, datos_de=None):
+    """Artistas que aún no escuchas y se parecen a los que sí: cada uno dice a quién se parece.
+
+    Sale de la página de tus artistas («A sus fans también les gusta»). Pesa más el que señalan varios de
+    los tuyos y los que más escuchas. Se arma una vez al día (con red; sin red, lo último que se supo)."""
+    dia = mixes.clave_dia(ahora or datetime.now())
+    tuyos, conocidos = _tus_artistas(col)
+    semillas = tuyos[:SEMILLAS_PARECIDOS]
+    firma = [i for i, _n, _p in semillas]
+    guardado = col.estado(CLAVE_PARECIDOS, None) or {}
+
+    def frescos(lista):
+        return [e for e in lista or [] if not conocidos & set(claves_artista(e.get("id"), e.get("titulo")))]
+    if guardado.get("dia") == dia and guardado.get("lista"):
+        return frescos(guardado["lista"])
+    if not semillas:
+        return []
+    leer = datos_de or _artista_datos
+    r = _en_paralelo({i: (leer, (i,)) for i in firma})
+    maximo = semillas[0][2] or 1.0
+    puntos, ficha, quien = {}, {}, {}
+    for i, nombre, peso in semillas:
+        for k, e in enumerate((r.get(i) or ([], []))[1]):
+            clave = e.get("id")
+            if not clave or not e.get("titulo") or conocidos & set(claves_artista(clave, e["titulo"])):
+                continue
+            # el primero de la lista de parecidos se parece más que el décimo
+            puntos[clave] = puntos.get(clave, 0.0) + (0.35 + 0.65 * peso / maximo) / (1 + k * 0.12)
+            ficha.setdefault(clave, e)
+            quien.setdefault(clave, []).append(nombre)
+    if not puntos:
+        return frescos(guardado.get("lista"))
+    salida, de_semilla = [], {}
+    for clave in sorted(puntos, key=lambda c: -puntos[c]):
+        s = quien[clave]
+        if len(s) == 1:
+            if de_semilla.get(s[0], 0) >= TOPE_POR_SEMILLA:
+                continue
+            de_semilla[s[0]] = de_semilla.get(s[0], 0) + 1
+        e = ficha[clave]
+        salida.append({"tipo": "artista", "id": clave, "titulo": e["titulo"], "miniatura": e.get("miniatura") or "",
+                       "radio_id": e.get("radio_id") or "",
+                       "subtitulo": "Parecido a " + (s[0] if len(s) == 1 else f"{s[0]} y {s[1]}")})
+        if len(salida) >= MAX_PARECIDOS:
+            break
+    col.guardar_estado(CLAVE_PARECIDOS, {"dia": dia, "lista": salida})
+    return salida
 
 
 def sugerencias_gustos(col, ahora=None, largo=30):

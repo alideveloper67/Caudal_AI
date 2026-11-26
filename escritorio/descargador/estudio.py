@@ -23,7 +23,7 @@ from datetime import date, datetime, timedelta
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
-from . import config
+from . import config, disco
 
 # ---------------------------------------------------------------------- perfiles
 
@@ -309,6 +309,7 @@ def _carpeta():
 
 def _leer_json(ruta, defecto):
     try:
+        disco.vaciar(ruta)
         with open(ruta, "r", encoding="utf-8") as f:
             return json.load(f)
     except (OSError, ValueError):
@@ -316,14 +317,10 @@ def _leer_json(ruta, defecto):
 
 
 def _escribir_json(ruta, datos):
-    """Se escribe en un archivo temporal y se renombra: un corte de luz no deja el
-    archivo a medias."""
+    """Lo escribe un hilo aparte y de una vez (disco.py): un corte de luz no deja el archivo a medias."""
     try:
-        tmp = str(ruta) + ".tmp"
-        with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(datos, f, ensure_ascii=False, indent=1)
-        os.replace(tmp, ruta)
-    except OSError:
+        disco.escribir(ruta, json.dumps(datos, ensure_ascii=False, indent=1))
+    except (OSError, TypeError, ValueError):
         pass
 
 

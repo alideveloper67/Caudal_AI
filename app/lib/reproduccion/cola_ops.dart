@@ -27,6 +27,18 @@ bool moverEnSecuencia(List<Json> secuencia, int pos, int de, int a) {
   return moverEnLista(secuencia, de, a.clamp(pos + 1, secuencia.length - 1));
 }
 
+/// Pone delante, en lo que aún no ha sonado, las que cumplen [cual] (conservando su orden y
+/// sin quitar ninguna). Devuelve cuántas son.
+int adelantar(List<Json> secuencia, int pos, bool Function(Json) cual) {
+  final desde = pos < 0 ? 0 : pos + 1;
+  if (desde >= secuencia.length) return 0;
+  final pendientes = secuencia.sublist(desde);
+  final si = [for (final p in pendientes) if (cual(p)) p];
+  if (si.isEmpty) return 0;
+  secuencia.replaceRange(desde, secuencia.length, [...si, for (final p in pendientes) if (!cual(p)) p]);
+  return si.length;
+}
+
 /// «Tocar después de esta»: pone [p] justo detrás de lo que suena. Si ya
 /// estaba en la cola (manual o del contexto), la mueve en vez de duplicarla.
 void tocarDespues(List<Json> proximas, List<Json> secuencia, List<Json> original, int pos, Json p) {

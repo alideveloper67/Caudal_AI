@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../nucleo/cuentas_vinculadas.dart';
 import '../nucleo/importar.dart';
 import '../nucleo/plataforma.dart';
 import '../nucleo/servicios_externos.dart';
@@ -89,12 +90,14 @@ class _ArmazonState extends State<Armazon> {
   final _navegadores = List.generate(4, (_) => GlobalKey<NavigatorState>());
   StreamSubscription<String>? _avisos;
   EjecutorAtajos? _atajos;
+  Timer? _alDia;
   static const _canal = MethodChannel('caudal/compartido');
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     final s = Caudal.leer(context);
+    CuentaExterna.deCaudal = s.cuenta.id;
     s.irAPestana = _ir;
     SesionMedios.alPararYouTube = () {
       if (mounted) unawaited(_avisoYouTubeParado());
@@ -127,10 +130,9 @@ class _ArmazonState extends State<Armazon> {
         _navegadores[_pestana].currentState?.push(MaterialPageRoute(builder: (_) => const EstudioPagina()));
         return;
       }
-      // vuelta de «Conectar con Spotify» (caudal://spotify?code=...)
-      if (CuentaSpotify.esVuelta(texto)) {
-        CuentaSpotify.volvio(texto).then((_) => s.avisar('Cuenta de Spotify conectada.'),
-            onError: (Object e) => s.avisar(e is ErrorServicio ? e.mensaje : 'Spotify no dejó conectar tu cuenta.'));
+      // vuelta de «Vincular cuentas» (caudal://vincular?servicio=...&code=...)
+      if (CuentaExterna.esVuelta(texto)) {
+        unawaited(_vinculada(s, texto));
         return;
       }
       // una lista de Spotify, Apple Music o SoundCloud compartida: se trae a la biblioteca
@@ -180,6 +182,20 @@ class _ArmazonState extends State<Armazon> {
         if (inicial != null && mounted) Caudal.leer(context).abrirEnlace?.call(inicial);
       } catch (_) {}
     });
+    if (kIsWeb) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        final vuelta = CuentaExterna.vueltaWeb(Uri.base);
+        if (vuelta != null && mounted) Caudal.leer(context).abrirEnlace?.call(vuelta);
+      });
+    }
+    // las cuentas vinculadas se ponen al día cuando la app ya está tranquila
+    if (widget.paginas == null) {
+      _alDia = Timer(const Duration(seconds: 25), () {
+        if (!mounted) return;
+        final s = Caudal.leer(context);
+        unawaited(CuentasVinculadas.alAbrir(s.coleccion, avisar: s.avisar));
+      });
+    }
   }
 
   /// La primera vez que se abre una version con novedades grandes sale su
@@ -320,6 +336,20 @@ class _ArmazonState extends State<Armazon> {
     if (que == 'plano') await mostrarSegundoPlano(context, Caudal.leer(context).reproductor.actual);
   }
 
+  /// El navegador volvió de vincular una cuenta: se traen ya sus me gusta.
+  Future<void> _vinculada(Servicios s, String enlace) async {
+    try {
+      final servicio = await CuentaExterna.volvio(enlace);
+      if (servicio == null) return;
+      s.avisar('${servicio.nombre} vinculado. Trayendo tus me gusta…');
+      await CuentasVinculadas.alAbrir(s.coleccion, avisar: s.avisar);
+    } on ErrorServicio catch (e) {
+      s.avisar(e.mensaje);
+    } catch (_) {
+      s.avisar('No se pudo vincular la cuenta. Vuelve a intentarlo.');
+    }
+  }
+
   /// Cuentas de antes de los términos (o con una versión vieja, o sin los
   /// datos básicos): se les pide aceptar y completar antes de seguir.
   Future<void> _revisarTerminos() async {
@@ -350,6 +380,7 @@ class _ArmazonState extends State<Armazon> {
   void dispose() {
     if (_esperaDonador case final c? when !c.isCompleted) c.complete(false);
     _avisos?.cancel();
+    _alDia?.cancel();
     super.dispose();
   }
 
@@ -430,13 +461,13 @@ class _ArmazonState extends State<Armazon> {
               final r = Caudal.of(context).reproductor;
               if (r.actual == null || (kIsWeb && ancho) || _sigueOculto(r)) return const SizedBox.shrink();
               return Stack(children: [
-                Positioned(left: 8, right: 8, bottom: 6,
+                Positioned(left: 0, right: 0, bottom: 0,
                     child: RepaintBoundary(child: MiniReproductor(alQuitar: _quitarMini))),
                 // la equis: en la esquina de arriba a la derecha, a caballo del borde para no
                 // tapar los botones; 32x32 de zona de toque y un icono de 17 px
                 Positioned(
-                  right: 8 + 6,
-                  bottom: 6 + 60 - 16,
+                  right: 6,
+                  bottom: 64 - 16,
                   child: _EquisMini(alPulsar: _quitarMini),
                 ),
               ]);
@@ -755,21 +786,18 @@ class _MiniReproductorState extends State<MiniReproductor> {
             curve: Curves.easeOut,
             child: AnimatedContainer(
             duration: const Duration(milliseconds: 400),
-            height: 60,
-            decoration: BoxDecoration(
-              color: Color.lerp(_color, Colors.black, 0.35),
-              borderRadius: BorderRadius.circular(8),
-            ),
+            height: 64,
+            decoration: BoxDecoration(color: Color.lerp(_color, C.panel, 0.62)),
             child: Stack(children: [
               Row(children: [
                 Padding(
-                  padding: const EdgeInsets.all(7),
+                  padding: const EdgeInsets.fromLTRB(16, 7, 14, 7),
                   child: Hero(
                     tag: etiquetaPortada,
                     flightShuttleBuilder: vueloPortada(url, ladoGrande),
                     child: AnimatedSwitcher(
                       duration: const Duration(milliseconds: 260),
-                      child: Portada(key: ValueKey(clave), url: url, lado: 46, radio: 5),
+                      child: Portada(key: ValueKey(clave), url: url, lado: 48, radio: 4),
                     ),
                   ),
                 ),
@@ -811,10 +839,10 @@ class _MiniReproductorState extends State<MiniReproductor> {
                           ),
                   ),
                 ),
-                const SizedBox(width: 4),
+                const SizedBox(width: 10),
               ]),
               Positioned(
-                left: 8, right: 8, bottom: 0,
+                left: 0, right: 0, bottom: 0,
                 // la barrita avanza varias veces por segundo: que repinte sola
                 child: RepaintBoundary(child: ValueListenableBuilder<Duration>(
                   valueListenable: r.posicion,

@@ -288,6 +288,11 @@ def _dibujar_extra(p, nombre, e, color):
         p.drawPath(ruta)
         _pluma(p, color)
 
+    if nombre == "cuadricula":
+        for x in (4, 13.5):
+            for y in (4, 13.5):
+                p.drawRoundedRect(QRectF(x * e, y * e, 6.5 * e, 6.5 * e), 1.8 * e, 1.8 * e)
+        return
     if nombre == "corazon":
         p.drawPath(_corazon(e))
     elif nombre == "corazon_lleno":

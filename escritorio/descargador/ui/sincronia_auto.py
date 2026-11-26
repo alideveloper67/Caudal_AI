@@ -14,8 +14,9 @@ import hashlib
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
-from .. import cotejo_audio, sincronia_letra
+from .. import ayudante, letras_cache, sincronia_letra, sincronia_tareas
 from ..hilos import en_segundo_plano
+from ..sincronia_tareas import poner_tramos, verificar  # noqa: F401  (los usan las vistas y las pruebas)
 
 MAX_GUARDADOS = 800
 REINTENTOS_FUENTE = 12        # cada 1,5 s mientras la canción todavía carga
@@ -45,31 +46,41 @@ def en_duda(sinc, p, datos):
     return bool((datos or {}).get("otra_duracion")) and not sinc.medida(p, datos.get("lineas"))
 
 
-def verificar(lineas, fuente, duracion, alternativas, datos=None, misma=False, voz=True):
-    """Trabajo de fondo: primero se compara el sonido con el de la canción de la que son los tiempos (exacto
-    y sin entender la voz); si no se puede, se escucha lo que se canta (sincronia_letra).
+def _con_parejas(res):
+    """Lo que volvió del ayudante (JSON) con las líneas otra vez como (ms, verso)."""
+    d = (res or {}).get("datos")
+    for k in ("lineas", "ref_lineas"):
+        if d and d.get(k):
+            d[k] = [(int(ms), str(t)) for ms, t in d[k]]
+    return res
 
-    misma: lo que suena ES esa grabación (nada que comparar). voz: hay reconocedor de voz."""
-    ref = (datos or {}).get("ref")
-    if ref and misma:
-        return {"accion": "bien", "desfase_ms": 0, "datos": None, "detalle": "los tiempos son de esta grabación"}
-    if ref and datos.get("ref_lineas"):
+
+def _verificar_aparte(vigente, pista, lineas, fuente, duracion, alternativas, datos, misma, voz, region):
+    """Lo que corre en el hilo de fondo: lo hace el proceso ayudante; si no se pudo abrir, este mismo hilo."""
+    if not vigente():
+        return None                         # ya suena otra: no se gasta en esta
+    if (datos or {}).get("ref") and misma:
+        return verificar(lineas, fuente, duracion, alternativas, datos, misma, voz)     # no hay nada que escuchar
+    if ayudante.disponible():
         try:
-            tramos = cotejo_audio.cotejar(fuente, ref)
-        except Exception:  # noqa: BLE001  (sin numpy, sin red…: se escucha)
-            tramos = None
-        if tramos:
-            return dict(poner_tramos(datos, tramos), tramos=tramos)
-    if not voz:
-        return {"accion": "nada", "desfase_ms": 0, "datos": None, "detalle": "sin reconocedor de voz"}
-    return sincronia_letra.verificar(lineas, fuente, duracion, alternativas)
+            return _con_parejas(ayudante.pedir("verificar", {
+                "pista": {k: v for k, v in (pista or {}).items() if not str(k).startswith("_")},
+                "lineas": lineas, "fuente": fuente, "duracion": duracion, "datos": datos, "misma": misma,
+                "voz": voz, "region": region,
+                "alternativas": alternativas if isinstance(alternativas, list) else None}))
+        except ayudante.ErrorAyudante as e:
+            if "modelo" in str(e) or "huggingface" in str(e).lower():
+                raise
+    pedir = (lambda: alternativas) if isinstance(alternativas, list) else alternativas
+    return verificar(lineas, fuente, duracion, pedir, datos, misma, voz)
 
 
-def poner_tramos(datos, tramos):
-    d = dict(datos, lineas=cotejo_audio.colocar(datos["ref_lineas"], tramos), sincronizada=True)
-    for k in ("otra_duracion", "ref", "ref_lineas"):
-        d.pop(k, None)
-    return {"accion": "cambiar", "desfase_ms": 0, "datos": d, "detalle": f"cotejo {tramos}"}
+def _tarea_aparte(vigente, nombre, datos):
+    if not vigente():
+        return None
+    if ayudante.disponible():
+        return ayudante.pedir(nombre, datos)
+    return sincronia_tareas.tarea(nombre, datos)
 
 
 class SincroniaAuto(QObject):
@@ -134,7 +145,7 @@ class SincroniaAuto(QObject):
         """La vista recibió `datos` (formato de catalogo.letras) para la pista `p`."""
         if not p or not datos or not datos.get("sincronizada") or not datos.get("lineas"):
             return
-        if not self.activa():
+        if not self.activa() or datos.get("escuchada"):     # sus tiempos ya salieron de escuchar esta canción
             return
         self._intentar(p, list(datos["lineas"]), alternativas, REINTENTOS_FUENTE, datos)
 
@@ -169,14 +180,91 @@ class SincroniaAuto(QObject):
         if alternativas is None:
             from .. import catalogo
             alternativas = (lambda q=dict(p): catalogo.letras_alternativas(q))
+        elif callable(alternativas) is False:
+            alternativas = list(alternativas)
         misma = modo == "audio" and bool(datos) and bool(p.get("video_id")) and datos.get("ref") == p.get("video_id")
         voz = not self._modelo_falla and sincronia_letra.disponible()
         if not voz and not (datos or {}).get("ref"):
             self._en_curso.discard(k)
             return
-        en_segundo_plano(verificar, lineas, fuente, dur, alternativas, datos, misma, voz,
-                         ok=lambda res, k=k, kc=kc, c=clave_pista(p): (self._guardar_cotejo(kc, res), self._llego(k, c, res)),
-                         error=lambda e, k=k: self._fallo(k, e), dueno=self)
+        en_segundo_plano(_verificar_aparte, self._vigente(p), dict(p), lineas, fuente, dur, alternativas, datos, misma,
+                         voz, self._region(),
+                         ok=lambda res, k=k, kc=kc, c=clave_pista(p): self._resultado(k, kc, c, res),
+                         error=lambda e, k=k: self._fallo(k, e), dueno=self, lento=True)
+
+    def _vigente(self, p):
+        """¿Sigue sonando esta canción? (se pregunta desde el hilo de fondo, justo antes de trabajar)."""
+        r, clave = self.ctx.reproductor, clave_pista(p)
+        return lambda: clave_pista(r.actual) == clave
+
+    def _region(self):
+        try:
+            return self.ctx.ajustes["region"]
+        except Exception:  # noqa: BLE001
+            return ""
+
+    def _resultado(self, k, kc, clave, res):
+        if res is None:                      # se pasó de canción antes de empezar: la próxima vez
+            self._en_curso.discard(k)
+            return
+        self._guardar_cotejo(kc, res)
+        self._llego(k, clave, res)
+
+    # ----------------------------------------------------------- canciones sin letra con tiempos
+    def pedir_tiempos(self, p, datos):
+        """La letra es solo texto (o no hay ninguna): se escucha la canción para ponerle tiempos (o para
+        escribirla). Al acabar avisa con `listo` y {"accion": "letra", "datos": …} (o «sin_letra»)."""
+        if not p or not self.activa() or not sincronia_letra.disponible() or self._modelo_falla:
+            return False
+        texto = ((datos or {}).get("texto") or "").strip()
+        if not texto and (datos or {}).get("oida_nada"):
+            return False                     # ya se escuchó y no se entendía
+        if texto and (datos or {}).get("texto_nada"):
+            return False
+        self._intentar_tiempos(dict(p), dict(datos or {}), texto, REINTENTOS_FUENTE)
+        return True
+
+    def _intentar_tiempos(self, p, datos, texto, quedan):
+        r = self.ctx.reproductor
+        if clave_pista(r.actual) != clave_pista(p):
+            return
+        sonando = r.fuente_sonando() if hasattr(r, "fuente_sonando") else None
+        if sonando is None:
+            if quedan > 0:
+                QTimer.singleShot(1500, self, lambda: self._intentar_tiempos(p, datos, texto, quedan - 1))
+            return
+        modo, fuente = sonando
+        nombre = "sincronizar_texto" if texto else "transcribir"
+        k = f"{clave_pista(p)}|{modo}|{nombre}"
+        if k in self._memoria:
+            self.listo.emit(clave_pista(p), self._memoria[k])
+            return
+        if k in self._en_curso:
+            return
+        self._en_curso.add(k)
+        dur = float(getattr(r, "_duracion", 0) or (p.get("duracion") or 0))
+        en_segundo_plano(_tarea_aparte, self._vigente(p), nombre, {"texto": texto, "fuente": fuente, "duracion": dur},
+                         ok=lambda res, k=k: self._llegaron_tiempos(k, p, datos, texto, modo, res),
+                         error=lambda e, k=k: self._fallo(k, e, clave_pista(p)), dueno=self, lento=True)
+
+    def _llegaron_tiempos(self, k, p, datos, texto, modo, res):
+        self._en_curso.discard(k)
+        if res is None:
+            return
+        lineas = [(int(ms), str(t)) for ms, t in (res or {}).get("lineas") or []]
+        if lineas:
+            nuevos = {"sincronizada": True, "lineas": lineas, "escuchada": True, "verificada": False,
+                      "texto": texto or "\n".join(t for _ms, t in lineas), "duracion": 0.0,
+                      "fuente": (datos.get("fuente") or "") if texto else "Escuchada por Caudal (puede tener errores)"}
+            final = {"accion": "letra", "desfase_ms": 0, "datos": nuevos, "detalle": "tiempos escuchados"}
+        else:
+            nuevos = dict(datos, sincronizada=False, lineas=[], texto=texto)
+            nuevos["texto_nada" if texto else "oida_nada"] = True
+            final = {"accion": "sin_letra", "desfase_ms": 0, "datos": None, "detalle": "no se pudo escuchar"}
+        self._memoria[k] = final
+        if modo == "audio":                  # los tiempos son de lo que sonó: el videoclip puede ser otro
+            letras_cache.guardar(p, nuevos)
+        self.listo.emit(clave_pista(p), final)
 
     @staticmethod
     def _clave_cotejo(p, modo, datos):
@@ -230,8 +318,10 @@ class SincroniaAuto(QObject):
                 pass
         self.listo.emit(clave, res)
 
-    def _fallo(self, k, e):
+    def _fallo(self, k, e, clave=""):
         self._en_curso.discard(k)
+        if clave:
+            self.listo.emit(clave, {"accion": "sin_letra", "desfase_ms": 0, "datos": None, "detalle": str(e)})
         # sin modelo (no se pudo bajar, sin internet la primera vez…) no se insiste en cada canción
         texto = str(e)
         if "modelo" in texto or "huggingface" in texto.lower() or isinstance(e, (ImportError, OSError)):

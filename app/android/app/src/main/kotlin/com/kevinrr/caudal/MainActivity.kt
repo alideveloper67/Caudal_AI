@@ -21,6 +21,8 @@ class MainActivity : AudioServiceActivity() {
     private var pendiente: String? = null
 
     private var canalPip: MethodChannel? = null
+    // «repintar»: la pantalla vuelve y se engancha a un motor que ya estaba en marcha (música de fondo)
+    private var canalVida: MethodChannel? = null
     // true solo mientras hay un video sonando (lo decide el lado Dart)
     private var pipPermitido = false
 
@@ -44,6 +46,17 @@ class MainActivity : AudioServiceActivity() {
         }
     }
 
+    override fun onPostResume() {
+        super.onPostResume()
+        // con la música sonando, el motor de Flutter seguía vivo sin pantalla: al abrir desde el ícono se
+        // pide que pinte ya (si no, a veces se quedaba toda negra)
+        try {
+            canalVida?.invokeMethod("repintar", null)
+            window?.decorView?.postDelayed({ canalVida?.invokeMethod("repintar", null) }, 350)
+        } catch (_: Exception) {
+        }
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "caudal/diagnostico")
@@ -51,6 +64,7 @@ class MainActivity : AudioServiceActivity() {
                 if (llamada.method == "traba") resultado.success(Vigilante.leer(applicationContext))
                 else resultado.notImplemented()
             }
+        canalVida = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "caudal/vida")
         canal = MethodChannel(flutterEngine.dartExecutor.binaryMessenger, "caudal/compartido")
         canal?.setMethodCallHandler { llamada, resultado ->
             if (llamada.method == "inicial") {

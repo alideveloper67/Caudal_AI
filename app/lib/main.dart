@@ -135,7 +135,27 @@ class _CaudalAppState extends State<CaudalApp> {
     if (a == null) return;
     Aspecto.aplicar(a.texto('acento'), a.texto('fondo'));
     if (mounted) setState(() {});
-    WidgetsBinding.instance.reassembleApplication();
+    _rehacerTodo();
+  }
+
+  bool _rehaciendo = false;
+
+  /// Repinta toda la app con el tema nuevo. Hacerlo en mitad de un cuadro (o del arranque) reconstruía
+  /// pantallas que se estaban quitando: «Null check» en Inicio y en la entrada, y a veces todo negro.
+  void _rehacerTodo() {
+    if (_rehaciendo) return;
+    _rehaciendo = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Future<void>.delayed(const Duration(milliseconds: 60), () async {
+        try {
+          if (mounted) await WidgetsBinding.instance.reassembleApplication();
+        } catch (_) {
+        } finally {
+          _rehaciendo = false;
+        }
+      });
+    });
+    WidgetsBinding.instance.scheduleFrame();
   }
 
   @override
@@ -259,8 +279,9 @@ class _CaudalAppState extends State<CaudalApp> {
       aspecto = nuevo;
       Aspecto.aplicar(ajustes.texto('acento'), ajustes.texto('fondo'));
       if (mounted) setState(() {});
-      // los widgets que leen los colores directamente se vuelven a construir
-      WidgetsBinding.instance.reassembleApplication();
+      // los widgets que leen los colores directamente se vuelven a construir (también si llega de la nube
+      // al arrancar: por eso fuera del cuadro en curso)
+      _rehacerTodo();
     });
     // modo ligero: sin animaciones ni adornos y con menos memoria para imagenes
     void aplicarLigero() {

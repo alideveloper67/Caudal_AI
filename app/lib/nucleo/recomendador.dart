@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:math';
 
+import 'package:flutter/foundation.dart' show visibleForTesting;
+
 import 'catalogo.dart';
 import 'coleccion.dart';
 import 'gustos.dart';
@@ -211,6 +213,7 @@ class Recomendador {
 
   static const _claveSaltos = 'saltos';
   static const _claveDescubre = 'descubre_dia';
+  static const claveParecidos = 'artistas_parecidos_dia';
 
   // ------------------------------------------------------------ señales
 
@@ -645,6 +648,112 @@ class Recomendador {
     };
     await c.guardarEstado(_claveDescubre, {'dia': dia, 'mix': mix});
     return mix;
+  }
+
+  // ------------------------------------------------------------ artistas parecidos
+
+  static const semillasParecidos = 8, maximoParecidos = 20, topePorSemilla = 4;
+
+  static Future<Map<String, dynamic>> Function(String id) _paginaArtista = Catalogo.artista;
+
+  /// Solo para pruebas: la página de un artista.
+  @visibleForTesting
+  static set paginaArtista(Future<Map<String, dynamic>> Function(String id) f) => _paginaArtista = f;
+
+  /// Los artistas parecidos a los tuyos, del más al menos señalado.
+  ///
+  /// [semillas]: tus artistas, con 'id', 'nombre' y 'veces'. [parecidosDe]: id de semilla → los que su página
+  /// señala, por orden. Cada semilla suma su peso a los que señala (los primeros, algo más) y que te señalen
+  /// varios de los tuyos vale más que uno solo. Fuera los que ya escuchas o sigues ([excluir]: ids y nombres en
+  /// minúscula). De una sola semilla salen [topePorSemilla] como mucho; los que señalan varias no cuentan para
+  /// ese tope.
+  static List<Json> ordenarParecidos(List<Json> semillas, Map<String, List<Json>> parecidosDe, Set<String> excluir,
+      {int maximo = maximoParecidos, int tope = topePorSemilla}) {
+    final mayor = semillas.fold<double>(1, (m, s) => max(m, ((s['veces'] as num?) ?? 1).toDouble()));
+    final fichas = <String, Json>{};
+    final puntos = <String, double>{};
+    final quienes = <String, List<(double, Json)>>{};
+    for (final s in semillas) {
+      final peso = 0.3 + 0.7 * ((s['veces'] as num?) ?? 1).toDouble() / mayor;
+      final vistos = <String>{};
+      for (final (i, e) in (parecidosDe['${s['id']}'] ?? const <Json>[]).indexed) {
+        final id = '${e['id'] ?? ''}', nombre = '${e['titulo'] ?? ''}'.trim();
+        if (id.isEmpty || nombre.isEmpty || !vistos.add(id)) continue;
+        if (excluir.contains(id) || excluir.contains(nombre.toLowerCase())) continue;
+        fichas.putIfAbsent(id, () => e);
+        puntos[id] = (puntos[id] ?? 0) + peso * (1 - 0.03 * min(i, 12));
+        (quienes[id] ??= []).add((peso, s));
+      }
+    }
+    for (final id in puntos.keys.toList()) {
+      puntos[id] = puntos[id]! + 0.35 * (quienes[id]!.length - 1);
+    }
+    final orden = puntos.keys.toList()
+      ..sort((a, b) {
+        final p = puntos[b]!.compareTo(puntos[a]!);
+        return p != 0 ? p : '${fichas[a]!['titulo']}'.compareTo('${fichas[b]!['titulo']}');
+      });
+    final deUna = <String, int>{};
+    final nombres = <String>{};
+    final salida = <Json>[];
+    for (final id in orden) {
+      if (salida.length >= maximo) break;
+      final q = quienes[id]!..sort((a, b) => b.$1.compareTo(a.$1));
+      if (q.length == 1) {
+        final de = '${q.first.$2['id']}';
+        if ((deUna[de] ?? 0) >= tope) continue;
+        deUna[de] = (deUna[de] ?? 0) + 1;
+      }
+      final e = fichas[id]!;
+      if (!nombres.add('${e['titulo']}'.trim().toLowerCase())) continue;
+      salida.add({
+        'tipo': 'artista',
+        'id': id,
+        'titulo': '${e['titulo']}',
+        'subtitulo': 'Parecido a ${q.first.$2['nombre']}',
+        'miniatura': '${e['miniatura'] ?? e['foto'] ?? ''}',
+      });
+    }
+    return salida;
+  }
+
+  /// «Artistas parecidos a los que escuchas»: se calcula una vez al día y queda guardado. Vacío si aún no hay
+  /// de quién partir o no hay red.
+  static Future<List<Json>> artistasParecidos(Coleccion c, {DateTime? ahora}) async {
+    final hoy = ahora ?? DateTime.now();
+    final dia = '${hoy.year}-${hoy.month}-${hoy.day}';
+    List<Json> leer(Object? l) =>
+        [for (final x in (l is List ? l : const []).whereType<Map>()) Map<String, dynamic>.from(x)];
+    final guardado = await c.estado(claveParecidos);
+    if (guardado is Map && guardado['dia'] == dia) return leer(guardado['lista']);
+    final frecuentes = await c.artistasFrecuentes(400);
+    if (frecuentes.isEmpty) return const [];
+    final semillas = frecuentes.take(semillasParecidos).toList();
+    final excluir = <String>{
+      for (final a in frecuentes)
+        if (((a['veces'] as num?) ?? 1) >= 2 || semillas.contains(a)) ...['${a['id']}', '${a['nombre']}'.trim().toLowerCase()],
+      for (final g in await c.guardados('artista')) ...['${g['id']}', '${g['titulo']}'.trim().toLowerCase()],
+      for (final g in Gustos.actuales) ...[if (g.id.isNotEmpty) g.id, g.nombre.trim().toLowerCase()],
+    };
+    final de = <String, List<Json>>{};
+    await Future.wait([
+      for (final s in semillas)
+        () async {
+          try {
+            final p = await _paginaArtista('${s['id']}').timeout(const Duration(seconds: 25));
+            de['${s['id']}'] = [
+              for (final sec in (p['secciones'] as List? ?? const []).whereType<Map>())
+                for (final e in (sec['elementos'] as List? ?? const []).whereType<Map>())
+                  if (e['tipo'] == 'artista') Map<String, dynamic>.from(e)
+            ];
+          } catch (_) {/* sin ese artista */}
+        }()
+    ]);
+    if (de.isEmpty) return const [];
+    final lista = ordenarParecidos(semillas, de, excluir);
+    if (lista.length < 3) return const [];
+    await c.guardarEstado(claveParecidos, {'dia': dia, 'lista': lista});
+    return lista;
   }
 
   // ------------------------------------------------------------ máquina del tiempo

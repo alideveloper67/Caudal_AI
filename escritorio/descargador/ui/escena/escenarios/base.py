@@ -20,7 +20,9 @@ from PySide6.QtCore import QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap, QRadialGradient
 from PySide6.QtWidgets import QWidget
 
-FPS = 30
+FPS = 30                    # el mínimo: si al equipo le sobra, va a FPS_FINO
+FPS_FINO = 60
+PINTADO_FINO_MS = 5.0       # si un cuadro cuesta más que esto de media, se queda en FPS
 N_BANDAS = 32
 ATAQUE, CAIDA = 0.45, 0.08
 TRANSICION_ACENTO = 0.8     # s
@@ -31,6 +33,38 @@ def mezclar(a, b, f):
     f = max(0.0, min(1.0, f))
     return QColor(round(a.red() + (b.red() - a.red()) * f), round(a.green() + (b.green() - a.green()) * f),
                   round(a.blue() + (b.blue() - a.blue()) * f), round(a.alpha() + (b.alpha() - a.alpha()) * f))
+
+
+class Ritmo:
+    """Cuántos cuadros por segundo puede un lienzo: mide lo que cuesta pintarlo y elige 60 o 30.
+    Cambia como mucho cada dos segundos, para que no baile entre uno y otro."""
+
+    def __init__(self, reloj):
+        self.reloj = reloj
+        self.media = None
+        self._revisado = time.monotonic()
+        self._t0 = None
+
+    def antes(self):
+        self._t0 = time.perf_counter()
+
+    def despues(self):
+        if self._t0 is None:
+            return
+        ms = min(40.0, (time.perf_counter() - self._t0) * 1000)      # un tirón suelto no decide
+        self._t0 = None
+        self.media = ms if self.media is None else self.media * 0.94 + ms * 0.06
+        ahora = time.monotonic()
+        if ahora - self._revisado < 2.0:
+            return
+        self._revisado = ahora
+        fino = self.reloj.interval() <= 1000 // FPS_FINO
+        if self.media > PINTADO_FINO_MS * (1.3 if fino else 1.0):
+            ms_cuadro = 1000 // FPS
+        else:
+            ms_cuadro = 1000 // FPS_FINO
+        if ms_cuadro != self.reloj.interval():
+            self.reloj.setInterval(ms_cuadro)
 
 
 def con_alfa(color, alfa):
@@ -58,7 +92,10 @@ class EscenarioBase(QWidget):
         self._cache = None
         self._cache_clave = None
         self._timer = QTimer(self)
+        self._timer.setTimerType(Qt.PreciseTimer)
         self._timer.setInterval(int(1000 / FPS))
+        self._ritmo = Ritmo(self._timer)
+        self._pasos = 1.0           # cuánto avanzó este cuadro, en cuadros de 1/30 s
         self._timer.timeout.connect(self._cuadro)
         self.preparar()
 
@@ -161,10 +198,13 @@ class EscenarioBase(QWidget):
     # ------------------------------------------------------------ reloj y pintado
 
     def _cuadro(self):
-        self._ahora = time.monotonic()
+        antes, self._ahora = self._ahora, time.monotonic()
+        # los suavizados están pensados a 30 por segundo: a 60 se da medio paso
+        pasos = self._pasos = max(0.2, min(2.0, (self._ahora - antes) * FPS)) if antes else 1.0
+        sube, baja = 1.0 - (1.0 - ATAQUE) ** pasos, 1.0 - (1.0 - CAIDA) ** pasos
         for i in range(N_BANDAS):
             o, v = self._objetivo[i], self.bandas[i]
-            self.bandas[i] = v + (o - v) * (ATAQUE if o > v else CAIDA)
+            self.bandas[i] = v + (o - v) * (sube if o > v else baja)
         self.update()
 
     def showEvent(self, ev):
@@ -194,6 +234,7 @@ class EscenarioBase(QWidget):
             finally:
                 pc.end()
             self._cache, self._cache_clave = pm, clave
+        self._ritmo.antes()
         p = QPainter(self)
         try:
             p.drawPixmap(0, 0, self._cache)
@@ -201,3 +242,4 @@ class EscenarioBase(QWidget):
             self.pintar_animado(p, w, h, self._ahora - self._t0)
         finally:
             p.end()
+            self._ritmo.despues()

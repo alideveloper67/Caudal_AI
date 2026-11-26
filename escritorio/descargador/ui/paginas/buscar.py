@@ -5,7 +5,7 @@ from PySide6.QtCore import QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPainterPath
 from PySide6.QtWidgets import (QHBoxLayout, QLabel, QMenu, QPushButton, QVBoxLayout, QWidget)
 
-from ... import catalogo, redes
+from ... import catalogo, listas, redes, soundcloud
 from ...hilos import en_segundo_plano
 from .. import iconos, imagenes
 from ..componentes import (Carrusel, Chip, ListaPistas, Pagina, Portada, SinResultados,
@@ -14,7 +14,7 @@ from ..estilos import C
 from .comun import Rejilla, cache, guardar_cache
 
 FILTROS = [("todo", "Todo"), ("canciones", "Canciones"), ("videos", "Videos"),
-           ("albumes", "Álbumes"), ("artistas", "Artistas"), ("listas", "Listas")]
+           ("albumes", "Álbumes"), ("artistas", "Artistas"), ("listas", "Listas"), ("soundcloud", "SoundCloud")]
 
 
 class ResultadoPrincipal(QWidget):
@@ -257,6 +257,8 @@ class PaginaBuscar(Pagina):
         self.zv.addWidget(Esqueleto("filas"))
         if self.filtro == "todo":
             funcion, args = catalogo.buscar_todo, (self.consulta,)
+        elif self.filtro == "soundcloud":
+            funcion, args = soundcloud.buscar, (self.consulta, 40)
         else:
             funcion, args = catalogo.buscar, (self.consulta, self.filtro, 40)
 
@@ -270,7 +272,9 @@ class PaginaBuscar(Pagina):
             self.zv.addWidget(SinResultados("aviso", "No se pudo buscar",
                                             f"Revisa tu conexión a internet.\n{str(e)[:160]}"))
         en_segundo_plano(funcion, *args, ok=listo, error=fallo, dueno=self)
-        self.ctx.coleccion.anotar_busqueda(self.consulta)
+        # en un hilo: con el disco ocupado, apuntarla paraba la página antes de enseñarla
+        en_segundo_plano(self.ctx.coleccion.anotar_busqueda, self.consulta, ok=lambda _r: None,
+                         error=lambda _e: None, dueno=self)
 
     def _resultados(self, datos):
         _borrar_layout(self.zv)
@@ -323,19 +327,55 @@ class PaginaBuscar(Pagina):
                     continue
                 self.zv.addWidget(Carrusel(ctx, s["titulo"], s["elementos"],
                                            mas=lambda f=s["filtro"]: self._filtrar(f)))
+            self._tambien_soundcloud()
             return
 
         elementos = datos or []
         if not elementos:
             self._nada()
             return
-        if self.filtro == "canciones":
-            lp = ListaPistas(ctx, mostrar_album=True)
+        if self.filtro in ("canciones", "soundcloud"):
+            lp = ListaPistas(ctx, mostrar_album=self.filtro == "canciones")
             lp.set_pistas(elementos)
             lp.al_reproducir = lambda i: ctx.reproducir_pista(elementos[i])
             self.zv.addWidget(lp)
         else:
             self.zv.addWidget(Rejilla(ctx, "", elementos))
+
+    def _tambien_soundcloud(self):
+        """Debajo de lo de YouTube Music, lo que hay en SoundCloud (llega después, sin frenar la página)."""
+        consulta = self.consulta
+
+        def poner(pistas):
+            if not pistas or self.filtro != "todo" or self.consulta != consulta:
+                return
+            caja = QWidget()
+            v = QVBoxLayout(caja)
+            v.setContentsMargins(0, 0, 0, 0)
+            fila = QHBoxLayout()
+            t = QLabel("En SoundCloud")
+            t.setObjectName("titulo_seccion")
+            fila.addWidget(t)
+            fila.addStretch(1)
+            mas = QPushButton("Ver todas")
+            mas.setObjectName("enlace")
+            mas.setCursor(Qt.PointingHandCursor)
+            mas.clicked.connect(lambda: self._filtrar("soundcloud"))
+            fila.addWidget(mas)
+            v.addLayout(fila)
+            lp = ListaPistas(self.ctx, mostrar_album=False, mostrar_cabecera=False, mostrar_numero=False)
+            lp.set_pistas(pistas[:5])
+            lp.al_reproducir = lambda i, ps=pistas: self.ctx.reproducir_pista(ps[i])
+            v.addWidget(lp)
+            self.zv.addWidget(caja)
+
+        clave = ("buscar_sc", consulta.lower())
+        guardadas = cache(clave, 10)
+        if guardadas is not None:
+            poner(guardadas)
+            return
+        en_segundo_plano(soundcloud.buscar, consulta, 12,
+                         ok=lambda d: (guardar_cache(clave, d), poner(d)), error=lambda _e: None, dueno=self.zona)
 
     def _nada(self):
         self.zv.addWidget(SinResultados(
@@ -356,6 +396,15 @@ class PaginaBuscar(Pagina):
                 b.clicked.connect(lambda _=False, l=lista_id: self.ctx.navegar(
                     {"pagina": "lista", "id": l}))
                 self.cuerpo.addWidget(b, 0, Qt.AlignLeft)
+            if (listas.detectar_plataforma(u) in ("spotify", "apple")
+                    or listas.tipo_soundcloud(u)[0] in ("lista", "me_gusta", "perfil") and soundcloud.es_enlace(u)):
+                b = QPushButton("  Pasar esta lista a Caudal")
+                b.setObjectName("principal")
+                b.setIcon(iconos.icono("anadir_lista", 16, C["acento_texto"]))
+                b.setCursor(Qt.PointingHandCursor)
+                b.clicked.connect(lambda _=False, e=u: self.ctx.ventana._traer_lista(e))
+                self.cuerpo.addWidget(b, 0, Qt.AlignLeft)
+                continue                  # es una lista: no hay una sola cosa que reproducir
             self.cuerpo.addWidget(TarjetaEnlace(self.ctx, u))
         if len(urls) > 1:
             b = QPushButton(f"  Descargar los {len(urls)} enlaces con mis ajustes")

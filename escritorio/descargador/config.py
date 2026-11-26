@@ -6,6 +6,8 @@ import os
 import sys
 from pathlib import Path
 
+from . import disco
+
 
 APP_NOMBRE = "Caudal"
 
@@ -157,6 +159,16 @@ DEFECTOS = {
     "letra_auto": {},                # lo que midió: «clave|modo|huella» -> ms (0 = cuadraba)
     "escena_fondo": "video",         # fondo de la escena de escritorio: video | ambiente
     "estilo_letra": "clasica",       # cómo se pinta la letra (escena, canción, karaoke): ui/estilo_letra.py
+    "karaoke_vista": "escenario",    # escenario (un verso, palabra por palabra) o lista (la letra entera)
+    "karaoke_voz": "original",       # original, baja o sin: cuánto se oye al cantante en el karaoke
+    "letra_movimiento": "clasica",
+    "letra_original": True,          # la letra de la escena con su tipo de letra propio (la de siempre)
+    "letra_acabado_original": "clasica",   # cómo entran las palabras de la letra clásica de la escena (estilo_letra)
+    "letra_intensidad": "normal",    # cuánto se mueve la letra épica: suave, normal, fuerte o brutal
+    # cómo se presenta la letra en la escena: «» = la clásica (contorno y la palabra fuerte en grande, la que
+    # prefiere el dueño); o una de las épicas de ui/epica, montadas como un edit
+    "letra_epica": "",
+    "letra_epica_elegida": False,    # la eligió la persona (las de antes tenían «edit» sin haberlo elegido)
     "fuente_letra": "predeterminada",  # tipo de letra de la letra: ui/tipografia_letra.py
     "mini_encima": True,             # el mini reproductor queda por encima de todo
     "letras_auto": False,            # abrir las letras al reproducir
@@ -203,6 +215,7 @@ class Ajustes:
 
     def cargar(self):
         try:
+            disco.vaciar(self.archivo)          # lo último guardado puede estar aún de camino al disco
             if self.archivo.exists():
                 guardado = json.loads(self.archivo.read_text(encoding="utf-8"))
                 for k, v in guardado.items():
@@ -218,9 +231,7 @@ class Ajustes:
 
     def guardar(self):
         try:
-            self.archivo.write_text(
-                json.dumps(self.datos, indent=2, ensure_ascii=False), encoding="utf-8"
-            )
+            disco.escribir(self.archivo, json.dumps(self.datos, indent=2, ensure_ascii=False))
         except Exception:
             pass
 
@@ -237,22 +248,7 @@ class Ajustes:
         return self.datos.get(clave, defecto if defecto is not None else DEFECTOS.get(clave))
 
 
-_NAVEGADORES_PROBADOS = {}
-
-
 def navegador_cookies_usable(nav):
-    """El navegador del que se pueden leer las cookies, o None.
-
-    Chrome y Edge recientes cifran sus cookies de forma que ningún programa externo puede leerlas
-    («Failed to decrypt with DPAPI», yt-dlp #10927). Si eso pasa, se sigue SIN cookies en lugar
-    de hacer fallar cada canción. Se prueba una vez por navegador y sesión."""
-    if not nav or nav == "ninguno":
-        return None
-    if nav not in _NAVEGADORES_PROBADOS:
-        try:
-            from yt_dlp.cookies import extract_cookies_from_browser
-            extract_cookies_from_browser(nav)
-            _NAVEGADORES_PROBADOS[nav] = True
-        except Exception:  # noqa: BLE001 - cualquier fallo al leerlas: sin cookies
-            _NAVEGADORES_PROBADOS[nav] = False
-    return nav if _NAVEGADORES_PROBADOS[nav] else None
+    """El navegador del que se pueden leer las cookies, o None (ver cookies_navegador.py)."""
+    from . import cookies_navegador
+    return cookies_navegador.usable(nav)

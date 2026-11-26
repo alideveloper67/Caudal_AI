@@ -70,3 +70,6 @@ escritorio/build_local/
 
 # lo genera crear_instalador.py (va dentro del .exe, no al repositorio)
 instalador/caudal_app.zip
+escritorio/salida_nueva/
+escritorio/build_pyi.log
+escritorio/build_inst.log

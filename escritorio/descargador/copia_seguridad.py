@@ -25,6 +25,8 @@ import os
 import time
 import zipfile
 import zlib
+
+from . import disco
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -188,6 +190,7 @@ def _datos_ajustes(ajustes):
 def _datos_estudio(carpeta):
     def leer(nombre, defecto):
         try:
+            disco.vaciar()
             return json.loads((carpeta / nombre).read_text(encoding="utf-8"))
         except (OSError, ValueError):
             return defecto

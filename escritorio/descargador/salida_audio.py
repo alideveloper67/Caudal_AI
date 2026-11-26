@@ -55,7 +55,7 @@ def _salida_windows():
                     ("valor", c_void_p), ("extra", c_void_p)]
 
     ole32 = ctypes.windll.ole32
-    ole32.CoInitializeEx(None, 2)        # ya iniciado por Qt: da igual lo que conteste
+    ole32.CoInitializeEx(None, 2)        # si el hilo ya lo tenía iniciado, da igual lo que conteste
 
     def metodo(obj, indice, *tipos):
         vtabla = ctypes.cast(obj, POINTER(POINTER(c_void_p))).contents

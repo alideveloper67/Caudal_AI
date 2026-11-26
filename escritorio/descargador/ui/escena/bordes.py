@@ -83,6 +83,7 @@ class BordeBrillo(QWidget):
         preparar_transparente(self)
         self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
         self._timer = QTimer(self)
+        self._timer.setTimerType(Qt.PreciseTimer)
         self._timer.setInterval(int(1000 / self.FPS))
         self._timer.timeout.connect(self._tic)
 

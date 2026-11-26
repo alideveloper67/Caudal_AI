@@ -123,6 +123,7 @@ class TarjetaCancion(QWidget):
         self._ultimo = self._t0
 
         self._timer = QTimer(self)
+        self._timer.setTimerType(Qt.PreciseTimer)
         self._timer.setInterval(50)     # 20 fps en reposo (vaivén lento); 60 con el ratón encima
         self._timer.timeout.connect(self._tic)
 

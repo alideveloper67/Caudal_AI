@@ -17,6 +17,7 @@ Se piden los datos en ingles porque el analizador de ytmusicapi solo reconoce
 bien las secciones en ese idioma; los titulos se traducen aqui.
 """
 
+import functools
 import re
 import shutil
 import threading
@@ -24,7 +25,7 @@ import time
 
 import requests
 
-from . import elegir_letra
+from . import elegir_letra, letras_cache
 
 REGION = "PE"
 _local = threading.local()
@@ -298,6 +299,27 @@ def nueva_pista(video_id, titulo="", artistas=None, album=None, duracion=0,
         "es_video": bool(es_video),
         "explicito": bool(explicito),
     }
+
+
+def pista_de_video(video_id):
+    """La pista de un video del que solo se sabe el id (los archivos de Google Takeout). None si no
+    existe o si no es de musica. Puede lanzar errores de red."""
+    d = _yt().get_song(video_id) or {}
+    det = d.get("videoDetails") or {}
+    if det.get("videoId") != video_id or not det.get("title"):
+        return None
+    categoria = _nav(d, "microformat", "microformatDataRenderer", "category")
+    if categoria and categoria != "Music" and not det.get("musicVideoType"):
+        return None
+    autor = re.sub(r"\s+-\s+Topic$", "", det.get("author") or "")
+    titulo = det["title"]
+    if autor == (det.get("author") or ""):
+        m = re.match(r"^(.+?)\s+[-–—]\s+(.+)$", titulo)
+        if m:
+            autor, titulo = m.group(1).strip(), m.group(2).strip()
+    return nueva_pista(video_id, titulo, [{"nombre": autor, "id": ""}],
+                       duracion=segundos(det.get("lengthSeconds")),
+                       miniatura=mejor_miniatura(_nav(det, "thumbnail", "thumbnails") or []))
 
 
 def _artistas_ytm(lista):
@@ -966,8 +988,11 @@ def _lrclib(ruta, params):
     """Lo que responde LRCLIB, o None si no está (o no contesta)."""
     try:
         r = requests.get(f"https://lrclib.net/api/{ruta}", params=params, headers=_CAB_LRCLIB, timeout=10)
+        if r.status_code >= 500 or r.status_code == 429:
+            _anotar_fallo_letra()
         return r.json() if r.status_code == 200 else None
     except (requests.RequestException, ValueError):
+        _anotar_fallo_letra()
         return None
 
 
@@ -995,6 +1020,14 @@ def _candidatas_lrclib(pista):
     return salida
 
 
+# si alguna fuente no contestó (sin red, servidor caído) no se da por hecho que no hay letra
+_letra_fallos = threading.local()
+
+
+def _anotar_fallo_letra():
+    _letra_fallos.n = getattr(_letra_fallos, "n", 0) + 1
+
+
 def _letra_youtube(vid):
     """(líneas con tiempos, texto, fuente) de YouTube Music para ese video exacto."""
     if not vid:
@@ -1015,7 +1048,7 @@ def _letra_youtube(vid):
         if l and l.get("lyrics"):
             return [], l["lyrics"], l.get("source") or "YouTube Music"
     except Exception:  # noqa: BLE001
-        pass
+        _anotar_fallo_letra()
     return [], "", ""
 
 
@@ -1044,7 +1077,74 @@ def _cancion_oficial(pista, texto=""):
     return None
 
 
+def _con_tiempos(d):
+    return bool(d and d.get("sincronizada") and d.get("lineas"))
+
+
 def letras(pista):
+    """La letra de una canción (ver `_letras_principales`), con lo que hace que casi ninguna se quede sin ella:
+    la guardada en el equipo, un segundo intento si la red falló y más sitios donde buscar."""
+    if not letras_cache.activa():
+        return _letras_principales(pista)
+    g = letras_cache.leer(pista)
+    if g is not None:
+        return g
+    _letra_fallos.n = 0
+    d = _letras_principales(pista)
+    if not _con_tiempos(d) and _letra_fallos.n:
+        time.sleep(1.2)
+        _letra_fallos.n = 0
+        d = _letras_principales(pista)
+    fallo = bool(_letra_fallos.n)
+    if not _con_tiempos(d):
+        try:
+            d = _letras_extra(pista, d)
+        except Exception:  # noqa: BLE001  (una fuente extra rota no quita la letra que ya había)
+            fallo = True
+    if _con_tiempos(d) or not fallo:
+        letras_cache.guardar(pista, d)
+    elif not (d.get("texto") or "").strip():
+        vieja = letras_cache.leer(pista, caducada=True)      # sin internet: la que se supo una vez
+        if vieja is not None:
+            return vieja
+    return d
+
+
+def _letras_extra(pista, d):
+    """Cuando no hay letra con tiempos: NetEase, los subtítulos del autor del video y Genius."""
+    from . import letras_fuentes
+    vid = pista.get("video_id") or ""
+    bueno = (d.get("texto") or "").strip()
+    con, texto, otra = elegir_letra.elegir(letras_fuentes.netease(pista), pista, bueno)
+    if con is not None:
+        lineas = _lrc_a_lineas(con["syncedLyrics"])
+        if lineas:
+            return {"sincronizada": True, "lineas": lineas, "texto": elegir_letra.texto_de(con), "fuente": "NetEase",
+                    "duracion": float(con.get("duration") or 0), "verificada": bool(bueno)}
+    subs = letras_fuentes.subtitulos_video(vid)
+    if subs:
+        dicho = "\n".join(t for _ms, t in subs["lineas"])
+        if not bueno or elegir_letra.palabras_en_comun(dicho, bueno) >= 0.4:
+            return {"sincronizada": True, "lineas": subs["lineas"], "texto": bueno or dicho,
+                    "fuente": "Subtítulos del video", "duracion": float(pista.get("duracion") or 0),
+                    "verificada": bool(bueno)}
+    if otra is not None:
+        lineas = _lrc_a_lineas(otra["syncedLyrics"])
+        if lineas:
+            return {"sincronizada": True, "lineas": lineas, "texto": elegir_letra.texto_de(otra), "fuente": "NetEase",
+                    "duracion": float(otra.get("duration") or 0), "verificada": bool(bueno), "otra_duracion": True}
+    if bueno:
+        return d
+    g = letras_fuentes.genius(pista)
+    if g is not None:
+        return {"sincronizada": False, "lineas": [], "texto": g["plainLyrics"], "fuente": "Genius", "verificada": False}
+    if texto is not None:
+        return {"sincronizada": False, "lineas": [], "texto": elegir_letra.texto_de(texto), "fuente": "NetEase",
+                "verificada": False}
+    return d
+
+
+def _letras_principales(pista):
     """{"sincronizada": bool, "lineas": [(ms, texto)] o [], "texto": str, "fuente", "verificada": bool}.
 
     La letra tiene que ser la de esta canción (descargador/elegir_letra.py) y sus tiempos, los del audio
@@ -1160,10 +1260,15 @@ _cache_streams = {}
 _cerrojo = threading.Lock()
 
 
+@functools.lru_cache(maxsize=1)
+def _hay_node():
+    return shutil.which("node") is not None      # recorre el PATH en el disco: una vez basta
+
+
 def _opciones_ytdlp(ajustes=None):
     o = {"quiet": True, "no_warnings": True, "skip_download": True, "noplaylist": True,
          "socket_timeout": 20}
-    if shutil.which("node"):
+    if _hay_node():
         o["js_runtimes"] = {"node": {}}
     if ajustes is not None:
         from .config import navegador_cookies_usable
@@ -1207,7 +1312,26 @@ def olvidar(objetivo):
             _cache_streams.pop(clave, None)
 
 
+_en_vuelo = {}            # lo que se está resolviendo ahora: quien pida lo mismo espera ese y no lo repite
+
+
 def resolver(objetivo, modo="audio", calidad="maxima", codec="auto", ajustes=None):
+    """Como `_resolver`, sin hacer dos veces a la vez el mismo trabajo (pulsar mientras se adelantaba)."""
+    clave = (str(objetivo), modo, str(calidad), codec)
+    with _cerrojo:
+        turno = _en_vuelo.setdefault(clave, [threading.Lock(), 0])
+        turno[1] += 1
+    try:
+        with turno[0]:
+            return _resolver(objetivo, modo, calidad, codec, ajustes)
+    finally:
+        with _cerrojo:
+            turno[1] -= 1
+            if not turno[1]:
+                _en_vuelo.pop(clave, None)
+
+
+def _resolver(objetivo, modo="audio", calidad="maxima", codec="auto", ajustes=None):
     """Convierte un video_id (o enlace) en direcciones que mpv puede reproducir.
 
     modo "audio": solo el sonido.  modo "video": imagen + sonido (en dos pistas
@@ -1218,7 +1342,8 @@ def resolver(objetivo, modo="audio", calidad="maxima", codec="auto", ajustes=Non
     clave = (url, modo, str(calidad), codec)
     with _cerrojo:
         guardado = _cache_streams.get(clave)
-        if guardado and time.time() - guardado[0] < 3.5 * 3600:
+        vale = 25 * 60 if "soundcloud.com/" in url else 3.5 * 3600
+        if guardado and time.time() - guardado[0] < vale:
             return guardado[1]
 
     import yt_dlp

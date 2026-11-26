@@ -22,6 +22,7 @@ import '../nucleo/sonidos_interfaz.dart';
 import '../nucleo/streams.dart';
 import '../reproduccion/reproductor.dart';
 import 'comunes.dart';
+import 'menu_hoja.dart';
 import 'paginas/artista.dart';
 import 'paginas/coleccion_pagina.dart';
 import 'paginas/genero.dart';
@@ -363,84 +364,132 @@ class Servicios {
     final album = pista['album'] is Map ? Map<String, dynamic>.from(pista['album'] as Map) : <String, dynamic>{};
     final vid = '${pista['video_id'] ?? ''}';
     final enlace = vid.isEmpty ? '' : 'https://music.youtube.com/watch?v=$vid';
-    // en iPhone, abrir el menu de una cancion (sobre todo manteniendo) se nota en la mano
-    Haptico.toque();
-    await showModalBottomSheet<void>(
-      context: context,
-      useRootNavigator: true,
-      isScrollControlled: true,
-      builder: (ctx) {
-        void hacer(VoidCallback f) {
-          Navigator.pop(ctx);
-          f();
-        }
-        return SafeArea(
-          child: SingleChildScrollView(
-            child: Column(mainAxisSize: MainAxisSize.min, children: [
-              ListTile(
-                leading: Portada(url: '${pista['miniatura'] ?? ''}', lado: 48, radio: 4),
-                title: Text('${pista['titulo']}', maxLines: 1, overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontWeight: FontWeight.w700)),
-                subtitle: Text('${pista['artista'] ?? ''}', maxLines: 1, style: estiloSecundario),
-              ),
-              const Divider(),
-              _opcion(gusta ? Icons.favorite_rounded : Icons.favorite_border_rounded,
-                  gusta ? 'Quitar de Tus me gusta' : 'Guardar en Tus me gusta',
-                  () => hacer(() => alternarMeGusta(pista)), color: gusta ? C.acento : null),
-              _opcion(Icons.playlist_add_rounded, 'Añadir a una lista',
-                  () => hacer(() => anadirALista(context, [pista]))),
-              _opcion(Icons.queue_music_rounded, 'Añadir a la cola',
-                  () => hacer(() => reproductor.agregarACola([pista]))),
-              _opcion(Icons.playlist_play_rounded, 'Tocar después de esta',
-                  () => hacer(() => reproductor.tocarDespues(pista))),
-              if (vid.isNotEmpty)
-                _opcion(Icons.radio_rounded, 'Iniciar radio', () => hacer(() => reproductor.iniciarRadio(pista))),
-              if (vid.isNotEmpty)
-                _opcion(Icons.auto_awesome_rounded, 'Canciones similares', () => hacer(() => abrirElemento(context, {
-                      'tipo': 'similares', 'id': vid, 'titulo': 'Similares a «${pista['titulo']}»',
-                      'miniatura': '${pista['miniatura'] ?? ''}', 'pista': pista,
-                    }))),
-              if (vid.isNotEmpty && !kIsWeb)
-                _opcion(Icons.download_rounded, coleccion.estaDescargada(pista) ? 'Descargar otra vez (otro formato)' : 'Descargar',
-                    () => hacer(() => hojaDescargar(context, [pista]))),
-              for (final a in artistas)
-                _opcion(Icons.person_rounded, artistas.length == 1 ? 'Ir al artista' : 'Ir a ${a['nombre']}',
-                    () => hacer(() => irAArtista(context, '${a['id']}'))),
-              if ('${album['id'] ?? ''}'.isNotEmpty)
-                _opcion(Icons.album_rounded, 'Ir al álbum', () => hacer(() => irAAlbum(context, '${album['id']}'))),
-              if (vid.isNotEmpty)
-                _opcion(Icons.send_rounded, 'Enviar en un chat', () => hacer(() => enviarPistaAChat(context, pista))),
-              if (enlace.isNotEmpty)
-                _opcion(Icons.share_rounded, 'Compartir', () => hacer(() => SharePlus.instance
-                    .share(ShareParams(text: '${pista['titulo']} — ${pista['artista']}\n$enlace')))),
-              if (kIsWeb && SesionMedios.esTelefono && vid.isNotEmpty && !suenaBloqueada(pista))
-                _opcion(Icons.smartphone_rounded, 'Escuchar en segundo plano',
-                    () => hacer(() => mostrarSegundoPlano(context, pista))),
-              if (kIsWeb && !suenaBloqueada(pista))
-                _opcion(Icons.phonelink_lock_rounded, 'Buscar una versión que suene bloqueada',
-                    () => hacer(() => _abrir(context, MusicaLibrePagina(
-                        busqueda: '${pista['titulo'] ?? ''} ${pista['artista'] ?? ''}'.trim())))),
-              if (MusicaLibre.es(pista))
-                _opcion(Icons.open_in_new_rounded, 'Ver en Audius',
-                    () => hacer(() => launchUrl(Uri.parse('${pista['enlace'] ?? 'https://audius.co'}')))),
-              if (pista['descarga_id'] != null)
-                _opcion(Icons.delete_outline_rounded, kIsWeb ? 'Borrar de este navegador' : 'Borrar del teléfono',
-                    () => hacer(() => _borrarDescarga(context, pista))),
-              ...extra,
-              const SizedBox(height: 8),
-            ]),
-          ),
-        );
-      },
+    final bajada = coleccion.estaDescargada(pista);
+    await mostrarMenuHoja(
+      context,
+      portada: Portada(url: '${pista['miniatura'] ?? ''}', lado: 60, radio: 8),
+      titulo: '${pista['titulo'] ?? ''}',
+      subtitulo: '${pista['artista'] ?? ''}',
+      rapidas: [
+        AccionRapida(gusta ? Icons.favorite_rounded : Icons.favorite_border_rounded, 'Me gusta',
+            () => alternarMeGusta(pista),
+            activa: gusta, etiqueta: gusta ? 'Quitar de Tus me gusta' : 'Guardar en Tus me gusta'),
+        AccionRapida(Icons.playlist_play_rounded, 'Después', () => reproductor.tocarDespues(pista),
+            etiqueta: 'Tocar después de esta'),
+        AccionRapida(Icons.queue_music_rounded, 'A la cola', () => reproductor.agregarACola([pista]),
+            etiqueta: 'Añadir a la cola'),
+        if (vid.isNotEmpty && !kIsWeb)
+          AccionRapida(bajada ? Icons.download_done_rounded : Icons.download_rounded, 'Descargar',
+              () => hojaDescargar(context, [pista]),
+              activa: bajada, etiqueta: bajada ? 'Descargar otra vez (otro formato)' : 'Descargar'),
+        if (enlace.isNotEmpty)
+          AccionRapida(Icons.ios_share_rounded, 'Compartir', () => SharePlus.instance
+              .share(ShareParams(text: '${pista['titulo']} — ${pista['artista']}\n$enlace'))),
+      ],
+      grupos: [
+        [
+          OpcionMenu(Icons.playlist_add_rounded, 'Añadir a una lista', () => anadirALista(context, [pista])),
+          if (vid.isNotEmpty)
+            OpcionMenu(Icons.radio_rounded, 'Iniciar radio', () => reproductor.iniciarRadio(pista)),
+          if (vid.isNotEmpty)
+            OpcionMenu(Icons.auto_awesome_rounded, 'Canciones similares', () => abrirElemento(context, {
+                  'tipo': 'similares', 'id': vid, 'titulo': 'Similares a «${pista['titulo']}»',
+                  'miniatura': '${pista['miniatura'] ?? ''}', 'pista': pista,
+                })),
+        ],
+        [
+          for (final a in artistas)
+            OpcionMenu(Icons.person_rounded, artistas.length == 1 ? 'Ir al artista' : 'Ir a ${a['nombre']}',
+                () => irAArtista(context, '${a['id']}')),
+          if ('${album['id'] ?? ''}'.isNotEmpty)
+            OpcionMenu(Icons.album_rounded, 'Ir al álbum', () => irAAlbum(context, '${album['id']}')),
+          if (vid.isNotEmpty)
+            OpcionMenu(Icons.send_rounded, 'Enviar en un chat', () => enviarPistaAChat(context, pista)),
+        ],
+        [
+          if (kIsWeb && SesionMedios.esTelefono && vid.isNotEmpty && !suenaBloqueada(pista))
+            OpcionMenu(Icons.smartphone_rounded, 'Escuchar en segundo plano', () => mostrarSegundoPlano(context, pista)),
+          if (kIsWeb && !suenaBloqueada(pista))
+            OpcionMenu(Icons.phonelink_lock_rounded, 'Buscar una versión que suene bloqueada',
+                () => _abrir(context, MusicaLibrePagina(
+                    busqueda: '${pista['titulo'] ?? ''} ${pista['artista'] ?? ''}'.trim()))),
+          if (MusicaLibre.es(pista))
+            OpcionMenu(Icons.open_in_new_rounded, 'Ver en Audius',
+                () => launchUrl(Uri.parse('${pista['enlace'] ?? 'https://audius.co'}'))),
+          if (pista['descarga_id'] != null)
+            OpcionMenu(Icons.delete_outline_rounded, kIsWeb ? 'Borrar de este navegador' : 'Borrar del teléfono',
+                () => _borrarDescarga(context, pista), peligro: true),
+        ],
+      ],
+      extra: extra,
     );
   }
 
-  Widget _opcion(IconData icono, String texto, VoidCallback alPulsar, {Color? color}) => ListTile(
-        leading: Icon(icono, color: color ?? C.texto2),
-        title: Text(texto),
-        onTap: alPulsar,
-        visualDensity: VisualDensity.compact,
-      );
+  /// El menú de un álbum, una lista, un artista o un mix (mantener pulsada su tarjeta, o su «⋮»).
+  Future<void> hojaElemento(BuildContext context, Json el) async {
+    final tipo = '${el['tipo']}';
+    if (tipo == 'pista') return hojaPista(context, el);
+    if (tipo == 'genero' || tipo == 'pagina') return;
+    final id = '${el['id'] ?? ''}';
+    final deCatalogo = const {'album', 'lista', 'artista'}.contains(tipo) && id.isNotEmpty;
+    final guardado = deCatalogo && coleccion.guardado(tipo, id);
+    final enlace = !deCatalogo
+        ? ''
+        : tipo == 'lista'
+            ? 'https://music.youtube.com/playlist?list=${id.startsWith('VL') ? id.substring(2) : id}'
+            : 'https://music.youtube.com/${tipo == 'artista' ? 'channel' : 'browse'}/$id';
+
+    Future<void> con(void Function(List<Json>) hacer) async {
+      try {
+        final pistas = await pistasDe(el);
+        if (pistas.isEmpty) return avisar('No tiene canciones disponibles.');
+        hacer(pistas);
+      } catch (_) {
+        avisar('No se pudo. Revisa tu conexión.');
+      }
+    }
+
+    await mostrarMenuHoja(
+      context,
+      portada: portadaDeMenu(el),
+      titulo: '${el['titulo'] ?? ''}',
+      subtitulo: '${el['subtitulo'] ?? (tipo == 'artista' ? 'Artista' : '')}',
+      alCabecera: tipo == 'radio' ? null : () => abrirElemento(context, el),
+      rapidas: [
+        AccionRapida(Icons.play_arrow_rounded, 'Reproducir', () => reproducirElemento(context, el)),
+        if (tipo != 'radio')
+          AccionRapida(Icons.shuffle_rounded, 'Aleatorio', () => reproducirElemento(context, el, aleatorio: true)),
+        if (tipo != 'radio')
+          AccionRapida(Icons.queue_music_rounded, 'A la cola', () => con(reproductor.agregarACola),
+              etiqueta: 'Añadir todo a la cola'),
+        if (deCatalogo)
+          AccionRapida(
+              tipo == 'artista'
+                  ? (guardado ? Icons.how_to_reg_rounded : Icons.person_add_alt_rounded)
+                  : (guardado ? Icons.bookmark_rounded : Icons.bookmark_border_rounded),
+              tipo == 'artista' ? (guardado ? 'Siguiendo' : 'Seguir') : (guardado ? 'Guardado' : 'Guardar'),
+              () => alternarGuardado(el),
+              activa: guardado),
+        if (enlace.isNotEmpty)
+          AccionRapida(Icons.ios_share_rounded, 'Compartir',
+              () => SharePlus.instance.share(ShareParams(text: '${el['titulo'] ?? ''}\n$enlace'))),
+      ],
+      grupos: [
+        if (tipo != 'radio')
+          [
+            OpcionMenu(Icons.open_in_full_rounded, 'Abrir', () => abrirElemento(context, el)),
+            if (tipo != 'mi_lista' && tipo != 'artista')
+              OpcionMenu(Icons.playlist_add_rounded, 'Añadir a una lista', () => con((p) {
+                    if (context.mounted) anadirALista(context, p);
+                  })),
+            if (!kIsWeb && tipo != 'artista' && tipo != 'descargados')
+              OpcionMenu(Icons.download_rounded, 'Descargar', () => con((p) {
+                    if (context.mounted) hojaDescargar(context, p);
+                  })),
+          ],
+      ],
+    );
+  }
 
   Future<void> _borrarDescarga(BuildContext context, Json pista) async {
     const donde = kIsWeb ? 'de este navegador' : 'del teléfono';

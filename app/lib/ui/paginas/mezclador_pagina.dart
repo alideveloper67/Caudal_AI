@@ -1624,7 +1624,7 @@ class _HojaElegirState extends State<_HojaElegir> {
           child: Align(alignment: Alignment.centerLeft, child: Text('Añadir canciones', style: estiloTituloSeccion)),
         ),
         SizedBox(
-          height: 44,
+          height: 50,
           child: ListView(scrollDirection: Axis.horizontal, padding: const EdgeInsets.symmetric(horizontal: 16), children: [
             for (final (clave, texto) in const [('cola', 'Tu cola'), ('gusta', 'Tus me gusta'), ('lista', 'Una lista')])
               Pildora(

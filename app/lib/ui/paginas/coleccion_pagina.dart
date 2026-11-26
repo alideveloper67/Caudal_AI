@@ -5,6 +5,7 @@ import '../../nucleo/catalogo.dart';
 import '../../nucleo/coleccion.dart';
 import '../../nucleo/listas_compartidas.dart';
 import '../comunes.dart';
+import '../menu_hoja.dart';
 import '../hoja_portada.dart';
 import '../servicios.dart';
 import '../tema.dart';
@@ -12,6 +13,7 @@ import 'enriquecer_hoja.dart';
 import 'inicio.dart';
 import 'lista_compartir.dart';
 import 'lista_privacidad_hoja.dart';
+import 'me_gusta_externos_pagina.dart';
 
 /// Album, lista de YouTube, tu lista, Tus me gusta o lo descargado.
 class ColeccionPagina extends StatefulWidget {
@@ -209,6 +211,13 @@ class _ColeccionPaginaState extends State<ColeccionPagina> {
             degradado: true,
             alto: kToolbarHeight + 8 + lado + 8,
             acciones: [
+              if (_tipo == 'me_gusta')
+                IconButton(
+                  tooltip: 'Vincular Spotify, YouTube Music o SoundCloud',
+                  icon: const Icon(Icons.link_rounded),
+                  onPressed: () => Navigator.of(context)
+                      .push(MaterialPageRoute(builder: (_) => const MeGustaExternosPagina())),
+                ),
               if (_tipo == 'mi_lista')
                 IconButton(tooltip: 'Cambiar el nombre', icon: const Icon(Icons.edit_outlined), onPressed: _editar),
             ],
@@ -472,87 +481,64 @@ class _ColeccionPaginaState extends State<ColeccionPagina> {
     final idPropia = _tipo == 'mi_lista' ? _idLista : null;
     final tienePropia = idPropia != null && (await s.coleccion.portadaPersonalizada(idPropia)).isNotEmpty;
     if (!mounted) return;
-    await showModalBottomSheet<void>(
-      context: context,
-      useRootNavigator: true,
-      builder: (ctx) => SafeArea(child: Column(mainAxisSize: MainAxisSize.min, children: [
-        ListTile(leading: const Icon(Icons.queue_music_rounded, color: C.texto2), title: const Text('Añadir todo a la cola'),
-            onTap: () {
-              Navigator.pop(ctx);
-              s.reproductor.agregarACola(_pistas);
-            }),
-        if (_tipo != 'mi_lista')
-          ListTile(leading: const Icon(Icons.playlist_add_rounded, color: C.texto2), title: const Text('Añadir a una lista'),
-              onTap: () {
-                Navigator.pop(ctx);
-                s.anadirALista(context, _pistas);
-              }),
-        if (_tipo == 'album' && '${_datos?['lista_id'] ?? ''}'.isNotEmpty)
-          ListTile(leading: const Icon(Icons.radio_rounded, color: C.texto2), title: const Text('Radio del álbum'),
-              onTap: () {
-                Navigator.pop(ctx);
-                s.reproductor.reproducirRadioId('RDAMPL${_datos!['lista_id']}', 'Radio de ${_datos!['titulo']}');
-              }),
-        if (_tipo == 'mi_lista') ...[
-          ListTile(leading: const Icon(Icons.auto_awesome_rounded, color: C.texto2), title: const Text('Enriquecer'),
-              subtitle: const Text('Sugiere canciones nuevas parecidas a las de esta lista'),
-              onTap: () {
-                Navigator.pop(ctx);
-                _enriquecer();
-              }),
-          ListTile(leading: const Icon(Icons.push_pin_outlined, color: C.texto2), title: const Text('Fijar arriba / desfijar'),
-              onTap: () async {
-                Navigator.pop(ctx);
-                final id = _idLista;
-                if (id == null) return;
-                final l = await s.coleccion.lista(id);
-                await s.coleccion.editarLista(id, fijada: (l?['fijada'] ?? 0) != 1);
-              }),
-          ListTile(leading: const Icon(Icons.ios_share_rounded, color: C.texto2), title: const Text('Compartir lista'),
-              onTap: () {
-                Navigator.pop(ctx);
-                final id = _idLista;
-                if (id != null) hojaCompartirLista(context, id: id);
-              }),
-          ListTile(leading: const Icon(Icons.public_rounded, color: C.texto2), title: const Text('Quién puede verla'),
-              subtitle: const Text('Pública o privada, y mostrarla en tu perfil'),
-              onTap: () {
-                Navigator.pop(ctx);
-                final id = _idLista;
-                if (id != null) mostrarHojaPrivacidadLista(context, id);
-              }),
-          ListTile(leading: const Icon(Icons.edit_outlined, color: C.texto2), title: const Text('Cambiar el nombre'),
-              onTap: () {
-                Navigator.pop(ctx);
-                _editar();
-              }),
-          ListTile(leading: const Icon(Icons.photo_camera_outlined, color: C.texto2), title: const Text('Cambiar portada'),
-              onTap: () {
-                Navigator.pop(ctx);
-                _cambiarPortada();
-              }),
-          if (tienePropia)
-            ListTile(leading: const Icon(Icons.hide_image_outlined, color: C.texto2),
-                title: const Text('Quitar portada personalizada'),
-                onTap: () {
-                  Navigator.pop(ctx);
-                  _quitarPortada();
-                }),
-          ListTile(leading: const Icon(Icons.delete_outline_rounded, color: C.error),
-              title: const Text('Borrar la lista', style: TextStyle(color: C.error)),
-              onTap: () async {
-                Navigator.pop(ctx);
-                final ok = await confirmar(context, 'Borrar la lista',
-                    '¿Borrar «${_datos?['titulo']}»? Las canciones no se borran del teléfono.');
-                final id = _idLista;
-                if (ok && id != null) {
-                  await s.coleccion.borrarLista(id);
-                  _salir();
-                }
-              }),
+    await mostrarMenuHoja(
+      context,
+      portada: portadaDeMenu({...widget.elemento, ...?_datos, 'tipo': _tipo}),
+      titulo: '${_datos?['titulo'] ?? widget.elemento['titulo'] ?? ''}',
+      subtitulo: _pistas.length == 1 ? '1 canción' : '${_pistas.length} canciones',
+      rapidas: [
+        if (_pistas.isNotEmpty) ...[
+          AccionRapida(Icons.play_arrow_rounded, 'Reproducir', () => s.reproducirLista(context, _pistas, contexto: _contexto)),
+          AccionRapida(Icons.shuffle_rounded, 'Aleatorio',
+              () => s.reproducirLista(context, _pistas, contexto: _contexto, aleatorio: true)),
+          AccionRapida(Icons.queue_music_rounded, 'A la cola', () => s.reproductor.agregarACola(_pistas),
+              etiqueta: 'Añadir todo a la cola'),
         ],
-        const SizedBox(height: 8),
-      ])),
+        if (idPropia != null)
+          AccionRapida(Icons.ios_share_rounded, 'Compartir', () => hojaCompartirLista(context, id: idPropia),
+              etiqueta: 'Compartir lista'),
+      ],
+      grupos: [
+        [
+          if (_tipo != 'mi_lista')
+            OpcionMenu(Icons.playlist_add_rounded, 'Añadir a una lista', () => s.anadirALista(context, _pistas)),
+          if (_tipo == 'album' && '${_datos?['lista_id'] ?? ''}'.isNotEmpty)
+            OpcionMenu(Icons.radio_rounded, 'Radio del álbum', () => s.reproductor
+                .reproducirRadioId('RDAMPL${_datos!['lista_id']}', 'Radio de ${_datos!['titulo']}')),
+          if (_tipo == 'mi_lista') ...[
+            OpcionMenu(Icons.auto_awesome_rounded, 'Enriquecer', _enriquecer,
+                detalle: 'Sugiere canciones nuevas parecidas a las de esta lista'),
+            OpcionMenu(Icons.push_pin_outlined, 'Fijar arriba / desfijar', () async {
+              final id = _idLista;
+              if (id == null) return;
+              final l = await s.coleccion.lista(id);
+              await s.coleccion.editarLista(id, fijada: (l?['fijada'] ?? 0) != 1);
+            }),
+          ],
+        ],
+        if (_tipo == 'mi_lista') ...[
+          [
+            OpcionMenu(Icons.public_rounded, 'Quién puede verla', () {
+              final id = _idLista;
+              if (id != null) mostrarHojaPrivacidadLista(context, id);
+            }, detalle: 'Pública o privada, y mostrarla en tu perfil'),
+            OpcionMenu(Icons.edit_outlined, 'Cambiar el nombre', _editar),
+            OpcionMenu(Icons.photo_camera_outlined, 'Cambiar portada', _cambiarPortada),
+            if (tienePropia) OpcionMenu(Icons.hide_image_outlined, 'Quitar portada personalizada', _quitarPortada),
+          ],
+          [
+            OpcionMenu(Icons.delete_outline_rounded, 'Borrar la lista', () async {
+              final ok = await confirmar(context, 'Borrar la lista',
+                  '¿Borrar «${_datos?['titulo']}»? Las canciones no se borran del teléfono.');
+              final id = _idLista;
+              if (ok && id != null) {
+                await s.coleccion.borrarLista(id);
+                _salir();
+              }
+            }, peligro: true),
+          ],
+        ],
+      ],
     );
   }
 }

@@ -1,7 +1,7 @@
 # -*- mode: python ; coding: utf-8 -*-
 from PyInstaller.utils.hooks import collect_all
 
-datas = [('bin', 'bin'), ('descargador/legal', 'descargador/legal'), ('descargador/mascotas', 'descargador/mascotas'), ('descargador/fondos', 'descargador/fondos'), ('descargador/donar', 'descargador/donar'), ('descargador/escenarios_img', 'descargador/escenarios_img'), ('descargador/fuentes_letra', 'descargador/fuentes_letra')]
+datas = [('bin', 'bin'), ('descargador/legal', 'descargador/legal'), ('descargador/mascotas', 'descargador/mascotas'), ('descargador/fondos', 'descargador/fondos'), ('descargador/donar', 'descargador/donar'), ('descargador/escenarios_img', 'descargador/escenarios_img'), ('descargador/fuentes_letra', 'descargador/fuentes_letra'), ('descargador/epica_img', 'descargador/epica_img')]
 binaries = []
 hiddenimports = ['descargador.juntos', 'descargador.ui.letra_viva', 'descargador.registro_fallos', 'descargador.ui.paginas.juntos', 'descargador.mixes', 'descargador.ui.paginas.resumen', 'descargador.descarga_inteligente', 'websocket', 'descargador.ui.actualizador', 'descargador.ui.dialogo_listas', 'descargador.conversion', 'descargador.listas',
                  'descargador.ui.paginas.inicio', 'descargador.ui.paginas.buscar', 'descargador.ui.paginas.explorar',
@@ -11,6 +11,11 @@ hiddenimports = ['descargador.juntos', 'descargador.ui.letra_viva', 'descargador
                  # letra a tiempo sola: reconocedor de voz local (sincronia_letra.py); el modelo se baja aparte
                  'descargador.sincronia_letra', 'descargador.ui.sincronia_auto', 'huggingface_hub',
                  # grupos para hablar (texto, canciones y notas de voz)
+                 'descargador.ui.epica', 'descargador.ui.epica.base', 'descargador.ui.epica.golpe', 'descargador.ui.epica.efectos',
+                 # motor: ayudante de voz, letras de más sitios, guardado en segundo plano
+                 'descargador.ayudante', 'descargador.sincronia_tareas', 'descargador.letras_fuentes', 'descargador.letras_cache',
+                 'descargador.disco', 'descargador.fluidez', 'descargador.cookies_navegador', 'descargador.karaoke_audio', 'descargador.ui.karaoke_escenario', 'descargador.soundcloud',
+                 'descargador.ui.panel_mas',
                  'descargador.grupos', 'descargador.notas_voz', 'descargador.ui.paginas.grupos']
 for paquete in ('yt_dlp', 'ytmusicapi', 'faster_whisper', 'ctranslate2', 'tokenizers'):
     tmp_ret = collect_all(paquete)
@@ -32,7 +37,9 @@ a = Analysis(
               'PySide6.QtCharts', 'PySide6.QtDataVisualization', 'PySide6.QtPdf',
               'PySide6.QtMultimedia', 'PySide6.QtMultimediaWidgets', 'tkinter',
               # el reconocedor de la letra no usa PyAV ni el VAD de onnxruntime (sincronia_letra._importar)
-              'av', 'onnxruntime', 'torch'],
+              'av', 'onnxruntime', 'torch',
+              # de este equipo, no de Caudal: los arrastraban otros paquetes y engordaban el instalador
+              'matplotlib', 'pandas', 'pyarrow', 'scipy', 'IPython', 'sympy', 'numba', 'pytest', 'sklearn', 'tensorflow'],
     noarchive=False,
     optimize=0,
 )

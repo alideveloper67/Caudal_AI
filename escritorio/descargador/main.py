@@ -12,7 +12,8 @@ def _preparar_rutas():
         sys.path.insert(0, raiz)
 
 
-NOMBRE_INSTANCIA = "caudal-escritorio-unica"
+# CAUDAL_INSTANCIA: para probar una copia sin molestar a la que está abierta
+NOMBRE_INSTANCIA = "caudal-escritorio-unica" + os.environ.get("CAUDAL_INSTANCIA", "")
 
 
 def _avisar_a_la_abierta(argumentos):
@@ -30,6 +31,10 @@ def _avisar_a_la_abierta(argumentos):
 
 def main():
     _preparar_rutas()
+    if "--caudal-ayudante" in sys.argv[1:]:
+        from descargador import ayudante
+        ayudante.atender()              # no vuelve: es el proceso de lo pesado, sin ventana
+        return
 
     from PySide6.QtCore import Qt
     from PySide6.QtGui import QIcon
@@ -44,6 +49,13 @@ def main():
     if _avisar_a_la_abierta(argumentos):
         return
 
+    try:
+        from descargador import fluidez
+        from descargador.config import carpeta_datos as _datos
+        fluidez.preparar(_datos())
+    except Exception:  # noqa: BLE001 - sin esto solo iría menos fina
+        pass
+
     # lo que falle queda escrito en fallos.log (en el .exe no hay consola)
     try:
         from descargador import registro_fallos
@@ -55,6 +67,7 @@ def main():
     except Exception:  # noqa: BLE001
         pass
 
+    from descargador import disco
     from descargador.config import APP_NOMBRE, Ajustes
     from descargador import catalogo
     from descargador.coleccion import Coleccion
@@ -116,6 +129,7 @@ def main():
         """Cerrar sesion: se vuelve a abrir Caudal desde la pantalla de entrada."""
         from PySide6.QtCore import QProcess
         servidor.close()
+        disco.vaciar()                  # la copia que se abre tiene que leer lo último guardado
         if getattr(sys, "frozen", False):
             QProcess.startDetached(sys.executable, [])
         else:
@@ -161,8 +175,21 @@ def main():
         from descargador.ui.escena.letra import fijar_estilo_letra
         fijar_estilo_letra(ajustes["estilo_letra"])
         tipografia_letra.fijar(ajustes["fuente_letra"])
+        from descargador.ui import epica
+        if ajustes["letra_epica"] and (not ajustes.get("letra_epica_elegida")
+                                       or ajustes["letra_epica"] not in epica.OFRECIDAS):
+            ajustes["letra_epica"] = ""         # la clásica vuelve a ser la de siempre si nadie eligió otra
+            ajustes.guardar()
+        epica.fijar(ajustes["letra_epica"])
+        epica.fijar_intensidad(ajustes["letra_intensidad"])
+        from descargador.ui import estilo_letra as _estilo_letra
+        _estilo_letra.fijar_movimiento(ajustes["letra_movimiento"])
+        _estilo_letra.fijar_original(ajustes["letra_original"], ajustes["letra_acabado_original"])
         historial = Historial()
         coleccion = Coleccion()
+        coleccion.con.estrenar()
+        from descargador import cookies_navegador
+        cookies_navegador.empezar(ajustes["navegador_cookies"])     # que esté sabido antes de la primera canción
         # cuenta nueva (o que aún no eligió): «¿Qué artistas te gustan?» antes de la pantalla principal
         from descargador.ui import pantalla_gustos
         pantalla_gustos.al_entrar(cuenta, coleccion, ajustes["region"])
@@ -227,6 +254,12 @@ def main():
                 vigia.iniciar(app, _carpeta_datos())
         except Exception:  # noqa: BLE001
             pass
+        try:
+            from PySide6.QtCore import QTimer
+            fluidez.precargar()
+            QTimer.singleShot(20000, fluidez.asentar)
+        except Exception:  # noqa: BLE001
+            pass
         revisar_terminos(cuenta, ventana)
         if estado["acceso"] is not None:
             estado["acceso"].close()
@@ -253,6 +286,12 @@ def main():
 
     codigo = app.exec()
     servidor.close()
+    disco.vaciar()
+    try:
+        from descargador import ayudante
+        ayudante.cerrar()
+    except Exception:  # noqa: BLE001
+        pass
     # salida inmediata: una descarga o una busqueda a medio camino no deben
     # dejar el proceso vivo e invisible (todo lo importante ya esta guardado)
     # en el .exe sin consola sys.stdout/sys.stderr son None

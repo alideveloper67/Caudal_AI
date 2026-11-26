@@ -1025,6 +1025,28 @@ class Reproductor extends ChangeNotifier {
     if (cola.moverEnSecuencia(secuencia, pos, de, a)) notifyListeners();
   }
 
+  /// Pone delante en lo que sigue las que cumplen [cual] (null = el orden de siempre).
+  /// Devuelve cuántas son; nada se quita.
+  int ordenarSiguientes(bool Function(Json)? cual) {
+    if (cual != null) {
+      final n = cola.adelantar(secuencia, pos, cual);
+      if (n > 0) notifyListeners();
+      return n;
+    }
+    if (pos < 0 || pos + 1 >= secuencia.length || aleatorio) return 0;
+    final pendientes = secuencia.sublist(pos + 1);
+    final quedan = pendientes.toSet();
+    final ordenados = original.where(quedan.contains).toList();
+    final vistas = ordenados.toSet();
+    secuencia = [
+      ...secuencia.sublist(0, pos + 1),
+      for (final p in pendientes) if (!vistas.contains(p)) p,
+      ...ordenados,
+    ];
+    notifyListeners();
+    return ordenados.length;
+  }
+
   /// Vuelve a poner en [absoluto] una canción quitada con [quitarDeSecuencia].
   void insertarEnSecuencia(int absoluto, Json p) {
     secuencia.insert(absoluto.clamp(pos + 1, secuencia.length), p);

@@ -80,18 +80,79 @@ class _ConexionSegura:
     """La conexión SQLite compartida, con un cerrojo: la interfaz y algún hilo pueden consultar
     a la vez sin que SQLite se queje («bad parameter or other API misuse»)."""
 
-    def __init__(self, con):
+    def __init__(self, con, archivo=None):
         self._con = con
+        self._archivo = archivo
         self._cerrojo = threading.RLock()
+        self._dueno = threading.get_ident()        # el hilo de la interfaz
+        self._propias = threading.local()
+        self._repaso = [time.monotonic(), 0]       # último repaso del diario y guardados desde entonces
+        self._guardado = 0.0                       # cuándo fue el último guardado
+
+    def _de_este_hilo(self):
+        """Los hilos de fondo leen por una conexión suya: sus consultas largas (historial, recomendaciones)
+        no hacen esperar a la interfaz por el cerrojo."""
+        con = getattr(self._propias, "con", None)
+        if con is None:
+            con = sqlite3.connect(str(self._archivo), check_same_thread=False, timeout=10)
+            con.row_factory = self._con.row_factory
+            self._propias.con = con
+        return con
 
     def execute(self, sql, args=()):
+        if (self._archivo is not None and threading.get_ident() != self._dueno
+                and sql.lstrip()[:6].upper() == "SELECT" and not self._con.in_transaction):
+            try:
+                cur = self._de_este_hilo().execute(sql, args)
+                return _Resultado(cur.fetchall(), cur.lastrowid, cur.rowcount)
+            except sqlite3.Error:
+                pass                                # por la de siempre
         with self._cerrojo:
             cur = self._con.execute(sql, args)
             return _Resultado(cur.fetchall(), cur.lastrowid, cur.rowcount)
 
+    def repasar(self, cada_s=90.0, cada_n=40):
+        """Pasa el diario (WAL) a la base, en un hilo: hacerlo en el guardado que tocaba paraba la interfaz
+        (215 ms medidos al contar una escucha)."""
+        if self._archivo is None:
+            return
+        self._repaso[1] += 1
+        ahora = time.monotonic()
+        if self._repaso[1] < cada_n and ahora - self._repaso[0] < cada_s:
+            return
+        self._repaso[:] = [ahora, 0]
+        threading.Thread(target=self._repasar_ahora, name="repaso-base", daemon=True).start()
+
+    def estrenar(self):
+        """Al abrir la app: el primer guardado del diario espera al disco; que no sea uno de la interfaz."""
+        if self._archivo is not None:
+            threading.Thread(target=self._repasar_ahora, args=(0.0,), name="repaso-base", daemon=True).start()
+
+    def _repasar_ahora(self, quieto=1.2, tope=30.0):
+        # en un momento sin guardados (saltar de canción hace varios seguidos)
+        fin = time.monotonic() + tope
+        while quieto and time.monotonic() - self._guardado < quieto and time.monotonic() < fin:
+            time.sleep(0.2)
+        try:
+            con = sqlite3.connect(str(self._archivo), timeout=5)
+            try:
+                con.execute("PRAGMA synchronous=NORMAL")
+                con.execute("PRAGMA wal_autocheckpoint=0")
+                con.execute("PRAGMA wal_checkpoint(PASSIVE)").fetchall()
+                # el primer guardado tras el repaso estrena el diario y SQLite espera al disco (25-900 ms
+                # medidos): se hace aquí uno de nada para que no le toque a la interfaz
+                con.execute("INSERT OR REPLACE INTO estado (clave, valor) VALUES ('_repaso', '1')")
+                con.commit()
+            finally:
+                con.close()
+        except sqlite3.Error:
+            pass
+
     def commit(self):
         with self._cerrojo:
             self._con.commit()
+        self._guardado = time.monotonic()
+        self.repasar()
 
     def close(self):
         with self._cerrojo:
@@ -112,7 +173,9 @@ class _ConexionSegura:
 class Coleccion:
     def __init__(self, archivo=None):
         self.archivo = Path(archivo) if archivo else carpeta_perfil() / "historial.db"
-        self.con = _ConexionSegura(sqlite3.connect(str(self.archivo), check_same_thread=False))
+        en_disco = str(self.archivo) != ":memory:"
+        self.con = _ConexionSegura(sqlite3.connect(str(self.archivo), check_same_thread=False),
+                                   self.archivo if en_disco else None)
         self.con.row_factory = sqlite3.Row
         self._indice_local = None
         self._existe_cache = {}
@@ -122,6 +185,7 @@ class Coleccion:
             self.con.execute("PRAGMA journal_mode=WAL")   # leer mientras se sincroniza
             # con WAL basta con «normal»: cada guardado deja de esperar al disco (antes ~0,4 s por cambio)
             self.con.execute("PRAGMA synchronous=NORMAL")
+            self.con.execute("PRAGMA wal_autocheckpoint=0")     # el diario lo pasa `repasar`, en otro hilo
         except sqlite3.DatabaseError:
             pass
         self._crear()

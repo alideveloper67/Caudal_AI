@@ -599,11 +599,8 @@ def test_pulsar_inicio_estando_en_inicio_solo_pone_al_dia_lo_reciente(app):
     v.navegar({"pagina": "inicio"})
     assert v.historia[v.indice][1] is pag          # la misma página, no una nueva
     assert pag.caja_tiempo is caja_tiempo          # la máquina del tiempo no se rehízo
-    from PySide6.QtCore import QEvent
-    from descargador.ui.componentes import Carrusel, Tarjeta
-    app.sendPostedEvents(None, QEvent.DeferredDelete)
-    carruseles = pag.caja_recientes.findChildren(Carrusel)
-    assert len(carruseles) == 1
-    titulos = [t.el.get("titulo") for t in carruseles[0].findChildren(Tarjeta)]
-    assert titulos and titulos[0] == "Recién escuchada"
+    # lo recién escuchado llega (en segundo plano) a la rejilla de arriba, que es la misma
+    assert _esperar(app, lambda: "Recién escuchada" in [e.get("titulo") for e in pag.rejilla.elementos[:4]])
+    from descargador.ui.paginas.rejilla_portadas import RejillaPortadas
+    assert pag.findChildren(RejillaPortadas) == [pag.rejilla]
     v.hide()

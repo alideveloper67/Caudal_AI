@@ -22,7 +22,7 @@ from datetime import date, datetime, timedelta
 
 from PySide6.QtCore import QAbstractNativeEventFilter, QObject, QTimer, Signal
 
-from . import catalogo
+from . import catalogo, disco
 from .config import carpeta_perfil
 from .hilos import en_segundo_plano
 from .social import Social
@@ -239,11 +239,8 @@ class ConfigGamer:
 
     def guardar(self):
         try:
-            tmp = f"{self.archivo}.tmp"
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(self.datos, f, indent=2, ensure_ascii=False)
-            os.replace(tmp, self.archivo)
-        except OSError:
+            disco.escribir(self.archivo, json.dumps(self.datos, indent=2, ensure_ascii=False))
+        except (OSError, TypeError, ValueError):
             pass
 
     def __getitem__(self, k):
@@ -353,11 +350,8 @@ class Progreso:
 
     def guardar(self):
         try:
-            tmp = f"{self.archivo}.tmp"
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump(self.d, f, ensure_ascii=False)
-            os.replace(tmp, self.archivo)
-        except OSError:
+            disco.escribir(self.archivo, json.dumps(self.d, ensure_ascii=False))
+        except (OSError, TypeError, ValueError):
             pass
 
     def _girar_dia(self):
@@ -996,9 +990,18 @@ class GestorGamer(QObject):
             self._t_sondeo.stop()
 
     def _sondear(self):
+        if self.sondeo is ventana_en_primer_plano:
+            # mirar qué programa está delante abre su proceso: en otro hilo
+            en_segundo_plano(self.sondeo, ok=self._sondeado, error=lambda _e: None, dueno=self, urgente=True)
+            return
         try:
             info = self.sondeo()
         except Exception:  # noqa: BLE001 - un sondeo que falla no debe molestar
+            return
+        self._sondeado(info)
+
+    def _sondeado(self, info):
+        if not self.activo or not self.cfg["ahorro"]:
             return
         hay = es_juego_pantalla_completa(info, os.getpid(), self.cfg["ignorar"])
         if hay:
@@ -1254,7 +1257,11 @@ class GestorGamer(QObject):
         nivel = nivel_de_xp(self.progreso.xp)
         self._nivel_mostrado = nivel
         if ganado or escuchado:
-            self.progreso.guardar()
+            # escuchando se suma cada 5 s: al disco basta cada 20 (y al momento si se ganó algo)
+            ahora = time.monotonic()
+            if ganado or ahora - getattr(self, "_xp_guardado", -99.0) >= 20.0:
+                self._xp_guardado = ahora
+                self.progreso.guardar()
         cobro = len(self.progreso.d["cobradas"]) != self._n_cobradas
         self._n_cobradas = len(self.progreso.d["cobradas"])
         if nivel > antes:

@@ -52,8 +52,19 @@ class TrabajoImportacion extends ChangeNotifier {
         'no_encontradas': noEncontradas,
         'aviso': aviso,
         'enlace': _enlace,
+        'cuenta': _cuenta,
       };
   String _enlace = '';
+
+  /// La cuenta vinculada de la que salen ('' si no es una cuenta): lo que se va trayendo se
+  /// apunta para no volver a buscarlo la próxima vez.
+  String _cuenta = '';
+
+  /// Se está haciendo sola, en silencio (sincronización de una cuenta vinculada).
+  bool enSilencio = false;
+
+  /// Se cumple cuando acaba (o se detiene) lo que está en marcha.
+  Future<void> alTerminar = Future.value();
 
   /// Lo que quedó a medias la última vez (o null).
   static Future<Map<String, dynamic>?> pendiente(Coleccion c) async {
@@ -65,7 +76,8 @@ class TrabajoImportacion extends ChangeNotifier {
   }
 
   /// Empieza a pasar [l] a una lista nueva o a tus Me gusta.
-  Future<void> empezar(Coleccion c, ListaExterna l, {required bool meGusta, String enlace = ''}) async {
+  Future<void> empezar(Coleccion c, ListaExterna l, {required bool meGusta, String enlace = '', String cuenta = '',
+      bool silencio = false}) async {
     if (enMarcha) throw const ErrorImportar('Ya se están pasando canciones: espera a que termine o páusalo.');
     _reiniciar();
     titulo = l.titulo;
@@ -73,6 +85,8 @@ class TrabajoImportacion extends ChangeNotifier {
     aMeGusta = meGusta;
     aviso = l.aviso;
     _enlace = enlace;
+    _cuenta = cuenta;
+    enSilencio = silencio;
     total = l.canciones.length;
     if (!meGusta) {
       var nombre = l.titulo.trim().isEmpty ? 'Lista traída' : l.titulo.trim();
@@ -87,7 +101,7 @@ class TrabajoImportacion extends ChangeNotifier {
     }
     await c.guardarEstado(claveCanciones, [for (final x in l.canciones) x.aJson()]);
     await c.guardarEstado(clavePendiente, _avance());
-    unawaited(_correr(c, l.canciones));
+    alTerminar = _correr(c, l.canciones);
   }
 
   /// Sigue la que quedó a medias.
@@ -109,12 +123,13 @@ class TrabajoImportacion extends ChangeNotifier {
     noEncontradas = [for (final x in (p['no_encontradas'] as List? ?? const [])) '$x'];
     aviso = '${p['aviso'] ?? ''}';
     _enlace = '${p['enlace'] ?? ''}';
+    _cuenta = '${p['cuenta'] ?? ''}';
     if (!aMeGusta && (listaId == null || await c.lista(listaId!) == null)) {
       await descartar(c);
       throw const ErrorImportar('La lista donde se estaban guardando ya no existe.');
     }
     final canciones = [for (final x in lista.whereType<Map>()) CancionExterna.deJson(x)];
-    unawaited(_correr(c, canciones));
+    alTerminar = _correr(c, canciones);
   }
 
   /// Se detiene después del lote que va: lo encontrado queda guardado.
@@ -147,6 +162,8 @@ class TrabajoImportacion extends ChangeNotifier {
     noEncontradas = [];
     aviso = '';
     error = null;
+    _cuenta = '';
+    enSilencio = false;
   }
 
   /// Lo que terminó, ya mostrado: la pantalla vuelve a su estado normal.
@@ -160,6 +177,7 @@ class TrabajoImportacion extends ChangeNotifier {
     enMarcha = true;
     notifyListeners();
     var ultimoAviso = DateTime(2000);
+    var guardadas = hechas;
     try {
       final r = await Importar.emparejar(canciones,
           desde: hechas,
@@ -186,6 +204,8 @@ class TrabajoImportacion extends ChangeNotifier {
             }
             encontradas += pistas.length;
             noEncontradas = [...noEncontradas, ...sin];
+            if (_cuenta.isNotEmpty) await _apuntarTraidas(c, canciones.sublist(guardadas, fin));
+            guardadas = fin;
             hechas = fin;
             await c.guardarEstado(clavePendiente, _avance());
             notifyListeners();
@@ -205,6 +225,22 @@ class TrabajoImportacion extends ChangeNotifier {
       _parar = false;
       notifyListeners();
     }
+  }
+
+  static String claveTraidas(String cuenta) => 'traidas_$cuenta';
+
+  /// Lo ya traído de una cuenta vinculada: clave de la canción → si se encontró.
+  static Future<Map<String, bool>> traidas(Coleccion c, String cuenta) async {
+    final t = await c.estado(claveTraidas(cuenta));
+    return t is Map ? {for (final e in t.entries) '${e.key}': e.value == true || e.value == 1} : {};
+  }
+
+  Future<void> _apuntarTraidas(Coleccion c, List<CancionExterna> canciones) async {
+    final t = await traidas(c, _cuenta);
+    for (final x in canciones) {
+      t[x.claveExterna] = x.pista != null;
+    }
+    await c.guardarEstado(claveTraidas(_cuenta), {for (final e in t.entries) e.key: e.value ? 1 : 0});
   }
 
   /// El resumen para el aviso final.

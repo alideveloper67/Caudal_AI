@@ -9,6 +9,7 @@ import sys
 import weakref
 from pathlib import Path
 
+from PySide6.QtCore import QByteArray
 from PySide6.QtGui import QFont, QFontDatabase, QFontMetricsF
 
 POR_DEFECTO = "predeterminada"
@@ -63,6 +64,7 @@ SIN_MAYUSCULAS = ("vibes", "kaushan", "courgette")
 AIRE = {"pixel": (0.10, 0.30), "elite": (0.22, 0.04), "vibes": (0.06, 0.06), "titan": (0.08, 0.06),
         "lilita": (0.06, 0.04)}
 
+_leidas = {}                   # archivo -> bytes (leídos en un hilo: el disco no hace esperar a la ventana)
 _familias = {}                 # clave -> familia ya cargada (o None si no se pudo)
 _actual = POR_DEFECTO
 _vivos = weakref.WeakSet()     # widgets que se repintan al cambiar la tipografía
@@ -93,10 +95,16 @@ def familia(clave):
     fam = None
     try:
         for archivo in FUENTES[clave][1]:
-            ruta = carpeta_fuentes() / archivo
-            if not ruta.exists():
-                continue
-            ident = QFontDatabase.addApplicationFont(str(ruta))
+            datos = _leidas.pop(archivo, None)
+            if datos is not None:
+                if not datos:
+                    continue
+                ident = QFontDatabase.addApplicationFontFromData(QByteArray(datos))
+            else:
+                ruta = carpeta_fuentes() / archivo
+                if not ruta.exists():
+                    continue
+                ident = QFontDatabase.addApplicationFont(str(ruta))
             if ident < 0:
                 continue
             nombres = QFontDatabase.applicationFontFamilies(ident)
@@ -106,6 +114,33 @@ def familia(clave):
         fam = None
     _familias[clave] = fam
     return fam
+
+
+def leer_todas():
+    """Lee los archivos (en un hilo): abrir «Diseño de letra» con el disco ocupado paraba la ventana 4 segundos."""
+    for clave, datos in list(FUENTES.items()):
+        for archivo in (datos[1] or ()):
+            if clave in _familias or archivo in _leidas:
+                continue
+            try:
+                _leidas[archivo] = (carpeta_fuentes() / archivo).read_bytes()
+            except OSError:
+                _leidas[archivo] = b""          # no está: se verá con la predeterminada
+
+
+def lista(clave):
+    """¿Se puede usar ya sin esperar al disco?"""
+    clave = normalizar(clave)
+    return clave == POR_DEFECTO or clave in _familias or all(a in _leidas for a in (FUENTES[clave][1] or ()))
+
+
+def calentar_una():
+    """Deja puesta una más de las leídas (una por vez, en el hilo de la interfaz). False = no queda ninguna."""
+    for clave in FUENTES:
+        if clave != POR_DEFECTO and clave not in _familias and lista(clave):
+            familia(clave)
+            return True
+    return False
 
 
 def adaptar(f, clave=None):

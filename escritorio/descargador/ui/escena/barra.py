@@ -94,6 +94,7 @@ class BarraMini(QWidget):
 
         self._t0 = 0.0
         self._timer = QTimer(self)
+        self._timer.setTimerType(Qt.PreciseTimer)
         self._timer.setInterval(30)
         self._timer.timeout.connect(self._tic)
 

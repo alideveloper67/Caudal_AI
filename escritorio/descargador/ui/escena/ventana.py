@@ -16,13 +16,15 @@ Dos maneras de abrirla:
 """
 
 import os
+import threading
 import time
+import weakref
 
 from PySide6.QtCore import QEvent, QObject, QPropertyAnimation, QRect, QSize, QTimer, Qt, Signal
-from PySide6.QtGui import QColor, QGuiApplication, QImage
+from PySide6.QtGui import QColor, QGuiApplication, QImage, QPainter, QPixmap
 from PySide6.QtWidgets import QLabel, QStackedLayout, QWidget
 
-from .. import imagenes
+from .. import epica, imagenes
 from ..video import PantallaNativa
 from .barra import ALTO as ALTO_BARRA, ANCHO as ANCHO_BARRA, BarraMini
 from .bordes import BordeBrillo, geometrias_borde
@@ -49,6 +51,8 @@ PASO_DESFASE_MS = 250       # Ctrl+← / Ctrl+→ en la escena: letra antes / de
 MINIMOS_PIEZA = {"reloj": (220, 90), "tarjeta": (180, 240), "letra": (260, 120), "lista": (220, 200),
                  "barra": (560, 92)}
 
+DURACION_FUNDIDO_S = 0.38   # de un fondo a otro
+MAX_ESCENARIOS = 3          # cuántos escenarios quedan creados (cada uno, su imagen: unos 6 MB)
 DURACION_AVISO_MS = 4000    # cuánto se queda el aviso de pieza oculta
 DURACION_FADE_MS = 200      # aparición y desvanecido del aviso
 
@@ -102,10 +106,60 @@ def disposicion(pantalla, solo_ver=False):
     return g
 
 
+class _Fundido(QWidget):
+    """Lo que se veía antes, desvaneciéndose sobre el fondo nuevo: cambiar de escenario no da un salto."""
+
+    def __init__(self, padre):
+        super().__init__(padre)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents, True)
+        self.setAttribute(Qt.WA_NoSystemBackground, True)
+        self._foto = None
+        self._t0 = 0.0
+        self._reloj = QTimer(self)
+        self._reloj.setTimerType(Qt.PreciseTimer)
+        self._reloj.setInterval(16)
+        self._reloj.timeout.connect(self._tic)
+        self.hide()
+
+    def empezar(self, foto):
+        self._foto = foto
+        self._t0 = 0.0                     # empieza a contar cuando el fondo nuevo ya se pintó
+        self.setGeometry(self.parentWidget().rect())
+        self.show()
+        self.raise_()
+        self._reloj.start()
+
+    def _avance(self):
+        if not self._t0:
+            return 0.0
+        return min(1.0, (time.monotonic() - self._t0) / DURACION_FUNDIDO_S)
+
+    def _tic(self):
+        if not self._t0:
+            self._t0 = time.monotonic()
+        if self._avance() >= 1.0:
+            self._reloj.stop()
+            self._foto = None
+            self.hide()
+            return
+        self.update()
+
+    def paintEvent(self, _ev):
+        u = self._avance()
+        p = QPainter(self)
+        p.setOpacity((1.0 - u) * (1.0 - u) * (1.0 + 2.0 * u))
+        if self._foto is not None and not self._foto.isNull():
+            p.drawPixmap(self.rect(), self._foto)
+        else:
+            p.fillRect(self.rect(), QColor(0, 0, 0))
+        p.end()
+
+
 class _FondoVentana(QWidget):
     """La ventana de fondo: el videoclip (mpv) o la carátula viva, a pantalla completa."""
 
     doble_clic = None      # f(): la escena lo pone para volver a mostrar la barra oculta
+    _preparado = Signal(str)      # la ilustración de ese escenario ya está lista (llega desde su hilo)
 
     def mouseDoubleClickEvent(self, ev):
         if self.doble_clic is not None and ev.button() == Qt.LeftButton:
@@ -122,35 +176,99 @@ class _FondoVentana(QWidget):
         self.pantalla = PantallaNativa()
         self.escenario = None             # el escenario animado elegido (se crea al elegirlo)
         self.clave_escenario = None
+        self._fundido = _Fundido(self)
+        self._hechos = {}                 # los últimos escenarios ya creados: volver a uno es al instante
+        self._esperado = None             # escenario que se está preparando en un hilo (lo de antes se sigue viendo)
+        self._preparado.connect(self._al_prepararse)
         self.pila.addWidget(self.ambiente)
         self.pila.addWidget(self.pantalla)
 
+    def _fundir(self):
+        """Antes de cambiar de fondo: una foto de lo que se ve (el videoclip no se puede: funde desde negro)."""
+        if not self.isVisible():
+            return
+        actual = self.pila.currentWidget()
+        foto = None
+        if actual is not None and actual is not self.pantalla and actual.width() > 1:
+            foto = QPixmap(actual.size())
+            actual.render(foto)
+        self._fundido.empezar(foto)
+
     def ver_video(self, si):
-        self.pila.setCurrentIndex(1 if si else 0)
+        self._esperado = None
+        destino = self.pantalla if si else self.ambiente
+        if self.pila.currentWidget() is not destino:
+            if not si:
+                self._fundir()
+            self.pila.setCurrentWidget(destino)
 
     def ver_escenario(self, clave, forzar=False):
         """Pone el escenario `clave` (synthwave, cyberpunk…). False si no se pudo cargar.
         Con `forzar`, lo vuelve a crear aunque sea la misma clave (p. ej. «Mi imagen» con imagen nueva)."""
-        if forzar or self.clave_escenario != clave or self.escenario is None:
-            nuevo = escenarios.crear(clave)
+        self._esperado = None
+        if forzar:
+            self._soltar_escenario(clave)
+        elif self.isVisible() and clave not in self._hechos:
+            hacer = escenarios.preparacion(clave)
+            if hacer is not None:
+                self._esperado = clave
+                threading.Thread(target=self._preparar_aparte, args=(clave, hacer), name="escenario",
+                                 daemon=True).start()
+                return True
+        return self._poner_escenario(clave)
+
+    def _preparar_aparte(self, clave, hacer):
+        try:
+            hacer()
+        except Exception:  # noqa: BLE001 - si no se pudo, se lee al crearlo
+            pass
+        try:
+            self._preparado.emit(clave)
+        except RuntimeError:                  # la escena se cerró mientras tanto
+            pass
+
+    def _al_prepararse(self, clave):
+        if clave == self._esperado:           # sigue siendo el que se quiere ver
+            self._esperado = None
+            self._poner_escenario(clave)
+
+    def _poner_escenario(self, clave):
+        if self.clave_escenario != clave or self.escenario is None:
+            nuevo = self._hechos.pop(clave, None)
             if nuevo is None:
-                return False
-            if self.escenario is not None:
-                self.pila.removeWidget(self.escenario)
-                self.escenario.deleteLater()
+                nuevo = escenarios.crear(clave)
+                if nuevo is None:
+                    return False
+                self.pila.addWidget(nuevo)
+            self._hechos[clave] = nuevo          # el último, al final
+            for vieja in list(self._hechos)[:-MAX_ESCENARIOS]:
+                self._soltar_escenario(vieja)
             self.escenario, self.clave_escenario = nuevo, clave
-            self.pila.addWidget(nuevo)
-        self.pila.setCurrentWidget(self.escenario)
+        if self.pila.currentWidget() is not self.escenario:
+            self._fundir()
+            self.pila.setCurrentWidget(self.escenario)
         return True
+
+    def _soltar_escenario(self, clave):
+        w = self._hechos.pop(clave, None)
+        if w is None:
+            return
+        if w is self.escenario:
+            self.escenario = self.clave_escenario = None
+        self.pila.removeWidget(w)
+        w.deleteLater()
 
 
 class EscenaEscritorio(QObject):
     """Abre, maneja y cierra la escena. Uno por aplicación (`escena_de(ctx)`)."""
 
     cerrada = Signal()
+    _video_soltado = Signal(object)      # el mpv del fondo ya se apagó (llega desde su hilo)
 
     def __init__(self, ctx, padre=None):
         super().__init__(padre)
+        self._sueltos = []               # fondos ocultos que esperan a que mpv los deje
+        self._video_soltado.connect(self._destruir_fondo)
         self.ctx = ctx
         self.r = ctx.reproductor
         self.abierta = False
@@ -184,7 +302,8 @@ class EscenaEscritorio(QObject):
         self._modelo_audio = None
         self._t_ondas = None
         self._reloj_letra = QTimer(self)
-        self._reloj_letra.setInterval(33)
+        self._reloj_letra.setTimerType(Qt.PreciseTimer)
+        self._reloj_letra.setInterval(16)
         self._reloj_letra.timeout.connect(self._tic_letra)
         self._pos = 0.0
         self._pos_t = time.monotonic()
@@ -211,6 +330,10 @@ class EscenaEscritorio(QObject):
         self._conectar(True)
         self._colores_caratula()
         self._pista(self.r.actual)
+        # la duración ya se avisó antes de abrir: sin esto la barra ponía «0:00» toda la canción. Con el video
+        # aún sin cargar no vale la de la ficha (decide el desfase de la letra): se espera a la suya
+        if self.r.modo != "video" or getattr(self.r, "_posicion", 0):
+            self._duracion(getattr(self.r, "_duracion", 0))
         self._estado(self.r.estado)
         # primero se ve la escena; el video (decodificar y presentar 720p) entra un instante después,
         # para que abrir no sea un único tirón con las once ventanas y el video a la vez
@@ -218,6 +341,8 @@ class EscenaEscritorio(QObject):
         QTimer.singleShot(0, self._recientes)
         # quien acaba de donar no tiene que esperar al refresco periódico (20 min): se pregunta ya
         self._preguntar_donador()
+        self._medir_audio()
+        escenarios.calentar()
         self._reloj_letra.start()
         if self.solo_ver:
             from . import escritorio_win
@@ -231,7 +356,7 @@ class EscenaEscritorio(QObject):
         if not self.solo_ver:
             self.ctx.avisar("Arrastra cualquier pieza para moverla y agrándala desde su esquina (o Ctrl+rueda). "
                             "El botón de fondo de la barra elige videoclip, carátula o uno de los escenarios. "
-                            "«Aa» (o la tecla L) cambia el diseño de la letra.")
+                            "«Aa» (o la tecla L) cambia el diseño de la letra y N pasa a la siguiente letra épica.")
         # solo en las ventanas de la escena (y el campo del buscador, que tiene el foco al escribir)
         for w in self._ventanas():
             w.installEventFilter(self)
@@ -272,6 +397,9 @@ class EscenaEscritorio(QObject):
             return True
         if tecla == Qt.Key_L and not en_buscador and not ev.modifiers():
             QTimer.singleShot(0, self.abrir_diseno_letra)
+            return True
+        if tecla == Qt.Key_N and not en_buscador and not ev.modifiers():
+            self.otra_epica()
             return True
         if tecla == Qt.Key_Space and not en_buscador:
             self.r.alternar()
@@ -326,7 +454,7 @@ class EscenaEscritorio(QObject):
 
         pieza("reloj", RelojGigante(), g["reloj"])
         pieza("tarjeta", TarjetaCancion(), g["tarjeta"])
-        pieza("letra", LetraCinetica(), g["letra"])
+        pieza("letra", LetraCinetica(con_epica=True), g["letra"])
         pieza("lista", ListaSeguir(), g["lista"])
         if not self.solo_ver:
             barra = pieza("barra", BarraMini(), g["barra"])
@@ -385,6 +513,19 @@ class EscenaEscritorio(QObject):
         from ..selector_letra import abrir_selector
         self._dialogo_letra = abrir_selector(self.ctx, self._fondo, sin_marco=True,
                                              area=self.pantalla_destino(util=True), lado="izquierda")
+
+    def otra_epica(self):
+        """Tecla N: la siguiente presentación de la letra (la clásica y luego cada épica)."""
+        from .. import presentacion_letra
+        pres = presentacion_letra.siguiente()
+        presentacion_letra.aplicar(pres, self.ctx.ajustes)
+        self._medir_audio()
+        self._mostrar_aviso(f"Letra: {pres['nombre']}  ·  N para la siguiente, Aa para elegir")
+
+    def _medir_audio(self):
+        """Los escenarios y las letras épicas se mueven con el nivel real de la música."""
+        if self.abierta and (epica.actual() or self._fondo.clave_escenario or self._fondo._esperado):
+            self.r.activar_espectro(True)
 
     def _cerrar_diseno_letra(self):
         d, self._dialogo_letra = self._dialogo_letra, None
@@ -571,6 +712,7 @@ class EscenaEscritorio(QObject):
         self._fondo_pendiente = None
         self._cerrar_diseno_letra()
         self._reloj_letra.stop()
+        self._soltar_audio()
         self._quitar_aviso_ya()
         self._aviso = None                 # el QLabel muere con la ventana de fondo
         self._anim_aviso = None
@@ -582,9 +724,15 @@ class EscenaEscritorio(QObject):
         if self._modo_previo is not None and self._modo_previo != self.r.modo:
             self.r.cambiar_modo(self._modo_previo)
         self._modo_previo = None
-        if self._motor is not None:
-            self.r.soltar_video(NOMBRE_VIDEO)
+        # el fondo desaparece ya; su ventana se destruye cuando mpv la haya dejado (apagarlo tarda, y la
+        # interfaz se quedaba esperando ~0,3 s al cerrar la escena)
+        fondo, hay_video = self._fondo, self._motor is not None
+        if hay_video:
             self._motor = None
+            if fondo is not None:
+                fondo.hide()
+            self._sueltos.append(fondo)
+            self.r.soltar_video(NOMBRE_VIDEO, al_terminar=lambda f=fondo: self._video_soltado.emit(f))
         if self.solo_ver and self._fondo is not None:
             from . import escritorio_win
             escritorio_win.soltar_de_fondo(int(self._fondo.winId()))
@@ -595,11 +743,32 @@ class EscenaEscritorio(QObject):
             w.deleteLater()
         self._piezas.clear()
         self._bordes.clear()
-        if self._fondo is not None:
-            self._fondo.close()
-            self._fondo.deleteLater()
+        if fondo is not None:
+            if not hay_video:
+                fondo.close()
+                fondo.deleteLater()
             self._fondo = None
         self.cerrada.emit()
+
+    def _soltar_audio(self):
+        """El medidor de nivel deja de gastar (si el visualizador está a la vista, es suyo)."""
+        v = getattr(self.ctx, "ventana", None)
+        try:
+            vis = (getattr(v, "singletons", None) or {}).get("visualizador")
+            if vis is None or not vis.isVisible():
+                self.r.activar_espectro(False)
+        except Exception:  # noqa: BLE001
+            pass
+
+    def _destruir_fondo(self, fondo):
+        """mpv ya dejó la ventana de video: ahora sí se puede destruir."""
+        if fondo in self._sueltos:
+            self._sueltos.remove(fondo)
+        try:
+            fondo.close()
+            fondo.deleteLater()
+        except (RuntimeError, AttributeError):
+            pass
 
     # ------------------------------------------------------------ señales del reproductor
 
@@ -733,7 +902,7 @@ class EscenaEscritorio(QObject):
             if self._fondo.ver_escenario(modo, forzar=forzar):
                 if modo == "propia":
                     self._forzar_propia = False
-                self.r.activar_espectro(True)
+                self._medir_audio()
                 return
             modo = "ambiente"                   # no se pudo cargar: la carátula viva
         if modo != "video" or not self.r.disponible:
@@ -762,6 +931,7 @@ class EscenaEscritorio(QObject):
         """El botón de fondo de la barra: un menú con videoclip, carátula y los escenarios."""
         from PySide6.QtGui import QCursor
         from PySide6.QtWidgets import QMenu
+        escenarios.calentar()
         actual = self.ctx.ajustes.get("escena_fondo", "video")
         menu = QMenu()
         menu.setStyleSheet(
@@ -920,7 +1090,11 @@ class EscenaEscritorio(QObject):
         lineas, sinc = preparar_lineas(datos or {})
         letra = self._piezas["letra"]
         if not lineas:
-            self._sin_letra(clave, "No hay letra para esta canción.")
+            self._datos_letra = datos or {}
+            if sincronia_de(self.ctx).pedir_tiempos(self.r.actual, datos):
+                self._sin_letra(clave, "Nadie tiene esta letra: Caudal la está escuchando para escribirla…")
+            else:
+                self._sin_letra(clave, "No hay letra para esta canción.")
             return
         letra.poner_mensaje("")
         letra.poner_lineas(lineas, sinc)
@@ -929,6 +1103,8 @@ class EscenaEscritorio(QObject):
         if (sinc or self._en_duda) and not self._desfase_letra():
             # Caudal escucha un tramo y la pone a tiempo (o cambia por la que cuadra): ui/sincronia_auto.py
             sincronia_de(self.ctx).pedir(self.r.actual, self._en_duda or datos)
+        elif not sinc and not self._en_duda:
+            sincronia_de(self.ctx).pedir_tiempos(self.r.actual, datos)      # solo texto: se le ponen tiempos
         self._lineas_actuales = [str((l or {}).get("texto") or "") if isinstance(l, dict) else str(l)
                                  for l in lineas]
         self._traducciones = None
@@ -1071,9 +1247,12 @@ class EscenaEscritorio(QObject):
         return self._ms_mostrado
 
     def _tic_ondas(self):
-        """Con un escenario a la vista, sus ondas se mueven con el audio que suena."""
+        """Las ondas del escenario y las letras épicas se mueven con el audio que suena."""
         sw = getattr(self._fondo, "escenario", None)
-        if sw is None or not sw.isVisible():
+        if sw is not None and not sw.isVisible():
+            sw = None
+        letra = self._piezas["letra"]
+        if sw is None and not letra.epica_puesta():
             return
         from ... import espectro
         if self._modelo_audio is None:
@@ -1088,8 +1267,27 @@ class EscenaEscritorio(QObject):
                 nivel = self.r.nivel_audio()
             except Exception:  # noqa: BLE001
                 nivel = None
-        self._modelo_audio.avanzar(dt, nivel, sonando, self._pos)
-        sw.fijar_espectro(list(self._modelo_audio.bandas) if sonando else [])
+        pos = self._pos + (min(MAX_EXTRAPOLAR_S, max(0.0, ahora - self._pos_t)) if sonando else 0.0)
+        bpm, fase = self._ritmo_de()
+        self._modelo_audio.avanzar(dt, nivel, sonando, pos, bpm, fase)
+        letra.fijar_audio(self._modelo_audio.energia, self._modelo_audio.golpe)
+        if sw is not None:
+            sw.fijar_espectro(list(self._modelo_audio.bandas) if sonando else [])
+
+    def _ritmo_de(self):
+        """(pulsos por minuto, dónde cae el primero) de la canción si ya se analizó; si no, (None, 0)."""
+        clave = clave_de(self.r.actual)
+        guardado = getattr(self, "_ritmo_guardado", None)
+        if guardado is None or guardado[0] != clave:
+            bpm, fase = None, 0.0
+            try:
+                an = self.r._analisis_de(self.r.actual) or {}
+                bpm = float(an.get("bpm") or 0) or None
+                fase = float(an.get("fase") or an.get("inicio") or 0.0)
+            except Exception:  # noqa: BLE001
+                pass
+            self._ritmo_guardado = guardado = (clave, (bpm, fase))
+        return guardado[1]
 
     def _correccion_letra(self):
         """Lo que se corre la letra: el ajuste de la persona manda; si no lo hay, lo que midió la sincronía
@@ -1109,8 +1307,20 @@ class EscenaEscritorio(QObject):
         datos = getattr(self, "_datos_letra", None) or {}
         accion = (res or {}).get("accion")
         duda = getattr(self, "_en_duda", None)
+        if accion == "letra":
+            self._llego_letra(self._lineas_clave, res["datos"])
+            return
+        if accion == "sin_letra":
+            if not datos.get("lineas") and not (datos.get("texto") or "").strip():
+                self._sin_letra(self._lineas_clave, "No hay letra para esta canción.")
+            return
         if duda is not None and accion in ("bien", "corregir"):
             self._llego_letra(self._lineas_clave, duda)
+            return
+        if duda is not None and accion in ("nada", "otra"):
+            # los tiempos eran de otra grabación: se le ponen los de esta escuchándola entera
+            from ..sincronia_auto import sin_tiempos
+            sincronia_de(self.ctx).pedir_tiempos(self.r.actual, sin_tiempos(duda))
             return
         if accion == "cambiar":
             nueva = sincronia_de(self.ctx).letra_nueva(self.r.actual, (duda or datos).get("lineas"))
@@ -1313,4 +1523,20 @@ def escena_de(ctx):
     if e is None:
         e = EscenaEscritorio(ctx, ctx)
         ctx.escena_escritorio = e
+        _vivas.append(weakref.ref(e))
     return e
+
+
+_vivas = []
+
+
+def hay_abierta():
+    """¿Se está mirando la escena? Lo que se prepara por adelantado espera a que se cierre."""
+    for r in _vivas:
+        e = r()
+        try:
+            if e is not None and e.abierta:
+                return True
+        except RuntimeError:
+            pass
+    return False

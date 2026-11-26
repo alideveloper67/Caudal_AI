@@ -748,6 +748,22 @@ class Coleccion extends ChangeNotifier {
     return pistas(filas.map((f) => '${f['clave']}').toList());
   }
 
+  /// Lo que más escuchas ahora: cada escucha de los últimos 90 días pesa menos cuanto más
+  /// vieja es (la mitad a la semana).
+  Future<List<Json>> masEscuchadasAhora([int n = 30]) async {
+    final ahora = _ahora;
+    final filas = await db.rawQuery(
+        'SELECT clave, SUM(1.0 / (1.0 + (? - fecha) / 604800.0)) peso FROM reproducciones '
+        'WHERE fecha > ? GROUP BY clave ORDER BY peso DESC LIMIT ?', [ahora, ahora - 90 * 86400, n]);
+    return pistas(filas.map((f) => '${f['clave']}').toList());
+  }
+
+  /// Las claves de lo que ya escuchaste o te gusta.
+  Future<Set<String>> clavesConocidas() async => {
+        for (final f in await db.rawQuery('SELECT DISTINCT clave FROM reproducciones')) '${f['clave']}',
+        for (final f in await db.query('me_gusta', columns: ['clave'])) '${f['clave']}',
+      };
+
   Future<List<Json>> contextosRecientes([int n = 12]) async {
     final filas = await db.query('contextos_recientes', orderBy: 'fecha DESC', limit: n);
     return [
@@ -773,7 +789,8 @@ class Coleccion extends ChangeNotifier {
     }
     final orden = cuenta.keys.toList()..sort((a, b) => cuenta[b]!.compareTo(cuenta[a]!));
     return [
-      for (final id in orden.take(n)) {'id': id, 'nombre': nombres[id], 'miniatura': portadas[id]}
+      for (final id in orden.take(n))
+        {'id': id, 'nombre': nombres[id], 'miniatura': portadas[id], 'veces': cuenta[id]}
     ];
   }
 

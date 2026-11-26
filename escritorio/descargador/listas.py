@@ -52,11 +52,12 @@ class SinCredenciales(Exception):
     """El servicio pide credenciales oficiales que aun no estan configuradas."""
 
 
-def paginar(pedir_pagina, inicio=None, al_avanzar=None):
+def paginar(pedir_pagina, inicio=None, al_avanzar=None, parar=None):
     """Junta todas las paginas: `pedir_pagina(cursor) -> (elementos, siguiente)`.
 
     Sin tope de cantidad: sigue mientras el servicio de un `siguiente`. Se corta
-    solo si un cursor se repite (el servicio se quedo dando vueltas)."""
+    solo si un cursor se repite (el servicio se quedo dando vueltas) o si
+    `parar(elementos)` dice que lo que sigue ya se conoce."""
     todos = []
     cursor = inicio
     vistos = set()
@@ -65,6 +66,8 @@ def paginar(pedir_pagina, inicio=None, al_avanzar=None):
         todos.extend(elementos)
         if al_avanzar:
             al_avanzar(len(todos))
+        if parar is not None and elementos and parar(elementos):
+            break
         if siguiente is None or siguiente == "" or siguiente in vistos:
             break
         vistos.add(siguiente)
@@ -218,7 +221,7 @@ def _pistas_de_pagina(pagina):
     return salida
 
 
-def spotify_paginado(primera_url, token, dormir=time.sleep, al_avanzar=None):
+def spotify_paginado(primera_url, token, dormir=time.sleep, al_avanzar=None, parar=None):
     """Todas las canciones desde `primera_url`, siguiendo `next` sin tope."""
     cab = {"Authorization": f"Bearer {token}"}
 
@@ -233,7 +236,7 @@ def spotify_paginado(primera_url, token, dormir=time.sleep, al_avanzar=None):
         pagina = r.json()
         return [_cancion_spotify(p) for p in _pistas_de_pagina(pagina)], pagina.get("next")
 
-    return paginar(pedir, al_avanzar=al_avanzar)
+    return paginar(pedir, al_avanzar=al_avanzar, parar=parar)
 
 
 def _spotify_api(tipo, ident, token, dormir=time.sleep):
@@ -282,11 +285,14 @@ def _spotify_api(tipo, ident, token, dormir=time.sleep):
 
 
 def _cancion_spotify(pista):
-    return {
+    c = {
         "titulo": _limpiar(pista.get("name")),
         "artista": ", ".join(a.get("name", "") for a in pista.get("artists", [])),
         "duracion": int((pista.get("duration_ms") or 0) / 1000),
     }
+    if pista.get("id"):
+        c["externa"] = f"sp:{pista['id']}"     # para no volver a buscarla al sincronizar
+    return c
 
 
 def _funcion(ruta, params, dormir=time.sleep, timeout=40):
@@ -502,11 +508,19 @@ def cancion_soundcloud(t):
     m = re.match(r"^(.+?)\s+[-–—]\s+(.+)$", titulo)
     if m and not meta.get("artist"):
         artista, titulo = m.group(1).strip(), m.group(2).strip()
-    return {"titulo": titulo, "artista": artista,
-            "duracion": int((t.get("duration") or t.get("full_duration") or 0) / 1000)}
+    c = {"titulo": titulo, "artista": artista,
+         "duracion": int((t.get("duration") or t.get("full_duration") or 0) / 1000)}
+    ident = str(t.get("urn") or t.get("id") or "").rsplit(":", 1)[-1]
+    if ident:
+        c["externa"] = f"sc:{ident}"
+    enlace = str(t.get("permalink_url") or "").split("?")[0]
+    if enlace:                          # su original, por si no está en YouTube Music
+        c["sc_url"] = enlace
+        c["miniatura"] = str(t.get("artwork_url") or "").replace("-large.", "-t500x500.")
+    return c
 
 
-def soundcloud_paginado(primera_url, token, dormir=time.sleep, al_avanzar=None):
+def soundcloud_paginado(primera_url, token, dormir=time.sleep, al_avanzar=None, parar=None):
     """Sigue `next_href` hasta el final (linked_partitioning), sin tope."""
     cab = {"Authorization": f"OAuth {token}", "Accept": "application/json; charset=utf-8"}
 
@@ -530,7 +544,7 @@ def soundcloud_paginado(primera_url, token, dormir=time.sleep, al_avanzar=None):
             siguiente = None            # solo se siguen enlaces de la propia API
         return canciones, siguiente
 
-    return paginar(pedir, al_avanzar=al_avanzar)
+    return paginar(pedir, al_avanzar=al_avanzar, parar=parar)
 
 
 def _soundcloud_api(url, tipo, token, dormir=time.sleep):
@@ -584,9 +598,7 @@ def _soundcloud_por_funcion(url, dormir=time.sleep):
     return {**cabecera, "canciones": canciones}
 
 
-def leer_soundcloud_pagina(pagina):
-    """Lo que trae la pagina publica de una lista: las primeras canciones completas
-    y cuantas tiene en total. Devuelve (datos, total)."""
+def _lista_hidratada(pagina):
     m = re.search(r"window\.__sc_hydration\s*=\s*(\[.*?\]);\s*</script>", pagina, re.S)
     if not m:
         raise ErrorLista("SoundCloud cambió su página y no se pudo leer.")
@@ -598,20 +610,51 @@ def leer_soundcloud_pagina(pagina):
                   if isinstance(x, dict) and x.get("hydratable") == "playlist"), None)
     if not isinstance(lista, dict):
         raise SinCredenciales()
+    return lista
+
+
+def _datos_lista(lista, canciones):
+    return {"titulo": _limpiar(lista.get("title")) or "Lista de SoundCloud",
+            "autor": _limpiar((lista.get("user") or {}).get("username")),
+            "portada": lista.get("artwork_url") or "", "canciones": canciones}
+
+
+def leer_soundcloud_pagina(pagina):
+    """Lo que trae la pagina publica de una lista: las primeras canciones completas
+    y cuantas tiene en total. Devuelve (datos, total)."""
+    lista = _lista_hidratada(pagina)
     canciones = [cancion_soundcloud(t) for t in lista.get("tracks") or []
                  if isinstance(t, dict) and t.get("title")]
     total = int(lista.get("track_count") or len(canciones))
-    return {"titulo": _limpiar(lista.get("title")) or "Lista de SoundCloud",
-            "autor": _limpiar((lista.get("user") or {}).get("username")),
-            "portada": lista.get("artwork_url") or "", "canciones": canciones}, total
+    return _datos_lista(lista, canciones), total
+
+
+def soundcloud_pagina_entera(pagina, completar=None):
+    """Todas las canciones de la lista, en su orden: de las que la página solo da el número, se pregunta
+    cuál es a oEmbed (la API pública de SoundCloud). Devuelve (datos, total)."""
+    from . import soundcloud
+    lista = _lista_hidratada(pagina)
+    pistas = [t for t in lista.get("tracks") or [] if isinstance(t, dict)]
+    faltan = [t["id"] for t in pistas if not t.get("title") and t.get("id")]
+    fichas = dict(zip(faltan, (completar or soundcloud.completar)(faltan)))
+    canciones = []
+    for t in pistas:
+        if t.get("title"):
+            canciones.append(cancion_soundcloud(t))
+            continue
+        f = fichas.get(t.get("id"))
+        if f:
+            canciones.append(soundcloud.cancion_de_pista(soundcloud.pista(
+                f["titulo"], f["autor"], f["enlace"], 0, f["miniatura"], t["id"])))
+    total = max(int(lista.get("track_count") or 0), len(pistas))
+    return _datos_lista(lista, canciones), total
 
 
 AVISO_SOUNDCLOUD_SIN_CONEXION = (
-    "SoundCloud solo muestra completas {n} de sus {total} canciones sin su conexión oficial, "
-    "que el dueño de Caudal aún no activó.")
+    "Se leyeron {n} de sus {total} canciones: las demás son privadas o ya no están en SoundCloud.")
 MENSAJE_SOUNDCLOUD_SIN_CONEXION = (
-    "Para leer los me gusta de SoundCloud hace falta su conexión oficial, y el dueño de Caudal "
-    "aún no la activó. Mientras tanto, pasa esas canciones a una lista pública de SoundCloud.")
+    "No se pudieron leer los me gusta de ese perfil de SoundCloud. Comprueba que sean públicos, o pasa esas "
+    "canciones a una lista pública y trae la lista.")
 
 
 def _soundcloud(url, ajustes, dormir=time.sleep):
@@ -643,8 +686,23 @@ def _soundcloud(url, ajustes, dormir=time.sleep):
     except SinCredenciales:
         pass
 
+    from . import soundcloud
     if tipo in ("me_gusta", "perfil"):
-        raise ErrorLista(MENSAJE_SOUNDCLOUD_SIN_CONEXION)
+        try:
+            canciones = [soundcloud.cancion_de_pista(p) for p in soundcloud.me_gusta_de(_ruta)]
+        except soundcloud.ErrorSoundcloud as e:
+            raise ErrorLista(MENSAJE_SOUNDCLOUD_SIN_CONEXION) from e
+        if not canciones:
+            raise ErrorLista(MENSAJE_SOUNDCLOUD_SIN_CONEXION)
+        return hecho({"titulo": f"Me gusta de {_ruta}", "autor": _ruta, "portada": "", "canciones": canciones,
+                      "me_gusta": True})
+    if tipo == "cancion":
+        ficha = soundcloud.ficha_oembed(url)
+        if not ficha:
+            raise ErrorLista("SoundCloud no mostró eso. Comprueba que sea público.")
+        p = soundcloud.pista(ficha["titulo"], ficha["autor"], url, 0, ficha["miniatura"])
+        return hecho({"titulo": p["titulo"], "autor": ficha["autor"], "portada": ficha["miniatura"],
+                      "canciones": [soundcloud.cancion_de_pista(p)]})
     try:
         r = requests.get(url, headers=CABECERAS, timeout=25)
     except requests.RequestException as e:
@@ -653,9 +711,9 @@ def _soundcloud(url, ajustes, dormir=time.sleep):
         raise ErrorLista("SoundCloud no mostró eso. Comprueba que sea público.")
     r.encoding = "utf-8"
     try:
-        datos, total = leer_soundcloud_pagina(r.text)
+        datos, total = soundcloud_pagina_entera(r.text)
     except SinCredenciales as e:
-        raise ErrorLista(MENSAJE_SOUNDCLOUD_SIN_CONEXION) from e
+        raise ErrorLista("SoundCloud no mostró esa lista. Comprueba que sea pública.") from e
     n = len(datos["canciones"])
     if not n:
         raise ErrorLista("Esa lista de SoundCloud está vacía o es privada.")

@@ -361,10 +361,7 @@ class MotorBucle:
         self._m = Motor(ajustes, None, f"ambiente-{nombre}")
 
     def reproducir(self, ruta, volumen, bucle=True):
-        try:
-            self._m.mpv["loop-file"] = "inf" if bucle else "no"
-        except Exception:  # noqa: BLE001
-            pass
+        self._m._poner("loop-file", "inf" if bucle else "no")
         self._m.fijar_volumen(volumen)
         self._m.cargar({"archivo": str(ruta), "titulo": ""})
 

@@ -82,6 +82,66 @@ def suscribir(widget):
     _vivos.add(widget)
 
 
+# ------------------------------------------------------------------ movimiento de la letra clásica (escena)
+# Variantes suaves de cómo entran y acompañan las palabras: que se vea bonito sin exagerar.
+MOVIMIENTOS = {
+    "clasica": ("Clásica", "Cada palabra llega deslizándose, como siempre"),
+    "suave": ("Suave", "Aparecen subiendo un poco, sin rebote: tranquila"),
+    "ola": ("Ola", "Llegan desde abajo y se mecen despacio con la canción"),
+    "brillo": ("Brillo", "La palabra que suena brilla con el color de la carátula"),
+    "eco": ("Eco", "Al entrar dejan un eco que se desvanece"),
+    "latido": ("Latido", "La letra late suavemente con el ritmo"),
+}
+MOVIMIENTO_POR_DEFECTO = "clasica"
+_movimiento = MOVIMIENTO_POR_DEFECTO
+# «Original»: la letra de la escena con su propio tipo de letra (no el elegido) y uno de estos acabados
+ACABADOS_ORIGINAL = ("clasica", "neon", "contorno", "nitida")
+_original = False              # la app lo pone al arrancar (ajuste «letra_original», sí por defecto)
+_acabado_original = "clasica"
+
+
+def original():
+    return _original
+
+
+def acabado_original():
+    return _acabado_original
+
+
+def efectivo():
+    """El estilo con que se pinta la letra de la escena."""
+    return _acabado_original if _original else _actual
+
+
+def fijar_original(si, acabado=None):
+    global _original, _acabado_original
+    _original = bool(si)
+    if acabado is not None:
+        _acabado_original = acabado if acabado in ACABADOS_ORIGINAL else "clasica"
+    for w in list(_vivos):
+        for nombre in ("al_cambiar_tipografia", "al_cambiar_estilo_letra"):
+            f = getattr(w, nombre, None)
+            if f is not None:
+                try:
+                    f()
+                except RuntimeError:
+                    pass
+
+
+def movimiento():
+    return _movimiento
+
+
+def fijar_movimiento(clave):
+    global _movimiento
+    _movimiento = clave if clave in MOVIMIENTOS else MOVIMIENTO_POR_DEFECTO
+    for w in list(_vivos):
+        try:
+            w.al_cambiar_estilo_letra()
+        except RuntimeError:
+            pass
+
+
 # ------------------------------------------------------------------ colores
 
 def luminancia(c):

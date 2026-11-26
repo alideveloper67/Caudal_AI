@@ -163,9 +163,19 @@ class BotonIcono(QPushButton):
         self.update()
         super().leaveEvent(e)
 
+    def _pintar_encima(self, p):
+        """Al pasar (o pulsar), un círculo suave: se ve qué se va a tocar y hasta dónde llega."""
+        if not self.isEnabled() or not (self._encima or self.isDown()):
+            return
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(255, 255, 255, 38 if self.isDown() else 20))
+        lado = min(self.width(), self.height()) - 1
+        p.drawEllipse(QPointF(self.width() / 2, self.height() / 2), lado / 2, lado / 2)
+
     def paintEvent(self, _e):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing, True)
+        self._pintar_encima(p)
         if not self.isEnabled():
             color = C["texto3"]
         elif self._activo:
@@ -1146,6 +1156,51 @@ class _AreaHorizontal(QScrollArea):
             e.ignore()
 
 
+class FilaDesplazable(_AreaHorizontal):
+    """Botones o fichas en una sola fila: si no caben, se desplazan de lado (no se aprietan ni
+    ensanchan la ventana). Se arrastra con el ratón o se mueve con Mayús + rueda."""
+
+    def __init__(self, espacio=8, padre=None):
+        super().__init__(padre)
+        self.setObjectName("lienzo")
+        self.setWidgetResizable(True)
+        self.setFrameShape(QFrame.NoFrame)
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self._alto = 0
+        interior = QWidget()
+        self.h = QHBoxLayout(interior)
+        self.h.setContentsMargins(0, 0, 0, 0)
+        self.h.setSpacing(espacio)
+        self.h.addStretch(1)
+        self.setWidget(interior)
+
+    def agregar(self, w):
+        self.h.insertWidget(self.h.count() - 1, w)
+        self._medir()
+        return w
+
+    def _medir(self):
+        # el alto de los botones sale de la hoja de estilos: se vuelve a medir al mostrarse
+        altos = [0]
+        for i in range(self.h.count()):
+            w = self.h.itemAt(i).widget()
+            if w is not None:
+                w.ensurePolished()
+                altos.append(w.sizeHint().height())
+        if max(altos) + 2 != self._alto:
+            self._alto = max(altos) + 2
+            self.setFixedHeight(self._alto)
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        self._medir()
+
+    def minimumSizeHint(self):
+        return QSize(0, self._alto)
+
+
 class Carrusel(QWidget):
     """Una fila de tarjetas con titulo, 'Mostrar todo' y flechas."""
 
@@ -1176,10 +1231,10 @@ class Carrusel(QWidget):
             bt_mas.setCursor(Qt.PointingHandCursor)
             bt_mas.clicked.connect(mas)
             cab.addWidget(bt_mas)
-        self.bt_izq = BotonIcono("atras", 16, "", 30)
-        self.bt_der = BotonIcono("adelante", 16, "", 30)
+        self.bt_izq = BotonIcono("atras", 18, "Ver los de antes", 38)
+        self.bt_der = BotonIcono("adelante", 18, "Ver más", 38)
         for b in (self.bt_izq, self.bt_der):
-            b.setStyleSheet(f"QPushButton{{background:{C['superficie2']};border:none;border-radius:15px;}}"
+            b.setStyleSheet(f"QPushButton{{background:{C['superficie2']};border:none;border-radius:19px;}}"
                             f"QPushButton:hover{{background:{C['superficie3']};}}")
             cab.addWidget(b)
         v.addLayout(cab)
@@ -1214,7 +1269,7 @@ class Carrusel(QWidget):
         self.bt_der.clicked.connect(lambda: self._desplazar(1))
         self.area.horizontalScrollBar().rangeChanged.connect(self._flechas)
         self.area.horizontalScrollBar().valueChanged.connect(self._flechas)
-        QTimer.singleShot(0, self._flechas)
+        QTimer.singleShot(0, self, self._flechas)      # atado a la fila: si se destruye antes, no llega
 
     def _desplazar(self, sentido):
         barra = self.area.horizontalScrollBar()
@@ -1246,6 +1301,7 @@ class FilaCompacta(QWidget):
         self.setMouseTracking(True)
         self.setCursor(Qt.PointingHandCursor)
         self._encima = False
+        self._en_puntos = False
         self._pm = None
         url = pista.get("miniatura") or ""
         yo = self
@@ -1257,25 +1313,37 @@ class FilaCompacta(QWidget):
             except RuntimeError:
                 pass
         if url:
-            self._pm = imagenes.pedir(url, 48, 48, "cuadrada", 4, listo)
+            self._pm = imagenes.pedir(url, 48, 48, "cuadrada", 6, listo)
         # método ligado: PySide suelta la conexión sola al destruir la fila (una lambda quedaba
         # colgada del reproductor y fallaba con «already deleted» en cada canción)
         ctx.reproductor.pista_cambio.connect(self._al_cambiar_pista)
+        self.setAccessibleName(f"{pista.get('titulo') or ''}, {pista.get('artista') or ''}")
 
     def _al_cambiar_pista(self, *_a):
         self.update()
+
+    def _r_puntos(self):
+        return QRect(self.width() - 40, (self.height() - 32) // 2, 32, 32)
 
     def enterEvent(self, e):
         self._encima = True
         self.update()
 
     def leaveEvent(self, e):
-        self._encima = False
+        self._encima = self._en_puntos = False
         self.update()
+
+    def mouseMoveEvent(self, e):
+        dentro = self._r_puntos().contains(e.position().toPoint())
+        if dentro != self._en_puntos:
+            self._en_puntos = dentro
+            self.update()
 
     def mousePressEvent(self, e):
         if e.button() == Qt.RightButton:
             self.ctx.menu_pista(self.pista, e.globalPosition().toPoint())
+        elif e.button() == Qt.LeftButton and self._r_puntos().contains(e.position().toPoint()):
+            self.ctx.menu_pista(self.pista, self.mapToGlobal(self._r_puntos().bottomLeft()))
         elif e.button() == Qt.LeftButton:
             self._pulso = True     # se reproduce al soltar, para poder arrastrar desde aquí
 
@@ -1300,13 +1368,23 @@ class FilaCompacta(QWidget):
             ruta.addRoundedRect(QRectF(r), 4, 4)
             p.fillPath(ruta, QColor(C["superficie3"]))
         if self._encima:
-            p.fillRect(r, QColor(0, 0, 0, 110))
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(0, 0, 0, 120))
+            p.drawRoundedRect(QRectF(r), 6, 6)
             p.drawPixmap(r.center().x() - 9, r.center().y() - 9,
                          iconos.pixmap("reproducir", 18, "#FFFFFF"))
+        rp = self._r_puntos()
+        p.drawPixmap(rp.x() + 6, rp.y() + 6, iconos.pixmap(
+            "puntos", 20, C["texto"] if self._en_puntos else (C["texto2"] if self._encima else C["texto3"])))
         actual = self.ctx.reproductor.actual
         es_actual = bool(actual and actual.get("video_id") and
                          actual.get("video_id") == self.pista.get("video_id"))
-        ancho = self.width() - 70
+        if es_actual and not self._encima:
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(0, 0, 0, 130))
+            p.drawRoundedRect(QRectF(r), 6, 6)
+            p.drawPixmap(r.center().x() - 9, r.center().y() - 9, iconos.pixmap("sonando", 18, "#FFFFFF"))
+        ancho = max(10, self.width() - 64 - 48)
         f = fuente(14, QFont.DemiBold)
         p.setFont(f)
         p.setPen(QColor(C["acento"] if es_actual else C["texto"]))
@@ -1319,17 +1397,93 @@ class FilaCompacta(QWidget):
         sub = self.pista.get("artista") or self.pista.get("subtitulo") or ""
         if self.pista.get("subtitulo") and self.pista.get("artista"):
             sub = f"{self.pista['artista']} • {self.pista['subtitulo']}"
-        p.drawText(QRect(64, 31, ancho, 18), Qt.AlignVCenter,
-                   QFontMetrics(f2).elidedText(sub, Qt.ElideRight, ancho))
+        x = 64
+        if self.pista.get("explicito"):
+            e = QRectF(x, 32.5, 15, 15)
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor(C["texto2"]))
+            p.drawRoundedRect(e, 2, 2)
+            p.setPen(QColor(C["panel"]))
+            p.setFont(fuente(10, QFont.Bold))
+            p.drawText(e, Qt.AlignCenter, "E")
+            p.setFont(f2)
+            p.setPen(QColor(C["texto2"]))
+            x += 21
+        p.drawText(QRect(x, 31, max(10, ancho - (x - 64)), 18), Qt.AlignVCenter,
+                   QFontMetrics(f2).elidedText(sub, Qt.ElideRight, max(10, ancho - (x - 64))))
+
+
+class Puntitos(QWidget):
+    """Los puntitos de las páginas (se pulsan) con una flecha a cada lado."""
+
+    ir = Signal(int)
+
+    def __init__(self, padre=None):
+        super().__init__(padre)
+        self.total, self.actual = 0, 0
+        self.setFixedHeight(28)
+        self.setMouseTracking(True)
+
+    def poner(self, total, actual):
+        total, actual = max(0, total), max(0, min(actual, max(0, total - 1)))
+        if (total, actual) != (self.total, self.actual):
+            self.total, self.actual = total, actual
+            self.setVisible(total > 1)
+            self.setAccessibleName(f"Página {actual + 1} de {total}")
+            self.update()
+
+    def _zonas(self):
+        ancho = self.total * 18
+        x0 = (self.width() - ancho) / 2
+        z = [(i, QRectF(x0 + i * 18, 4, 18, 20)) for i in range(self.total)]
+        z.append((self.actual - 1, QRectF(x0 - 34, 2, 24, 24)))
+        z.append((self.actual + 1, QRectF(x0 + ancho + 10, 2, 24, 24)))
+        return z
+
+    def mousePressEvent(self, e):
+        if e.button() != Qt.LeftButton:
+            return
+        for i, r in self._zonas():
+            if r.contains(e.position()) and 0 <= i < self.total:
+                self.ir.emit(i)
+                return
+
+    def mouseMoveEvent(self, e):
+        sobre = any(r.contains(e.position()) and 0 <= i < self.total for i, r in self._zonas())
+        self.setCursor(Qt.PointingHandCursor if sobre else Qt.ArrowCursor)
+
+    def paintEvent(self, _e):
+        if self.total < 2:
+            return
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing, True)
+        p.setPen(Qt.NoPen)
+        zonas = self._zonas()
+        for i, r in zonas[:self.total]:
+            p.setBrush(QColor(C["texto"] if i == self.actual else C["borde_claro"]))
+            p.drawEllipse(r.center(), 4, 4)
+        for (i, r), icono in zip(zonas[self.total:], ("atras", "adelante")):
+            p.setOpacity(0.9 if 0 <= i < self.total else 0.25)
+            p.drawPixmap(int(r.center().x() - 8), int(r.center().y() - 8),
+                         iconos.pixmap(icono, 16, C["texto2"]))
 
 
 class RejillaRapida(QWidget):
-    """Canciones en columnas (la 'Seleccion rapida' de YouTube Music)."""
+    """Canciones en columnas por páginas, con «Reproducir todo». Las columnas salen del ancho que
+    haya: en una ventana pequeña es una sola y nada se desborda."""
 
-    def __init__(self, ctx, titulo, pistas, columnas=3, filas=4, subtitulo="", padre=None):
+    ANCHO_COLUMNA = 300
+
+    def __init__(self, ctx, titulo, pistas, columnas=3, filas=4, subtitulo="", paginas=3, padre=None):
         super().__init__(padre)
         self.ctx = ctx
-        self.pistas = pistas
+        self.titulo = titulo
+        self.pistas = list(pistas)
+        self.filas = filas
+        self.max_columnas = max(1, columnas)
+        self.paginas = max(1, paginas)
+        self.pagina = 0
+        self._widgets = {}
         v = QVBoxLayout(self)
         v.setContentsMargins(0, 0, 0, 0)
         v.setSpacing(8)
@@ -1343,28 +1497,74 @@ class RejillaRapida(QWidget):
             textos.addWidget(s)
         t = QLabel(titulo)
         t.setObjectName("titulo_seccion")
+        t.setMinimumWidth(10)
         textos.addWidget(t)
-        cab.addLayout(textos)
-        cab.addStretch(1)
+        cab.addLayout(textos, 1)
         bt = QPushButton("  Reproducir todo")
         bt.setObjectName("contorno")
         bt.setIcon(iconos.icono("reproducir", 14, C["texto"]))
         bt.setCursor(Qt.PointingHandCursor)
-        bt.clicked.connect(lambda: ctx.reproducir_lista(pistas, 0, {"tipo": "seleccion",
-                                                                     "id": titulo, "titulo": titulo}))
-        cab.addWidget(bt)
+        bt.clicked.connect(lambda: self._reproducir(0))
+        self.bt_todo = bt
+        cab.addWidget(bt, 0, Qt.AlignBottom)
         v.addLayout(cab)
-        from PySide6.QtWidgets import QGridLayout
-        rej = QGridLayout()
-        rej.setHorizontalSpacing(8)
-        rej.setVerticalSpacing(0)
-        for i, pista in enumerate(pistas[:columnas * filas]):
-            fila = FilaCompacta(ctx, pista, lambda p, i=i: ctx.reproducir_lista(
-                self.pistas, i, {"tipo": "seleccion", "id": titulo, "titulo": titulo}))
-            rej.addWidget(fila, i % filas, i // filas)
-        for c in range(columnas):
-            rej.setColumnStretch(c, 1)
-        v.addLayout(rej)
+        self.zona = QWidget()
+        self.zona.setFixedHeight(filas * 60)
+        v.addWidget(self.zona)
+        self.puntos = Puntitos()
+        self.puntos.hide()
+        self.puntos.ir.connect(self.ir_a)
+        v.addWidget(self.puntos)
+
+    def _reproducir(self, i):
+        self.ctx.reproducir_lista(self.pistas, i, {"tipo": "seleccion", "id": self.titulo,
+                                                   "titulo": self.titulo})
+
+    def ir_a(self, pagina):
+        self.pagina = pagina
+        self._colocar()
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self._colocar()
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        self._colocar()
+
+    def _colocar(self):
+        w = self.width()
+        if w < 60 or not self.pistas:
+            return
+        texto = "  Reproducir todo" if w >= 420 else "  Todo"
+        if self.bt_todo.text() != texto:
+            self.bt_todo.setText(texto)
+            self.bt_todo.setToolTip("Reproducir todo")
+        columnas = max(1, min(self.max_columnas, w // self.ANCHO_COLUMNA))
+        por_pagina = columnas * self.filas
+        n = min(len(self.pistas), por_pagina * self.paginas)
+        total = max(1, -(-n // por_pagina))
+        self.pagina = max(0, min(self.pagina, total - 1))
+        hueco = 10
+        ancho = (w - hueco * (columnas - 1)) // columnas
+        desde = self.pagina * por_pagina
+        hasta = min(n, desde + por_pagina)
+        for i, f in self._widgets.items():
+            if not desde <= i < hasta:
+                f.hide()
+        for i in range(desde, hasta):
+            f = self._widgets.get(i)
+            if f is None:                # las filas se crean al llegar a su página
+                f = FilaCompacta(self.ctx, self.pistas[i], lambda _p, i=i: self._reproducir(i), self.zona)
+                f.setMinimumWidth(0)
+                self._widgets[i] = f
+            k = i - desde
+            f.setGeometry((k // self.filas) * (ancho + hueco), (k % self.filas) * 60, ancho, 60)
+            f.show()
+        altas = self.filas if total > 1 else min(self.filas, hasta - desde)
+        if self.zona.height() != altas * 60:
+            self.zona.setFixedHeight(altas * 60)
+        self.puntos.poner(total, self.pagina)
 
 
 # ---------------------------------------------------------------- paginas
@@ -1415,6 +1615,8 @@ class _RuedaSuave(QObject):
             d = e.angleDelta().y()
             if d == 0 or e.pixelDelta().y():
                 return False          # touchpads ya desplazan suave por su cuenta
+            if self.barra.maximum() <= self.barra.minimum():
+                return False          # cabe entera: la rueda es para la página que la contiene
             if self.anim.state() != QPropertyAnimation.Running:
                 self.destino = self.barra.value()
             paso = -d / 120 * max(110, self.area.viewport().height() * 0.16)
@@ -1501,6 +1703,7 @@ class Esqueleto(QWidget):
 def aparecer(widget, ms=170):
     """Fundido de entrada al mostrar una pagina."""
     from PySide6.QtWidgets import QGraphicsOpacityEffect
+    import time
     efecto = QGraphicsOpacityEffect(widget)
     efecto.setOpacity(0.0)
     widget.setGraphicsEffect(efecto)
@@ -1516,6 +1719,18 @@ def aparecer(widget, ms=170):
         except RuntimeError:
             pass
     anim.finished.connect(fin)
+    # el efecto repinta la página entera en cada paso: si una página grande no da para un fundido fluido,
+    # mejor que aparezca ya a que aparezca a saltos
+    ultimo = [time.perf_counter(), 0]
+
+    def vigilar(_v):
+        ahora = time.perf_counter()
+        ultimo[1] = ultimo[1] + 1 if ahora - ultimo[0] > 0.045 else 0
+        ultimo[0] = ahora
+        if ultimo[1] >= 2:
+            fin()
+            anim.stop()
+    anim.valueChanged.connect(vigilar)
     anim.start(QPropertyAnimation.DeleteWhenStopped)
 
 

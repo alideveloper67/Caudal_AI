@@ -173,12 +173,20 @@ def _importar():
     return faster_whisper
 
 
+_hay_motor = None
+
+
 def disponible():
-    try:
-        _importar()
-        return True
-    except Exception:  # noqa: BLE001
-        return False
+    """¿Viene el reconocedor con la app? Solo se mira si está: cargarlo tarda segundos y lo hace el proceso
+    ayudante (antes se importaba aquí, en el hilo de la interfaz, y la app se quedaba congelada)."""
+    global _hay_motor
+    if _hay_motor is None:
+        import importlib.util
+        try:
+            _hay_motor = all(importlib.util.find_spec(m) is not None for m in ("faster_whisper", "ctranslate2"))
+        except (ImportError, ValueError):
+            _hay_motor = False
+    return _hay_motor
 
 
 def _carpeta_modelos():
@@ -266,6 +274,21 @@ def escuchar(fuente, desde, largo, idioma=None):
             if (w.word or "").strip():
                 salida.append((desde + float(w.start), w.word.strip()))
     return salida
+
+
+def escuchar_segmentos(fuente, desde, largo):
+    """Lo oído por frases, con lo seguro que está el reconocedor de cada una (para transcribir), o None."""
+    audio = _leer_audio(fuente, desde, largo)
+    if audio is None:
+        return None
+    modelo = _cargar_modelo()
+    segmentos, info = modelo.transcribe(audio, word_timestamps=True, vad_filter=False, beam_size=3,
+                                        condition_on_previous_text=False)
+    salida = [{"desde": desde + float(s.start), "texto": s.text or "", "logprob": float(s.avg_logprob),
+               "sin_voz": float(s.no_speech_prob), "compresion": float(s.compression_ratio),
+               "palabras": [(desde + float(w.start), w.word) for w in s.words or [] if (w.word or "").strip()]}
+              for s in segmentos]
+    return {"segmentos": salida, "idioma": info.language, "idioma_prob": float(info.language_probability)}
 
 
 def verificar(lineas, fuente, duracion, alternativas=None):

@@ -356,3 +356,17 @@ def test_los_ajustes_por_defecto(ctx):
     a = ctx.ajustes
     assert a["visualizador_estilo"] == "ondas" and a["colores_caratula"] is True
     assert a["sonidos_ui"] is False and a["sonido_ui_tipo"] == "burbuja"
+
+
+def test_ajustes_por_partes_para_su_reloj_si_se_pide_un_control_antes():
+    """Pedir un control que falta termina la página; el reloj que la construía no puede seguir dando errores."""
+    from types import SimpleNamespace
+    from descargador.ui.paginas.ajustes import PaginaAjustes
+    parado, hechos = [], []
+    p = SimpleNamespace(_partes=(hechos.append(i) for i in range(3)), _construyendo=False,
+                        _t_partes=SimpleNamespace(stop=lambda: parado.append(1), setInterval=lambda ms: None),
+                        isVisible=lambda: True)
+    PaginaAjustes._otra_parte(p)
+    PaginaAjustes.terminar(p)
+    PaginaAjustes._otra_parte(p)
+    assert hechos == [0, 1, 2] and p._partes is None and parado

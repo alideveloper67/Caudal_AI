@@ -56,7 +56,7 @@ late _ColeccionFalsa _col;
 // 320 px de ancho (lo que se comprueba) y alto suficiente para que las pantallas
 // entren enteras: las listas son perezosas y lo que queda debajo no existe en el árbol
 Future<void> _montar(WidgetTester t, Widget pagina, {Size tam = const Size(880, 3600)}) async {
-  SharedPreferences.setMockInitialValues({});
+  SharedPreferences.setMockInitialValues(_prefs);
   final ajustes = await Ajustes.cargar('prueba');
   _col = _ColeccionFalsa();
   final s = Servicios(
@@ -75,6 +75,8 @@ Future<void> _montar(WidgetTester t, Widget pagina, {Size tam = const Size(880, 
   await t.pump(const Duration(milliseconds: 300));
 }
 
+Map<String, Object> _prefs = {};
+
 void main() {
   setUp(() {
     // el portapapeles vacío
@@ -90,7 +92,7 @@ void main() {
     await t.tap(find.text('Mis Me gusta'));
     await t.pump();
     expect(find.text('Pasar a Me gusta'), findsOneWidget);
-    expect(find.text('Pasar tus me gusta de Spotify, YouTube Music o SoundCloud'), findsOneWidget);
+    expect(find.text('Vincular Spotify, YouTube Music o SoundCloud'), findsOneWidget);
     expect(t.takeException(), isNull);
   });
 
@@ -111,24 +113,44 @@ void main() {
     tr.olvidarTerminado();
   });
 
-  testWidgets('Pasar tus me gusta sin conexiones: cada servicio dice qué falta y qué hacer', (t) async {
+  testWidgets('Vincular cuentas sin activar: cada servicio dice cómo traerlos ya, sin desbordes', (t) async {
     ServiciosExternos.pedir = (u) async => http.Response('<html>no existe</html>', 404);
     await _montar(t, const MeGustaExternosPagina());
     await t.pump(const Duration(milliseconds: 300));
-    expect(find.textContaining('la conexión con Spotify aún no está activada'), findsOneWidget);
-    expect(find.textContaining('Agregar a playlist'), findsOneWidget);
-    expect(find.textContaining('La conexión oficial con SoundCloud aún no está activada'), findsOneWidget);
-    expect(find.text('Conectar con Spotify'), findsNothing);
+    expect(find.text('Pedirlo a Spotify'), findsOneWidget);
+    expect(find.text('Vincular Spotify'), findsNothing);
+    await t.scrollUntilVisible(find.text('Abrir Google Takeout'), 200, scrollable: find.byType(Scrollable).first);
+    await t.scrollUntilVisible(find.text('Otro archivo o una lista de nombres'), 200, scrollable: find.byType(Scrollable).first);
     expect(t.takeException(), isNull);
   });
 
-  testWidgets('con el client_id de Spotify y SoundCloud activado, ofrece conectar y pegar un perfil', (t) async {
+  testWidgets('con las conexiones activadas ofrece vincular los tres', (t) async {
     ServiciosExternos.pedir = (u) async => http.Response(
-        jsonEncode({'spotify_client_id': 'cid', 'spotify': true, 'soundcloud': true}), 200);
+        jsonEncode({'spotify_client_id': 'a', 'youtube_client_id': 'b', 'soundcloud_client_id': 'c', 'soundcloud': true}), 200);
     await _montar(t, const MeGustaExternosPagina());
     await t.pump(const Duration(milliseconds: 300));
-    expect(find.text('Conectar con Spotify'), findsOneWidget);
-    expect(find.textContaining('modo de desarrollo'), findsOneWidget);
-    expect(find.text('Traer sus me gusta'), findsOneWidget);
+    for (final s in ['Spotify', 'YouTube Music', 'SoundCloud']) {
+      await t.scrollUntilVisible(find.text('Vincular $s'), 200, scrollable: find.byType(Scrollable).first);
+    }
+    await t.scrollUntilVisible(find.text('Traer sus me gusta'), 200, scrollable: find.byType(Scrollable).first);
+    expect(t.takeException(), isNull);
+  });
+
+  testWidgets('una cuenta vinculada enseña su estado, mantener al día y desvincular', (t) async {
+    ServiciosExternos.pedir = (u) async => http.Response(jsonEncode({'spotify_client_id': 'a'}), 200);
+    _prefs = {'vinculada.${CuentaExterna.deCaudal}.spotify': jsonEncode({'access': 'A', 'refresh': 'R', 'caduca': 0})};
+    await _montar(t, const MeGustaExternosPagina());
+    await t.pump(const Duration(milliseconds: 300));
+    expect(find.textContaining('Vinculada'), findsOneWidget);
+    expect(find.text('Mantener al día'), findsOneWidget);
+    expect(find.text('Sincronizar ahora'), findsOneWidget);
+    await t.tap(find.text('Desvincular'));
+    await t.pumpAndSettle();
+    expect(find.textContaining('se quedan'), findsOneWidget);
+    await t.tap(find.widgetWithText(FilledButton, 'Desvincular'));
+    await t.pumpAndSettle();
+    expect(find.text('Vincular Spotify'), findsOneWidget);
+    _prefs = {};
+    expect(t.takeException(), isNull);
   });
 }

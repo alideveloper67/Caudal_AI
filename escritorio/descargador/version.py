@@ -18,7 +18,7 @@ import tempfile
 import urllib.error
 import urllib.request
 
-VERSION = "2.8.5"
+VERSION = "2.8.6"
 
 # usuario/repositorio de GitHub donde publicas las versiones
 ORIGEN = "alideveloper67/Caudal_AI"
@@ -189,4 +189,10 @@ def instalar_y_salir(ruta_instalador):
     subprocess.Popen([ruta_instalador, "/actualizar"], creationflags=banderas)
     # salida inmediata, como al cerrar: nada debe quedarse vivo y bloquear
     # los archivos que el instalador tiene que sustituir
+    try:
+        from . import ayudante, disco
+        ayudante.cerrar()               # si sigue vivo, el instalador no puede sustituir el .exe
+        disco.vaciar()                  # lo último guardado, antes de salir de golpe
+    except Exception:  # noqa: BLE001
+        pass
     os._exit(0)

@@ -157,12 +157,15 @@ def test_el_medidor_convive_con_los_filtros_del_sonido(app, motor, wav):
     motor.fijar_espectro(True)
     motor.fijar_filtros("lavfi=[volume=-3dB]")
     assert esperar(app, lambda: motor.nivel_audio() is not None)
+    assert motor.esperar_ordenes()                 # las órdenes van por el hilo del motor
     etiquetas = [f.get("label") for f in motor.mpv.af]
     assert "vis" in etiquetas and len(motor.mpv.af) == 2
     motor.fijar_filtros("")
     assert esperar(app, lambda: motor.nivel_audio() is not None)
+    assert motor.esperar_ordenes()
     assert [f.get("label") for f in motor.mpv.af] == ["vis"]
     motor.fijar_espectro(False)
+    assert motor.esperar_ordenes()
     assert list(motor.mpv.af) == []
 
 

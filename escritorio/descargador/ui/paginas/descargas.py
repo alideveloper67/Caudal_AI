@@ -11,11 +11,11 @@ from PySide6.QtGui import QGuiApplication
 from PySide6.QtWidgets import (QAbstractItemView, QComboBox, QHBoxLayout, QHeaderView, QLabel,
                                QLineEdit, QMenu, QMessageBox, QPushButton, QScrollArea,
                                QStackedWidget, QTableWidget, QTableWidgetItem, QVBoxLayout,
-                               QWidget, QFrame)
+                               QWidget, QFrame, QSizePolicy)
 
 from ... import motor, redes
 from .. import iconos
-from ..componentes import SinResultados
+from ..componentes import FilaDesplazable, SinResultados
 from ..dialogo_descarga import AUDIOS, CALIDADES, CONTENEDORES, DialogoDescarga
 from ..estilos import C
 from ..tarjeta import TarjetaDescarga
@@ -60,7 +60,18 @@ class PaginaDescargas(QWidget):
         self.tarjetas = {}
         self._sucias = set()
 
-        v = QVBoxLayout(self)
+        # en ventanas bajas la página entera se desplaza: nada se aplasta ni se monta encima
+        fuera = QVBoxLayout(self)
+        fuera.setContentsMargins(0, 0, 0, 0)
+        self.zona = QScrollArea()
+        self.zona.setObjectName("lienzo")
+        self.zona.setWidgetResizable(True)
+        self.zona.setFrameShape(QFrame.NoFrame)
+        self.zona.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        todo = QWidget()
+        self.zona.setWidget(todo)
+        fuera.addWidget(self.zona)
+        v = QVBoxLayout(todo)
         v.setContentsMargins(24, 20, 24, 14)
         v.setSpacing(14)
         t = QLabel("Descargar videos")
@@ -104,8 +115,7 @@ class PaginaDescargas(QWidget):
         fila.addWidget(bt)
         vc.addLayout(fila)
 
-        opciones = QHBoxLayout()
-        opciones.setSpacing(8)
+        opciones = FilaDesplazable()           # en ventanas estrechas se desplaza de lado: no se aplasta
         a = self.ajustes
         self.c_tipo = _combo(TIPOS, a["tipo_descarga"], 170)
         self.c_calidad = _combo(CALIDADES, a["calidad"], 200)
@@ -115,14 +125,13 @@ class PaginaDescargas(QWidget):
                               a["codec_descarga"], 170)
         for c in (self.c_tipo, self.c_calidad, self.c_codec, self.c_contenedor, self.c_audio):
             c.currentIndexChanged.connect(self._guardar_rapidos)
-            opciones.addWidget(c)
+            opciones.agregar(c)
         bt_mas = QPushButton("Más opciones…")
         bt_mas.setObjectName("enlace")
         bt_mas.setCursor(Qt.PointingHandCursor)
         bt_mas.clicked.connect(self._mas_opciones)
-        opciones.addWidget(bt_mas)
-        opciones.addStretch(1)
-        vc.addLayout(opciones)
+        opciones.agregar(bt_mas)
+        vc.addWidget(opciones)
         self.et_carpeta = QPushButton("")
         self.et_carpeta.setObjectName("enlace")
         self.et_carpeta.setCursor(Qt.PointingHandCursor)
@@ -161,7 +170,8 @@ class PaginaDescargas(QWidget):
         self.bt_pausar.setIcon(iconos.icono("pausa", 14, C["texto"]))
         self.bt_reanudar = QPushButton("  Reanudar")
         self.bt_reanudar.setIcon(iconos.icono("reproducir", 14, C["texto"]))
-        self.bt_limpiar = QPushButton("  Limpiar terminadas")
+        self.bt_limpiar = QPushButton("  Limpiar")
+        self.bt_limpiar.setToolTip("Limpiar las descargas terminadas")
         self.bt_limpiar.setIcon(iconos.icono("papelera", 14, C["texto"]))
         for b in (self.bt_pausar, self.bt_reanudar, self.bt_limpiar):
             b.setCursor(Qt.PointingHandCursor)
@@ -226,6 +236,9 @@ class PaginaDescargas(QWidget):
         self.tabla.doubleClicked.connect(self._abrir_historial)
         vh.addWidget(self.tabla, 1)
         self.pila.addWidget(hist)
+        caja.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Minimum)
+        caja.setMinimumHeight(168)
+        self.pila.setMinimumHeight(150)
         v.addWidget(self.pila, 1)
 
         self.bt_pausar.clicked.connect(self._pausar_todo)

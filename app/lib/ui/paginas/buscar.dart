@@ -433,7 +433,7 @@ class _BuscarPaginaState extends State<BuscarPagina> with AutomaticKeepAliveClie
             child: Pulsable(
               escala: 0.985,
               child: ListTile(
-                contentPadding: const EdgeInsets.symmetric(horizontal: Esp.lado, vertical: 2),
+                contentPadding: const EdgeInsets.fromLTRB(Esp.lado, 2, 4, 2),
                 leading: Portada(url: '${el['miniatura'] ?? ''}', lado: 54, radio: 4, circulo: el['tipo'] == 'artista',
                     icono: el['tipo'] == 'artista' ? Icons.person_rounded
                         : el['tipo'] == 'album' ? Icons.album_rounded : Icons.queue_music_rounded),
@@ -441,6 +441,12 @@ class _BuscarPaginaState extends State<BuscarPagina> with AutomaticKeepAliveClie
                 subtitle: Text('${el['subtitulo'] ?? ''}', maxLines: 1, overflow: TextOverflow.ellipsis,
                     style: estiloSecundario),
                 onTap: () => s.abrirElemento(context, el),
+                onLongPress: () => s.hojaElemento(context, el),
+                trailing: IconButton(
+                  tooltip: 'Opciones',
+                  icon: const Icon(Icons.more_vert_rounded, color: C.texto2),
+                  onPressed: () => s.hojaElemento(context, el),
+                ),
               ),
             ),
           );
@@ -497,7 +503,6 @@ class _BuscarPaginaState extends State<BuscarPagina> with AutomaticKeepAliveClie
                           ),
                           IconButton(
                             tooltip: 'Poner en el buscador',
-                            visualDensity: VisualDensity.compact,
                             icon: const Icon(Icons.north_west_rounded, size: 18, color: C.texto3),
                             onPressed: () {
                               _campo.text = r;
@@ -508,7 +513,6 @@ class _BuscarPaginaState extends State<BuscarPagina> with AutomaticKeepAliveClie
                           ),
                           IconButton(
                             tooltip: 'Quitar de recientes',
-                            visualDensity: VisualDensity.compact,
                             icon: const Icon(Icons.close_rounded, size: 18, color: C.texto3),
                             onPressed: () async {
                               await Caudal.leer(context).coleccion.borrarBusqueda(r);
@@ -554,6 +558,7 @@ class _Principal extends StatelessWidget {
         child: InkWell(
           borderRadius: BorderRadius.circular(10),
           onTap: () => s.abrirElemento(context, el),
+          onLongPress: () => s.hojaElemento(context, el),
           child: Padding(
             padding: const EdgeInsets.all(14),
             child: Row(children: [

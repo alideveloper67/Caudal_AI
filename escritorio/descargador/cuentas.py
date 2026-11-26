@@ -13,9 +13,11 @@ En el equipo solo se guarda:
 import json
 import os
 import re
+import threading
+import time
 
 from . import config, nube
-from .nube import ErrorNube, SinConexion
+from .nube import ErrorNube, SinConexion  # noqa: F401
 
 
 class ErrorCuenta(Exception):
@@ -31,9 +33,15 @@ def _leer(nombre, defecto):
 
 def _escribir(nombre, datos):
     ruta = config.carpeta_datos() / nombre
-    tmp = ruta.with_suffix(".tmp")
+    tmp = ruta.with_suffix(f".{os.getpid()}-{threading.get_ident()}.tmp")
     tmp.write_text(json.dumps(datos, indent=2, ensure_ascii=False), encoding="utf-8")
-    os.replace(tmp, ruta)
+    for intento in range(5):
+        try:
+            os.replace(tmp, ruta)
+            return
+        except PermissionError:              # el antivirus tiene el archivo abierto un instante
+            time.sleep(0.05 * (intento + 1))
+    ruta.write_text(json.dumps(datos, indent=2, ensure_ascii=False), encoding="utf-8")
 
 
 def _carpeta_para(user_id):
@@ -49,9 +57,12 @@ def _carpeta_para(user_id):
 
 
 def _cuenta(sesion, usuario, nombre, sin_conexion=False, google=False):
-    return {"id": sesion.user_id if sesion else None, "usuario": usuario,
-            "nombre": nombre or usuario, "carpeta": _carpeta_para(sesion.user_id) if sesion else "",
-            "sesion": sesion, "sin_conexion": sin_conexion, "google": google}
+    cuenta = {"id": sesion.user_id if sesion else None, "usuario": usuario,
+              "nombre": nombre or usuario, "carpeta": _carpeta_para(sesion.user_id) if sesion else "",
+              "sesion": sesion, "sin_conexion": sin_conexion, "google": google}
+    if sesion is not None:
+        sesion.al_renovar = lambda: Cuentas().actualizar_recordada(cuenta)
+    return cuenta
 
 
 _PAGINA_VUELTA = """<!doctype html><html lang="es"><meta charset="utf-8">
@@ -203,18 +214,30 @@ class Cuentas:
             return None
         try:
             sesion = nube.renovar(guardada["refresh"])
-        except SinConexion:
-            sesion = nube.Sesion(guardada["id"], "", guardada["refresh"], 0)
-            cuenta = _cuenta(sesion, guardada["usuario"], guardada["nombre"], sin_conexion=True,
-                             google=bool(guardada.get("google")))
-            return cuenta
-        except ErrorNube:
-            self.olvidar()
-            return None
+        except nube.SesionCaducada:
+            # ¿la renovó otro Caudal mientras tanto? Se prueba con lo último guardado antes de rendirse
+            otra = _leer("sesion.json", None) or {}
+            try:
+                if not otra.get("refresh") or otra["refresh"] == guardada["refresh"]:
+                    raise nube.SesionCaducada("")
+                guardada, sesion = otra, nube.renovar(otra["refresh"])
+            except nube.SesionCaducada:
+                self.olvidar()
+                return None
+            except ErrorNube:
+                return self._sin_red(otra)
+        except ErrorNube:                # sin red, o el servidor no pudo: nunca se cierra la sesión por eso
+            return self._sin_red(guardada)
         cuenta = _cuenta(sesion, guardada["usuario"], guardada["nombre"],
                          google=bool(guardada.get("google")))
         self.recordar(cuenta)
         return cuenta
+
+    @staticmethod
+    def _sin_red(guardada):
+        """Se entra con la biblioteca local; la sesión se renueva sola cuando vuelva la conexión."""
+        return _cuenta(nube.Sesion(guardada["id"], "", guardada["refresh"], 0), guardada["usuario"],
+                       guardada["nombre"], sin_conexion=True, google=bool(guardada.get("google")))
 
     def ultimo_usuario(self):
         return _leer("ultimo.json", {}).get("usuario", "")

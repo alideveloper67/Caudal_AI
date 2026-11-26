@@ -1,16 +1,24 @@
 # -*- coding: utf-8 -*-
-"""«Pasar tus me gusta»: los de Spotify, YouTube Music y SoundCloud a los Me gusta de Caudal.
+"""«Vincular Spotify, YouTube y SoundCloud»: sus me gusta pasan a los Me gusta de Caudal.
 
-Cada servicio dice en una frase qué se puede hacer y, si algo falta, qué hacer.
-Lo traído se busca en YouTube Music (DialogoImportacion) y se añade sin repetir.
+Con la cuenta vinculada se traen solos; y sin vincular nada, desde el archivo con tus datos que da
+cada servicio, desde cualquier tabla de canciones o pegando los nombres. Lo traído se busca en
+YouTube Music (DialogoImportacion) y se añade sin repetir.
 """
 
-from PySide6.QtCore import Qt, QThread, Signal
-from PySide6.QtWidgets import (QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton,
-                               QScrollArea, QVBoxLayout, QWidget)
+import time
 
-from .. import importacion, listas, servicios_externos
+from PySide6.QtCore import Qt, QThread, QUrl, Signal
+from PySide6.QtGui import QDesktopServices
+from PySide6.QtWidgets import (QCheckBox, QDialog, QFileDialog, QFrame, QHBoxLayout, QLabel, QLineEdit,
+                               QPlainTextEdit, QPushButton, QScrollArea, QVBoxLayout, QWidget)
+
+from .. import archivo_me_gusta, importacion, listas, servicios_externos, vinculadas
+from ..hilos import en_segundo_plano
 from .estilos import C
+
+COLORES = {"spotify": "#1DB954", "youtube": "#FF4E45", "soundcloud": "#FF7733"}
+_VIVOS = set()          # un hilo que espera al navegador no se destruye aunque se cierre la ventana
 
 
 class _Hilo(QThread):
@@ -20,11 +28,18 @@ class _Hilo(QThread):
     def __init__(self, funcion):
         super().__init__()
         self.funcion = funcion
+        self.cancelar = False
+        _VIVOS.add(self)
+        self.finished.connect(self._soltar)
+
+    def _soltar(self):
+        _VIVOS.discard(self)
 
     def run(self):
         try:
             self.listo.emit(self.funcion())
-        except (listas.ErrorLista, servicios_externos.ErrorServicio) as e:
+        except (listas.ErrorLista, servicios_externos.ErrorServicio,
+                archivo_me_gusta.ErrorArchivo) as e:
             self.fallo.emit(str(e))
         except Exception as e:  # noqa: BLE001
             self.fallo.emit(f"No se pudo: {str(e)[:100]}")
@@ -39,45 +54,38 @@ def _texto(t, ayuda=True):
 
 
 class DialogoMeGusta(QDialog):
-    listo = Signal(list, str, str, str)   # canciones, titulo, servicio, enlace
+    # canciones, titulo, servicio, enlace, cuenta ('spotify'|'youtube'|'soundcloud' o '')
+    listo = Signal(list, str, str, str, str)
 
     def __init__(self, ctx, padre=None):
         super().__init__(padre)
         self.ctx = ctx
         self.hilo = None
-        self.setWindowTitle("Pasar tus me gusta")
-        self.setMinimumSize(600, 620)
+        self.campo_sc = None
+        self.setWindowTitle("Vincular Spotify, YouTube y SoundCloud")
+        self.setMinimumSize(620, 660)
 
         raiz = QVBoxLayout(self)
         raiz.setContentsMargins(22, 20, 22, 18)
         raiz.setSpacing(12)
-        titulo = QLabel("Pasar tus me gusta a Caudal")
+        titulo = QLabel("Vincular Spotify, YouTube y SoundCloud")
         titulo.setStyleSheet("font-size:19px;font-weight:700;letter-spacing:-0.3px;")
         raiz.addWidget(titulo)
-        raiz.addWidget(_texto("Las canciones que te gustan en otra app se buscan en YouTube Music "
-                              "y se añaden a tus Me gusta de Caudal (aquí, en el teléfono y en la "
-                              "web). Las que ya tenías no se repiten."))
+        raiz.addWidget(_texto("Las canciones que te gustan allí pasan a tus Me gusta de Caudal (aquí, en el "
+                              "teléfono y en la web). Las que ya tenías no se repiten."))
 
         self.estado = _texto("", ayuda=False)
         self.estado.setStyleSheet(f"color:{C['texto2']};")
+        self.estado.hide()
         raiz.addWidget(self.estado)
 
-        cuerpo = QWidget()
-        self.col = QVBoxLayout(cuerpo)
-        self.col.setContentsMargins(0, 0, 0, 0)
-        self.col.setSpacing(12)
         zona = QScrollArea()
+        zona.setObjectName("lienzo")
         zona.setWidgetResizable(True)
         zona.setFrameShape(QFrame.NoFrame)
-        zona.setWidget(cuerpo)
+        zona.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.zona = zona
         raiz.addWidget(zona, 1)
-
-        conf = servicios_externos.configuracion()
-        self._seccion_spotify(conf)
-        self._seccion_youtube()
-        self._seccion_soundcloud(conf)
-        self._seccion_fuentes()
-        self.col.addStretch(1)
 
         fila = QHBoxLayout()
         fila.addStretch(1)
@@ -86,7 +94,45 @@ class DialogoMeGusta(QDialog):
         fila.addWidget(cerrar)
         raiz.addLayout(fila)
 
-    # ------------------------------------------------------------ secciones
+        self.conf = servicios_externos.configuracion_en_memoria() or dict(servicios_externos.VACIA)
+        self._pintar()
+        # qué está activado se pregunta aparte: la ventana se abre al instante
+        en_segundo_plano(servicios_externos.configuracion, ok=self._llego_conf,
+                         error=lambda _e: None, dueno=self)
+
+    # ------------------------------------------------------------ pintado
+
+    def _llego_conf(self, conf):
+        if conf and dict(conf) != dict(self.conf):
+            self.conf = dict(conf)
+            self._pintar()
+
+    def _pintar(self):
+        escrito = getattr(self, "campo_texto", None)
+        texto = escrito.toPlainText() if escrito is not None else ""
+        enlace = self.campo.text() if getattr(self, "campo", None) is not None else ""
+        cuerpo = QWidget()
+        self.col = QVBoxLayout(cuerpo)
+        self.col.setContentsMargins(0, 0, 6, 0)
+        self.col.setSpacing(12)
+        self.campo_sc = None
+        self._seccion_servicio("spotify", "Spotify", [
+            "1. Entra en tu cuenta de Spotify y pide «Descargar tus datos» (los datos de la cuenta).",
+            "2. Cuando llegue el correo, baja el .zip.",
+            "3. Elígelo aquí, sin abrirlo."], "Pedir mis datos a Spotify",
+            "https://www.spotify.com/account/privacy/")
+        self._seccion_servicio("youtube", "YouTube y YouTube Music", [
+            "1. En Google Takeout marca solo «YouTube y YouTube Music» y crea la exportación.",
+            "2. Cuando llegue el correo, baja el .zip.",
+            "3. Elígelo aquí, sin abrirlo."], "Abrir Google Takeout", "https://takeout.google.com/")
+        self._seccion_servicio("soundcloud", "SoundCloud", [], "", "")
+        self._seccion_archivo(texto)
+        self._seccion_enlace(enlace)
+        self._seccion_fuentes()
+        self.col.addStretch(1)
+        barra = self.zona.verticalScrollBar().value()
+        self.zona.setWidget(cuerpo)
+        self.zona.verticalScrollBar().setValue(barra)
 
     def _tarjeta(self, nombre, color):
         caja = QFrame()
@@ -100,121 +146,154 @@ class DialogoMeGusta(QDialog):
         self.col.addWidget(caja)
         return v
 
-    def _seccion_spotify(self, conf):
-        v = self._tarjeta("Spotify", "#1DB954")
-        if not conf.get("spotify_client_id"):
-            v.addWidget(_texto(
-                "Tus «Canciones que te gustan» de Spotify son privadas y la conexión con Spotify "
-                "aún no está activada en Caudal."))
-            v.addWidget(_texto(
-                "Mientras tanto: en Spotify selecciona todas tus canciones que te gustan, "
-                "añádelas a una lista nueva y pega aquí abajo, en «Desde un enlace», el enlace "
-                "de esa lista. Ojo: sin la conexión oficial Spotify solo deja ver 50 canciones."))
-            return
-        conectado = servicios_externos.spotify_conectado()
-        v.addWidget(_texto("Conecta tu cuenta y se traen todas tus canciones que te gustan." if not conectado
-                           else "Tu cuenta de Spotify está conectada."))
+    def _boton(self, texto, accion, principal=False):
+        b = QPushButton(texto)
+        b.setObjectName("principal" if principal else "contorno")
+        b.setCursor(Qt.PointingHandCursor)
+        b.setAutoDefault(False)
+        b.clicked.connect(lambda _=False: accion())
+        return b
+
+    def _fila(self, v, *botones):
         fila = QHBoxLayout()
-        if conectado:
-            traer = QPushButton("  Traer mis me gusta de Spotify")
-            traer.setObjectName("principal")
-            traer.clicked.connect(lambda: self._correr(
-                servicios_externos.me_gusta_spotify, "Spotify", "spotify:me"))
-            fila.addWidget(traer)
-            salir = QPushButton("Desconectar")
-            salir.clicked.connect(self._desconectar_spotify)
-            fila.addWidget(salir)
-        else:
-            con = QPushButton("  Conectar con Spotify")
-            con.setObjectName("principal")
-            con.clicked.connect(self._conectar_spotify)
-            fila.addWidget(con)
+        fila.setSpacing(8)
+        for b in botones:
+            fila.addWidget(b)
         fila.addStretch(1)
         v.addLayout(fila)
-        v.addWidget(_texto("Mientras la app de Caudal esté en «modo desarrollo» de Spotify, solo "
-                           "pueden conectarse las cuentas que el dueño de Caudal haya añadido."))
 
-    def _seccion_youtube(self):
-        v = self._tarjeta("YouTube Music", "#FF3B30")
-        v.addWidget(_texto(
-            "Caudal entra con Google solo para tu cuenta: no tiene permiso para leer tu YouTube, "
-            "y pedirlo exige una revisión de Google. Haz esto: en YouTube Music abre «Música que te "
-            "gusta», toca ⋮ › «Agregar a playlist», crea una lista pública o no listada y pega su "
-            "enlace aquí abajo."))
-
-    def _seccion_soundcloud(self, conf):
-        v = self._tarjeta("SoundCloud", "#FF5500")
-        hay = conf.get("soundcloud") or bool(
-            listas._ajuste(self.ctx.ajustes, "soundcloud_id"))
-        v.addWidget(_texto("Pega el enlace de un perfil (sus me gusta deben ser públicos)." if hay else
-                           "La conexión oficial con SoundCloud aún no está activada en Caudal, así que "
-                           "todavía no se pueden leer los me gusta de un perfil."))
-        if not hay:
+    def _seccion_servicio(self, servicio, nombre, pasos, texto_enlace, enlace):
+        v = self._tarjeta(nombre, COLORES[servicio])
+        corto = servicios_externos.NOMBRES[servicio]
+        activado = bool(servicios_externos.client_id(self.conf, servicio))
+        if servicios_externos.vinculada(servicio):
+            self._vinculada(v, servicio, corto)
             return
-        fila = QHBoxLayout()
-        self.campo_sc = QLineEdit()
-        self.campo_sc.setPlaceholderText("https://soundcloud.com/tu-perfil")
-        fila.addWidget(self.campo_sc, 1)
-        traer = QPushButton("  Traer sus me gusta")
-        traer.setObjectName("principal")
-        traer.clicked.connect(self._soundcloud)
-        fila.addWidget(traer)
-        v.addLayout(fila)
+        if activado:
+            v.addWidget(_texto(f"Vincula tu cuenta de {corto}: se traen todos tus me gusta y Caudal los "
+                               "mantiene al día."))
+            self._fila(v, self._boton(f"  Vincular {corto}", lambda: self._vincular(servicio), True))
+            if servicio == "spotify":
+                v.addWidget(_texto("Spotify solo deja vincular unas pocas cuentas. Si no acepta la tuya, usa "
+                                   "el archivo con tus datos."))
+        if servicio == "soundcloud":
+            self._soundcloud_sin_vincular(v, activado)
+            return
+        if not activado:
+            v.addWidget(_texto(f"Trae tus me gusta con el archivo que te da {corto}:", ayuda=False))
+        for p in pasos:
+            v.addWidget(_texto(p))
+        self._fila(v, self._boton(texto_enlace, lambda: QDesktopServices.openUrl(QUrl(enlace))),
+                   self._boton("Elegir el archivo", self._elegir_archivo, not activado))
 
-    def _seccion_fuentes(self):
+    def _soundcloud_sin_vincular(self, v, activado):
+        hay = self.conf.get("soundcloud") or bool(listas._ajuste(self.ctx.ajustes, "soundcloud_id"))
+        if hay:
+            v.addWidget(_texto("O pega el enlace de tu perfil (tus me gusta tienen que ser públicos)."))
+            fila = QHBoxLayout()
+            self.campo_sc = QLineEdit()
+            self.campo_sc.setPlaceholderText("https://soundcloud.com/tu-perfil")
+            self.campo_sc.returnPressed.connect(self._soundcloud)
+            fila.addWidget(self.campo_sc, 1)
+            fila.addWidget(self._boton("Traer sus me gusta", self._soundcloud))
+            v.addLayout(fila)
+        elif not activado:
+            v.addWidget(_texto("Copia los nombres de tus canciones de SoundCloud y pégalos más abajo, en "
+                               "«Desde un archivo o un texto». Si los tienes en una tabla (.csv), elígela allí."))
+
+    def _vinculada(self, v, servicio, corto):
+        d = vinculadas.info(self.ctx.coleccion, servicio)
+        n = d["cuantas"]
+        detalle = f"Cuenta vinculada · {vinculadas.hace_cuanto(d['ultima'])}"
+        if d["ultima"]:
+            detalle += f" · {importacion.miles(n)} {'canción traída' if n == 1 else 'canciones traídas'}"
+        v.addWidget(_texto(detalle, ayuda=False))
+        caja = QCheckBox("Mantener al día (al abrir Caudal, como mucho cada 12 horas)")
+        caja.setChecked(d["mantener"])
+        caja.toggled.connect(lambda si: vinculadas.anotar(self.ctx.coleccion, servicio, mantener=bool(si)))
+        v.addWidget(caja)
+        self._fila(v, self._boton("  Sincronizar ahora", lambda: self._sincronizar(servicio), True),
+                   self._boton("Desvincular", lambda: self._desvincular(servicio)))
+        v.addWidget(_texto(f"Tu sesión de {corto} se queda en esta PC. Al desvincular se borra; las canciones "
+                           "que ya trajiste se quedan."))
+
+    def _seccion_archivo(self, texto=""):
+        v = self._tarjeta("Desde un archivo o un texto", C["acento"])
+        v.addWidget(_texto("Sirve el .zip de Spotify o de Google Takeout, cualquier tabla .csv con título y "
+                           "artista (Exportify, TuneMyMusic, Soundiiz…) o un .txt."))
+        self._fila(v, self._boton("Elegir un archivo", self._elegir_archivo))
+        v.addWidget(_texto("O pega tus canciones, una por línea:"))
+        self.campo_texto = QPlainTextEdit(texto)
+        self.campo_texto.setPlaceholderText("Artista - Título\nArtista - Título")
+        self.campo_texto.setTabChangesFocus(True)
+        self.campo_texto.setFixedHeight(84)
+        v.addWidget(self.campo_texto)
+        self._fila(v, self._boton("Pasar a Me gusta", self._pegado))
+
+    def _seccion_enlace(self, texto=""):
         v = self._tarjeta("Desde un enlace", C["acento"])
-        v.addWidget(_texto("Cualquier lista pública de Spotify, YouTube Music o SoundCloud: sus "
-                           "canciones pasan a tus Me gusta."))
+        v.addWidget(_texto("Cualquier lista pública de Spotify, YouTube Music o SoundCloud."))
         fila = QHBoxLayout()
-        self.campo = QLineEdit()
+        self.campo = QLineEdit(texto)
         self.campo.setPlaceholderText("Enlace de la lista")
         self.campo.returnPressed.connect(self._enlace)
         fila.addWidget(self.campo, 1)
-        bt = QPushButton("  Pasar a Me gusta")
-        bt.setObjectName("principal")
-        bt.clicked.connect(self._enlace)
-        fila.addWidget(bt)
+        fila.addWidget(self._boton("Pasar a Me gusta", self._enlace))
         v.addLayout(fila)
 
-        fuentes = self.ctx.coleccion.estado(importacion.CLAVE_FUENTES, []) or []
-        if fuentes:
-            v.addWidget(_texto("Ya sincronizadas (vuelve a pasar solo lo nuevo):"))
+    def _seccion_fuentes(self):
+        fuentes = [f for f in (self.ctx.coleccion.estado(importacion.CLAVE_FUENTES, []) or [])
+                   if isinstance(f, dict) and str(f.get("enlace") or "").startswith("http")]
+        if not fuentes:
+            return
+        v = self._tarjeta("Ya traídas", C["texto"])
         for f in fuentes[:6]:
-            if not isinstance(f, dict):
-                continue
             fila = QHBoxLayout()
             fila.addWidget(_texto(f"{f.get('servicio') or ''} · {f.get('titulo') or f.get('enlace')}"
                                   f" · {importacion.miles(f.get('anadidas', 0))} añadidas"), 1)
-            otra = QPushButton("Volver a sincronizar")
-            otra.setObjectName("contorno")
-            otra.clicked.connect(lambda _=False, f=f: self._repetir(f))
-            fila.addWidget(otra)
+            fila.addWidget(self._boton("Volver a traer", lambda f=f: self._repetir(f)))
             v.addLayout(fila)
 
     # ------------------------------------------------------------ acciones
 
-    def _correr(self, funcion, servicio, enlace):
-        if self.hilo and self.hilo.isRunning():
-            return
-        self.estado.setStyleSheet(f"color:{C['texto2']};")
-        self.estado.setText("Leyendo tus canciones…")
+    def _decir(self, texto, error=False):
+        self.estado.setStyleSheet(f"color:{C['error'] if error else C['texto2']};")
+        self.estado.setText(texto)
+        self.estado.setVisible(bool(texto))
+
+    def _ocupado(self):
+        return self.hilo is not None and self.hilo.isRunning()
+
+    def _lanzar(self, funcion, al_terminar):
         self.hilo = _Hilo(funcion)
-        self.hilo.listo.connect(lambda d: self._leido(d, servicio, enlace))
+        self.hilo.listo.connect(al_terminar)
         self.hilo.fallo.connect(self._fallo)
         self.hilo.start()
 
-    def _leido(self, datos, servicio, enlace):
+    def _correr(self, funcion, servicio, enlace, cuenta=""):
+        if self._ocupado():
+            return self._decir("Espera: todavía se está leyendo lo anterior.")
+        self._decir("Leyendo tus canciones…")
+        self._lanzar(funcion, lambda d: self._leido(d, servicio, enlace, cuenta))
+
+    def _leido(self, datos, servicio, enlace, cuenta=""):
         canciones = datos.get("canciones") or []
+        if enlace.endswith(":me"):
+            # de una cuenta vinculada solo se busca lo que aún no se trajo
+            col = self.ctx.coleccion
+            canciones = vinculadas.nuevas(canciones, vinculadas.conocidas(col, cuenta))
+            if not canciones:
+                vinculadas.anotar(col, cuenta, ultima=time.time(), completa=True)
+                self._pintar()
+                return self._decir("Ya lo tienes todo: no hay canciones nuevas.")
         if not canciones:
-            self._fallo("No llegó ninguna canción.")
-            return
+            return self._fallo("No llegó ninguna canción.")
         self.listo.emit(canciones, datos.get("titulo") or servicio,
-                        datos.get("plataforma") or servicio, enlace)
+                        datos.get("plataforma") or servicio, enlace, cuenta)
         self.accept()
 
     def _fallo(self, texto):
-        self.estado.setStyleSheet(f"color:{C['error']};")
-        self.estado.setText(texto or "Se canceló.")
+        self._decir(texto or "Se canceló.", error=True)
 
     def _enlace(self):
         url = self.campo.text().strip()
@@ -226,7 +305,7 @@ class DialogoMeGusta(QDialog):
                      nombres.get(listas.detectar_plataforma(url), "Enlace"), url)
 
     def _soundcloud(self):
-        url = self.campo_sc.text().strip()
+        url = self.campo_sc.text().strip() if self.campo_sc is not None else ""
         if not url:
             return
         if listas.tipo_soundcloud(url)[0] == "perfil":
@@ -235,29 +314,72 @@ class DialogoMeGusta(QDialog):
 
     def _repetir(self, fuente):
         enlace = fuente.get("enlace") or ""
-        if enlace == "spotify:me":
-            self._correr(servicios_externos.me_gusta_spotify, "Spotify", enlace)
-        elif enlace:
-            self._correr(lambda: listas.leer(enlace, self.ctx.ajustes),
-                         fuente.get("servicio") or "", enlace)
+        self._correr(lambda: listas.leer(enlace, self.ctx.ajustes), fuente.get("servicio") or "", enlace)
 
-    def _conectar_spotify(self):
-        self.estado.setText("Se abrió el navegador: entra en Spotify y acepta.")
-        hilo = _Hilo(servicios_externos.conectar_spotify)
-        hilo.listo.connect(lambda _ok: self._recargar("Cuenta de Spotify conectada."))
+    def _elegir_archivo(self):
+        ruta, _f = QFileDialog.getOpenFileName(self, "Elige el archivo con tus canciones", "",
+                                               archivo_me_gusta.FILTRO_DIALOGO)
+        if ruta:
+            self.traer_archivo(ruta)
+
+    def traer_archivo(self, ruta):
+        if self._ocupado():
+            return self._decir("Espera: todavía se está leyendo lo anterior.")
+        self._decir("Leyendo el archivo…")
+        self._lanzar(lambda: archivo_me_gusta.desde_archivo(ruta), self._leido_archivo)
+
+    def _leido_archivo(self, datos):
+        servicio = datos.get("servicio") or ""
+        self._leido(datos, datos.get("plataforma") or "", f"archivo:{servicio or 'lista'}", servicio)
+
+    def _pegado(self):
+        try:
+            datos = archivo_me_gusta.desde_texto(self.campo_texto.toPlainText())
+        except archivo_me_gusta.ErrorArchivo as e:
+            return self._fallo(str(e))
+        self._leido(datos, "Tu lista", "archivo:texto")
+
+    def _vincular(self, servicio):
+        if self._ocupado():
+            return
+        nombre = servicios_externos.NOMBRES[servicio]
+        self._decir(f"Se abrió el navegador: entra en {nombre} y acepta.")
+        hilo = _Hilo(None)
+        hilo.funcion = lambda: servicios_externos.vincular(servicio, cancelado=lambda: hilo.cancelar)
+        hilo.listo.connect(lambda _ok: self._recien_vinculada(servicio))
         hilo.fallo.connect(self._fallo)
         self.hilo = hilo
         hilo.start()
 
-    def _desconectar_spotify(self):
-        servicios_externos.desconectar_spotify()
-        self._recargar("Cuenta de Spotify desconectada.")
+    def _recien_vinculada(self, servicio):
+        self._pintar()
+        self._decir("Cuenta vinculada. Leyendo tus me gusta…")
+        self.hilo.wait(2000)          # el hilo del navegador ya acabó: se puede empezar a leer
+        self._sincronizar(servicio)
 
-    def _recargar(self, texto):
-        # se rehace el diálogo para que la tarjeta de Spotify cambie de estado
-        padre = self.parent()
-        self.accept()
-        nuevo = DialogoMeGusta(self.ctx, padre)
-        nuevo.listo.connect(lambda *a: self.listo.emit(*a))
-        nuevo.estado.setText(texto)
-        nuevo.exec()
+    def _sincronizar(self, servicio):
+        nombre = "YouTube Music" if servicio == "youtube" else servicios_externos.NOMBRES[servicio]
+        self._correr(lambda: servicios_externos.me_gusta(servicio), nombre, f"{servicio}:me", servicio)
+
+    def _desvincular(self, servicio):
+        if self._ocupado():
+            return self._decir("Espera: todavía se está leyendo lo anterior.")
+        vinculadas.olvidar(self.ctx.coleccion, servicio)
+        nombre = servicios_externos.NOMBRES[servicio]
+
+        def hecho(_r):
+            self._pintar()
+            self._decir(f"Cuenta de {nombre} desvinculada.")
+        # retirar el permiso en Google toca la red: aparte
+        self._lanzar(lambda: servicios_externos.desvincular(servicio), hecho)
+
+    def done(self, r):
+        # si se cierra mientras espera al navegador, se deja de esperar
+        if self.hilo is not None:
+            self.hilo.cancelar = True
+            for s in (self.hilo.listo, self.hilo.fallo):
+                try:
+                    s.disconnect()
+                except (RuntimeError, TypeError):
+                    pass
+        super().done(r)

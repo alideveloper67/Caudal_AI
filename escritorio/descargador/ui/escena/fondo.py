@@ -81,6 +81,7 @@ class FondoAmbiente(QWidget):
         self._grano = self._generar_grano()
 
         self._timer = QTimer(self)
+        self._timer.setTimerType(Qt.PreciseTimer)
         self._timer.setInterval(INTERVALO_MS)
         self._timer.timeout.connect(self._tic)
 

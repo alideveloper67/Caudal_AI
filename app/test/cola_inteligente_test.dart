@@ -380,8 +380,8 @@ void main() {
       final menu = find.descendant(of: fila, matching: find.byIcon(Icons.more_vert_rounded));
       await t.tap(menu);
       await t.pumpAndSettle();
-      expect(find.text('Tocar después de esta'), findsOneWidget);
-      await t.tap(find.text('Tocar después de esta'));
+      expect(find.bySemanticsLabel('Tocar después de esta'), findsOneWidget);
+      await t.tap(find.text('Después'));
       await t.pumpAndSettle();
       expect(_r.tocadasDespues, ['yt:id5']);
       // la 5 pasa a lo primero de lo tuyo y sale del contexto

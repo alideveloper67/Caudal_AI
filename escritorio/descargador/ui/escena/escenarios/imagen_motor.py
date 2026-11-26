@@ -33,6 +33,23 @@ MARGEN = 0.015            # margen para el desplazamiento con el ratón (y la sa
 MAX_TRAZO = 70            # partículas de la interacción a la vez
 
 
+# ilustraciones ya decodificadas en un hilo, esperando a su escenario (decodificar una cuesta 60 ms: un tirón)
+_LISTAS = {}
+
+
+def adelantar(nombre):
+    """Decodifica la ilustración (se llama en un hilo: QImage(ruta) suelta el intérprete)."""
+    img = QImage(os.path.join(CARPETA, nombre))
+    _LISTAS.clear()                  # solo la última: las demás ya no se quieren
+    _LISTAS[nombre] = img
+
+
+def ilustracion(nombre):
+    """La ilustración, ya decodificada si se adelantó; si no, se lee ahora."""
+    img = _LISTAS.pop(nombre, None)
+    return QImage(os.path.join(CARPETA, nombre)) if img is None or img.isNull() else img
+
+
 # ---------------------------------------------------------------- sprites
 
 def _halo(color, radio, dureza=0.5):
@@ -696,7 +713,7 @@ class EscenarioImagen(EscenarioBase):
     VINETA = 70
 
     def preparar(self):
-        self._img = QImage(os.path.join(CARPETA, self.IMAGEN)) if self.IMAGEN else QImage()
+        self._img = ilustracion(self.IMAGEN) if self.IMAGEN else QImage()
         self.iw = max(1, self._img.width() // self.SUPER)
         self.ih = max(1, self._img.height() // self.SUPER)
         self.efectos = list(self.crear_efectos())
@@ -896,16 +913,17 @@ class EscenarioImagen(EscenarioBase):
         # golpe de bajo: sacudida corta y destello (solo en los épicos)
         if self.EPICO:
             g = self.graves()
-            self._graves_media += (g - self._graves_media) * 0.05
+            self._graves_media += (g - self._graves_media) * (1.0 - 0.95 ** self._pasos)
             if g > 0.55 and g - self._graves_media > 0.18 and t - self._ult_golpe > 0.25:
                 self._ult_golpe = t
                 self._golpe(min(1.0, g))
-            self._sacudida *= 0.82
-            self._flash *= 0.80
+            self._sacudida *= 0.82 ** self._pasos
+            self._flash *= 0.80 ** self._pasos
         # solo se mueve con el ratón; los épicos además dan una sacudida corta con los golpes de bajo y el clic
         amp = self._sacudida * M * 0.8
         ox = round(-M + self._px + self._sac_dir[0] * amp * math.sin(t * 60))
         oy = round(-M + self._py + self._sac_dir[1] * amp * math.sin(t * 60))
+        self._ritmo.antes()
         p = QPainter(self)
         try:
             p.drawPixmap(ox, oy, self._cache)
@@ -914,3 +932,4 @@ class EscenarioImagen(EscenarioBase):
             self.pintar_animado(p, W, H, t)
         finally:
             p.end()
+            self._ritmo.despues()

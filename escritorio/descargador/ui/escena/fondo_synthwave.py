@@ -18,6 +18,8 @@ from PySide6.QtGui import (QBrush, QColor, QLinearGradient, QPainter, QPainterPa
                            QPixmap, QRadialGradient)
 from PySide6.QtWidgets import QWidget
 
+from .escenarios.base import Ritmo
+
 FPS = 30
 INTERVALO_MS = 1000 // FPS          # 33 ms por cuadro
 TAU = 2.0 * math.pi
@@ -137,7 +139,9 @@ class FondoSynthwave(QWidget):
             self._estrellas.append((fx, fy, tam, alfa, periodo, fase))
 
         self._timer = QTimer(self)
+        self._timer.setTimerType(Qt.PreciseTimer)
         self._timer.setInterval(INTERVALO_MS)
+        self._ritmo = Ritmo(self._timer)
         self._timer.timeout.connect(self._al_tic)
 
     # ----- API pública -------------------------------------------------------------
@@ -167,6 +171,9 @@ class FondoSynthwave(QWidget):
         """Avanza la animación hasta `ahora` (segundos); lo llama el timer en cada cuadro."""
         if ahora is None:
             ahora = self._monotonic()
+        # los suavizados están pensados a 30 por segundo: a 60 se da medio paso
+        pasos = max(0.2, min(2.0, (ahora - self._t) * FPS)) if ahora > self._t else 1.0
+        sube, baja = 1.0 - (1.0 - ATAQUE) ** pasos, 1.0 - (1.0 - CAIDA) ** pasos
         self._t = ahora
 
         if self._objetivo is None:
@@ -175,7 +182,7 @@ class FondoSynthwave(QWidget):
         else:
             meta = self._objetivo
         for j in range(BINS_ESPECTRO):
-            paso = ATAQUE if meta[j] > self._suave[j] else CAIDA
+            paso = sube if meta[j] > self._suave[j] else baja
             self._suave[j] += (meta[j] - self._suave[j]) * paso
 
         u = min(1.0, max(0.0, (ahora - self._acento_t0) / DURACION_ACENTO))
@@ -206,6 +213,7 @@ class FondoSynthwave(QWidget):
         if self._base is None or self._base_tam != (w, h):
             self._construir_base()
         yh = _yh(h)
+        self._ritmo.antes()
         pintor = QPainter(self)
         try:
             pintor.setRenderHint(QPainter.Antialiasing, True)
@@ -217,6 +225,7 @@ class FondoSynthwave(QWidget):
             self._dibujar_cordillera(pintor, w, yh)
         finally:
             pintor.end()
+            self._ritmo.despues()
 
     # ----- dibujo ------------------------------------------------------------------
 

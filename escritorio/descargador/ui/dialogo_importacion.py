@@ -7,23 +7,33 @@ después de cada lote y apunta por dónde va: si se cierra Caudal o se pausa,
 la próxima vez se sigue desde ahí.
 """
 
+import time
+
 from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (QDialog, QHBoxLayout, QLabel, QPlainTextEdit, QProgressBar,
                                QPushButton, QVBoxLayout)
 
-from .. import catalogo, importacion
+from .. import catalogo, importacion, vinculadas, soundcloud
 from .estilos import C
 
 
 def buscar_pista(cancion):
     """La pista de YouTube Music para una canción traída (con sus reintentos)."""
     vid = catalogo.video_id_de(cancion.get("url") or "")
+    if vid and not cancion.get("titulo"):
+        # solo se sabe el video (Google Takeout): se pregunta qué canción es
+        return importacion.con_reintentos(lambda: catalogo.pista_de_video(vid))
     if vid:
         return catalogo.nueva_pista(vid, cancion.get("titulo") or "",
                                     [{"nombre": cancion.get("artista") or "", "id": ""}],
                                     duracion=cancion.get("duracion") or 0,
                                     miniatura=cancion.get("miniatura") or "")
-    return importacion.resolver_una(cancion, lambda q: catalogo.buscar(q, "canciones", 3))
+    if cancion.get("directa"):
+        return soundcloud.pista_original(cancion)          # la persona la quiere tal cual está en SoundCloud
+    hallada = importacion.resolver_una(cancion, lambda q: catalogo.buscar(q, "canciones", 3))
+    if cancion.get("sc_url") and (hallada is None or not soundcloud.es_la_misma(cancion, hallada)):
+        return soundcloud.pista_original(cancion) or hallada
+    return hallada
 
 
 class _Trabajo(QThread):
@@ -36,11 +46,18 @@ class _Trabajo(QThread):
         self.canciones = canciones
         self.desde = desde
         self.parar = False
+        self.externas = set()       # las del otro servicio que sí se encontraron
+
+    def _buscar(self, cancion):
+        p = buscar_pista(cancion)
+        if p and cancion.get("externa"):
+            self.externas.add(cancion["externa"])
+        return p
 
     def run(self):
         try:
             r = importacion.emparejar(
-                self.canciones, buscar_pista, desde=self.desde,
+                self.canciones, self._buscar, desde=self.desde,
                 al_avanzar=lambda h, t: self.avance.emit(h, t),
                 al_lote=lambda fin, p, s: self.lote.emit(fin, p, s),
                 cancelado=lambda: self.parar)
@@ -61,7 +78,8 @@ def pendiente(col):
 
 def nueva(col, canciones, destino):
     """Prepara una importación y la deja apuntada. `destino`:
-    {'tipo': 'lista', 'nombre', 'plataforma'} o {'tipo': 'me_gusta', 'servicio', 'enlace', 'titulo'}."""
+    {'tipo': 'lista', 'nombre', 'plataforma'} o {'tipo': 'me_gusta', 'servicio', 'enlace', 'titulo',
+    'cuenta': 'spotify'|'youtube'|'soundcloud' si viene de ahí}."""
     trabajo = {"destino": dict(destino), "canciones": canciones, "hechas": 0,
                "encontradas": 0, "anadidas": 0, "repetidas": 0, "no_encontradas": []}
     if destino.get("tipo") == "lista":
@@ -167,10 +185,20 @@ class DialogoImportacion(QDialog):
                     destino["lista_id"], pistas)
         t["encontradas"] = t.get("encontradas", 0) + len(pistas)
         t["no_encontradas"] = t.get("no_encontradas", []) + list(sin)
+        self._anotar_externas(t["canciones"][t.get("hechas", 0):fin])
         t["hechas"] = fin
         self.col.guardar_estado(importacion.CLAVE_PENDIENTE, t)
         if not self.es_me_gusta and pistas:
             self.ctx.listas_cambio.emit()
+
+    def _anotar_externas(self, canciones):
+        """Lo ya traído de una cuenta vinculada: no se vuelve a buscar al sincronizar."""
+        servicio = self.trabajo["destino"].get("cuenta")
+        if not self.es_me_gusta or servicio not in vinculadas.SERVICIOS or self.hilo is None:
+            return
+        claves = [c["externa"] for c in canciones if c.get("externa")]
+        si = [k for k in claves if k in self.hilo.externas]
+        vinculadas.anotar_traidas(self.col, servicio, si, [k for k in claves if k not in self.hilo.externas])
 
     def _pausar(self):
         if self.hilo and self.hilo.isRunning():
@@ -189,6 +217,13 @@ class DialogoImportacion(QDialog):
                 importacion.anotar_fuente(self.col, d.get("servicio", ""), d.get("enlace", ""),
                                           d.get("titulo", ""), t.get("anadidas", 0),
                                           len(t.get("no_encontradas", [])))
+                servicio = d.get("cuenta")
+                if servicio in vinculadas.SERVICIOS and d.get("enlace") == f"{servicio}:me":
+                    antes = vinculadas.info(self.col, servicio)
+                    vinculadas.anotar(self.col, servicio, ultima=time.time(), completa=True,
+                                      cuantas=antes["cuantas"] + t.get("anadidas", 0))
+                if getattr(self.ctx, "me_gusta_cambio", None) is not None:
+                    self.ctx.me_gusta_cambio.emit("", True)
         self.titulo.setText(self.resumen() if acabo else
                             "En pausa. Lo encontrado ya está guardado; sigue cuando quieras "
                             "desde «Traer una lista».")

@@ -8,6 +8,7 @@ import 'package:caudal/nucleo/ajustes.dart';
 import 'package:caudal/nucleo/coleccion.dart';
 import 'package:caudal/nucleo/cuentas.dart';
 import 'package:caudal/nucleo/descargas.dart';
+import 'package:caudal/nucleo/estilo_reproductor.dart';
 import 'package:caudal/nucleo/streams.dart';
 import 'package:caudal/reproduccion/cast.dart';
 import 'package:caudal/reproduccion/reproductor.dart';
@@ -31,6 +32,12 @@ class _ReproductorFalso extends ChangeNotifier implements Reproductor {
   Json? actual;
   @override
   Json? contexto;
+  @override
+  List<Json> proximas = [];
+  @override
+  int pos = 0;
+  @override
+  List<Json> get siguientesDeContexto => const [];
   @override
   EstadoRepro estado = EstadoRepro.sonando;
   @override
@@ -155,6 +162,12 @@ void main() {
       await _montar(t, const ReproductorPagina());
       expect(find.byType(FondoAmbiente), findsOneWidget);
       expect(find.text('Canción 1'), findsOneWidget);
+      // con la carátula a todo el ancho el fondo se queda quieto; con los demás estilos se mueve
+      expect(t.widget<FondoAmbiente>(find.byType(FondoAmbiente)).enMovimiento, isFalse);
+      PreferenciasReproductor.i.estilo = EstiloReproductor.vinilo;
+      PreferenciasReproductor.i.notifyListeners();
+      addTearDown(PreferenciasReproductor.i.reiniciarParaPruebas);
+      await t.pump(const Duration(milliseconds: 300));
       expect(t.widget<FondoAmbiente>(find.byType(FondoAmbiente)).enMovimiento, isTrue);
 
       // pausa: el boton grande cambia de icono y el fondo se queda quieto

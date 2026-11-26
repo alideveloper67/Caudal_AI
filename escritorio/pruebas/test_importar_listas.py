@@ -222,14 +222,75 @@ def test_soundcloud_pagina_publica_trae_lo_que_ensena():
     assert datos["canciones"][0]["artista"] == "Artista 0"
 
 
-def test_soundcloud_sin_credenciales_explica_lo_que_falta(monkeypatch):
+def _fichas(faltan=()):
+    def completar(ids):
+        return [None if i in faltan else {"titulo": f"Otro - Canción {i}", "autor": "chillhop", "miniatura": "m",
+                                          "enlace": f"https://api.soundcloud.com/tracks/{i}"} for i in ids]
+    return completar
+
+
+def test_soundcloud_sin_credenciales_trae_la_lista_entera(monkeypatch):
+    from descargador import soundcloud
     monkeypatch.setattr(listas, "_soundcloud_por_funcion", MagicMock(side_effect=listas.SinCredenciales()))
     monkeypatch.setattr(listas.requests, "get", lambda *a, **k: Resp(200, None, texto=PAGINA_SC))
+    monkeypatch.setattr(soundcloud, "completar", _fichas())
     d = listas.leer("https://soundcloud.com/chillhop/sets/chill", {})
-    assert d["total"] == 5 and not d["completa"] and "5 de sus 48" in d["aviso"]
+    assert d["total"] == 48 and d["completa"] and not d["aviso"]
+    # en su orden: las 5 de la página y detrás las que se preguntaron
+    assert d["canciones"][0]["titulo"] == "Tema 0" and d["canciones"][5]["titulo"] == "Canción 100"
+    assert d["canciones"][5]["artista"] == "Otro" and d["canciones"][5]["externa"] == "sc:100"
+    assert d["canciones"][5]["sc_url"] == "https://api.soundcloud.com/tracks/100"
+
+
+def test_soundcloud_si_alguna_es_privada_lo_dice(monkeypatch):
+    from descargador import soundcloud
+    monkeypatch.setattr(listas, "_soundcloud_por_funcion", MagicMock(side_effect=listas.SinCredenciales()))
+    monkeypatch.setattr(listas.requests, "get", lambda *a, **k: Resp(200, None, texto=PAGINA_SC))
+    monkeypatch.setattr(soundcloud, "completar", _fichas(faltan=(101, 102)))
+    d = listas.leer("https://soundcloud.com/chillhop/sets/chill", {})
+    assert d["total"] == 46 and not d["completa"] and "46 de sus 48" in d["aviso"]
+
+
+def test_soundcloud_me_gusta_de_un_perfil(monkeypatch):
+    from descargador import soundcloud
+    monkeypatch.setattr(listas, "_soundcloud_por_funcion", MagicMock(side_effect=listas.SinCredenciales()))
+    monkeypatch.setattr(soundcloud, "_entradas", lambda *a, **k: [
+        {"id": "7", "title": "Ana - Luna", "url": "https://soundcloud.com/ana/luna"},
+        {"id": "8", "title": None, "url": "https://soundcloud.com/ana/privada"}])
+    d = listas.leer("https://soundcloud.com/ana/likes", {})
+    assert d["me_gusta"] and [c["titulo"] for c in d["canciones"]] == ["Luna"]
+    assert d["canciones"][0]["sc_url"] == "https://soundcloud.com/ana/luna"
+
+    def falla(*_a, **_k):
+        raise soundcloud.ErrorSoundcloud("no")
+    monkeypatch.setattr(soundcloud, "_entradas", falla)
     with pytest.raises(listas.ErrorLista) as e:
-        listas.leer("https://soundcloud.com/chillhop/likes", {})
-    assert "conexión oficial" in str(e.value)
+        listas.leer("https://soundcloud.com/ana/likes", {})
+    assert "públicos" in str(e.value)
+
+
+def test_soundcloud_si_no_es_la_misma_se_queda_el_original(monkeypatch):
+    from descargador.ui import dialogo_importacion as D
+    c = {"titulo": "Luna (Remix)", "artista": "Ana", "duracion": 0, "externa": "sc:7", "miniatura": "m",
+         "sc_url": "https://soundcloud.com/ana/luna-remix"}
+    otra = {"clave": "yt:aaaaaaaaaaa", "video_id": "aaaaaaaaaaa", "titulo": "Luna", "artista": "Ana", "duracion": 1}
+    monkeypatch.setattr(D.importacion, "resolver_una", lambda *a, **k: otra)
+    p = D.buscar_pista(c)
+    assert p["clave"] == "url:https://soundcloud.com/ana/luna-remix" and p["url"] == c["sc_url"]
+    assert p["titulo"] == "Luna (Remix)" and p["artista"] == "Ana" and not p["video_id"]
+    # si es la misma, la de YouTube Music (viaja al teléfono)
+    assert D.buscar_pista(dict(c, titulo="Luna"))["clave"] == "yt:aaaaaaaaaaa"
+    # y si la persona las quiere tal cual, ni se busca
+    assert D.buscar_pista(dict(c, titulo="Luna", directa=True))["url"] == c["sc_url"]
+
+
+def test_soundcloud_pistas_y_enlaces():
+    from descargador import soundcloud as S
+    p = S.pista("06 - Canserbero - Mundo de Piedra", "canal", "https://soundcloud.com/x/y", 100.7, "", 5)
+    assert (p["titulo"], p["artista"], p["duracion"]) == ("Mundo de Piedra", "Canserbero", 100)
+    assert S.es(p) and not S.es({"video_id": "a", "url": "https://soundcloud.com/x/y"})
+    assert S.es_enlace("https://api.soundcloud.com/tracks/1") and not S.es_enlace("https://nosoundcloud.com/x")
+    assert S.separar("Solo el título", "Canal") == ("Solo el título", "Canal")
 
 
 def test_me_gusta_de_youtube_explica_como_pasarlos():
@@ -489,26 +550,3 @@ def test_el_dialogo_de_avance_guarda_por_lotes_y_se_puede_reanudar(app, col, mon
     assert len(fin[0]["no_encontradas"]) == 23
     assert DI.pendiente(col) is None
     assert "207 canciones" in dlg.resumen() and "23 no se encontraron" in dlg.resumen()
-
-
-def test_dialogo_me_gusta_explica_lo_que_falta_sin_conexiones(app, col, monkeypatch):
-    from PySide6.QtWidgets import QLabel
-    from descargador import servicios_externos
-    monkeypatch.setattr(servicios_externos, "configuracion", lambda forzar=False: {
-        "spotify_client_id": "", "spotify": False, "soundcloud": False})
-    from descargador.ui.dialogo_me_gusta import DialogoMeGusta
-    d = DialogoMeGusta(_ctx(col))
-    textos = " ".join(l.text() for l in d.findChildren(QLabel))
-    assert "aún no está activada" in textos           # Spotify
-    assert "Agregar a playlist" in textos             # YouTube Music
-    assert "SoundCloud aún no está activada" in textos
-
-
-def test_spotify_pkce_url_sin_secreto():
-    from urllib.parse import parse_qs, urlparse
-    from descargador import servicios_externos as SE
-    v = SE.nuevo_verificador()
-    q = parse_qs(urlparse(SE.url_autorizar_spotify("cid", v, "est")).query)
-    assert q["code_challenge"][0] == SE.huella(v) and q["code_challenge_method"][0] == "S256"
-    assert q["redirect_uri"][0] == "http://127.0.0.1:43821/spotify"
-    assert "client_secret" not in q

@@ -5,9 +5,13 @@ Se instala una sola vez en la aplicación (`instalar()`): al pulsar y mover el
 ratón sobre cualquier página, lista o carrusel, el contenido sigue al puntero y,
 al soltar, se desliza un poco más (inercia). Los clics normales no cambian: solo
 cuenta como arrastre si el puntero se mueve unos pocos píxeles.
+
+Solo se mira la pulsación en cada ventana y, mientras dura, el widget pulsado y los que lo contienen.
+(Antes era un filtro de toda la aplicación: cada evento de cada widget —miles por pantalla— pasaba por
+Python, y solo eso eran ~100 ms al abrir Ajustes.)
 """
 from PySide6.QtCore import QEvent, QObject, QPointF, Qt, QTimer
-from PySide6.QtGui import QGuiApplication, QMouseEvent
+from PySide6.QtGui import QGuiApplication, QMouseEvent, QWindow
 from PySide6.QtWidgets import (QAbstractItemView, QAbstractScrollArea, QAbstractSlider, QAbstractSpinBox,
                                QApplication, QComboBox, QLineEdit, QPlainTextEdit, QTabBar, QTextEdit, QWidget)
 
@@ -33,6 +37,7 @@ class ArrastreRaton(QObject):
         self._velocidad = 0.0
         self._barra = None
         self._cursor = False
+        self._vigilados = []        # widgets con el filtro puesto mientras dura la pulsación
         self._inercia = QTimer(self)
         self._inercia.setInterval(16)
         self._inercia.timeout.connect(self._paso_inercia)
@@ -68,8 +73,35 @@ class ArrastreRaton(QObject):
             QGuiApplication.restoreOverrideCursor()
             self._cursor = False
 
+    def vigilar_ventana(self, ventana):
+        """Cada ventana nativa se mira una sola vez (llega sola al ganar el foco)."""
+        if ventana is None or ventana.property("_caudal_arrastre"):
+            return
+        ventana.setProperty("_caudal_arrastre", True)
+        ventana.installEventFilter(self)
+
+    def _vigilar(self, widget):
+        """El filtro, en el widget pulsado y los que lo contienen (hasta su ventana)."""
+        self._soltar_vigilados()
+        p = widget
+        while p is not None:
+            p.installEventFilter(self)
+            self._vigilados.append(p)
+            if p.isWindow():
+                break
+            p = p.parentWidget()
+
+    def _soltar_vigilados(self):
+        for w in self._vigilados:
+            try:
+                w.removeEventFilter(self)
+            except RuntimeError:            # ya se destruyó
+                pass
+        self._vigilados = []
+
     def _reiniciar(self):
         self._poner_cursor(False)
+        self._soltar_vigilados()
         self._objetivo = None
         self._origen = None
         self._cadena = []
@@ -80,10 +112,22 @@ class ArrastreRaton(QObject):
     # ---------------------------------------------------------------- eventos
     def eventFilter(self, obj, e):
         t = e.type()
+        if isinstance(obj, QWindow):
+            # la pulsación llega antes a la ventana que al widget: ahí se pone a mirar lo que se pulsó
+            if t == QEvent.MouseButtonPress:
+                self._inercia.stop()
+                self._reiniciar()
+                if e.button() == Qt.LeftButton:
+                    w = QApplication.widgetAt(e.globalPosition().toPoint())
+                    if w is not None and self._areas_sobre(w):
+                        self._vigilar(w)
+            elif t in (QEvent.Close, QEvent.Hide):
+                self._reiniciar()
+            return False
         if t == QEvent.MouseButtonPress:
             if e.button() == Qt.LeftButton and isinstance(obj, QWidget):
                 self._inercia.stop()
-                self._reiniciar()
+                self._objetivo = None
                 if not self._se_excluye(obj):
                     cadena = self._areas_sobre(obj)
                     if cadena:
@@ -163,6 +207,7 @@ class ArrastreRaton(QObject):
             self._inercia.start()
         else:
             self._reiniciar()
+        self._soltar_vigilados()
         self._objetivo = None
 
     def _paso_inercia(self):
@@ -187,5 +232,8 @@ def instalar(app=None):
     app = app or QApplication.instance()
     if _instancia is None and app is not None:
         _instancia = ArrastreRaton(app)
-        app.installEventFilter(_instancia)
+        app.focusWindowChanged.connect(_instancia.vigilar_ventana)
+    if _instancia is not None and app is not None:
+        for v in app.topLevelWindows():
+            _instancia.vigilar_ventana(v)
     return _instancia

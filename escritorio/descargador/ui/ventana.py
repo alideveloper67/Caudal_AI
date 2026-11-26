@@ -5,7 +5,7 @@ import os
 import sys
 
 from PySide6.QtCore import QAbstractNativeEventFilter, QByteArray, QEvent, QObject, QPoint, Qt, QTimer
-from PySide6.QtGui import QAction, QGuiApplication, QIcon, QKeySequence, QShortcut
+from PySide6.QtGui import QAction, QFont, QGuiApplication, QIcon, QKeySequence, QShortcut
 from PySide6.QtWidgets import (QAbstractButton, QAbstractSpinBox, QApplication, QComboBox, QFrame, QHBoxLayout,
                                QLabel, QLineEdit, QMenu, QMessageBox, QPlainTextEdit, QPushButton, QSlider, QSplitter,
                                QStackedWidget, QSystemTrayIcon, QTextEdit, QVBoxLayout, QWidget)
@@ -25,26 +25,25 @@ EXT_AUDIO = {".mp3", ".m4a", ".opus", ".ogg", ".flac", ".wav", ".aac", ".wma", "
 EXT_VIDEO = {".mp4", ".mkv", ".mov", ".avi", ".webm", ".m4v", ".wmv", ".flv", ".ts"}
 
 # Ajustes también: tiene cientos de controles y rehacerla en cada visita trababa ~0,4 s
-SINGLETONS = ("descargas", "video", "letra", "vinilo", "visualizador", "karaoke", "escena", "ajustes")
+SINGLETONS = ("descargas", "video", "letra", "vinilo", "visualizador", "karaoke", "escena", "ajustes",
+              "sonando")
 VISTAS_GRANDES = ("visualizador", "karaoke", "escena")      # a pantalla completa, para donadores
 
 
-class _Teclas(QObject):
-    """Espacio para reproducir/pausar en toda la app, salvo al escribir."""
+class _BarraSuperior(QFrame):
+    """Con poco sitio se esconden los dos botones que también están en otra parte, y el buscador respira."""
 
     def __init__(self, ventana):
-        super().__init__(ventana)
+        super().__init__()
         self.v = ventana
 
-    def eventFilter(self, obj, ev):
-        if ev.type() == QEvent.KeyPress and ev.key() == Qt.Key_Space and not ev.modifiers():
-            foco = QApplication.focusWidget()
-            if not isinstance(foco, (QLineEdit, QTextEdit, QPlainTextEdit, QComboBox,
-                                     QAbstractSpinBox)):
-                if QApplication.activeWindow() in (self.v, self.v.mini):
-                    self.v.ctx.reproductor.alternar()
-                    return True
-        return False
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        cabe = self.width() >= 500
+        for nombre in ("bt_adelante", "bt_resumen"):
+            b = getattr(self.v, nombre, None)
+            if b is not None and b.isHidden() == cabe:
+                b.setVisible(cabe)
 
 
 class TeclasMultimedia(QAbstractNativeEventFilter):
@@ -219,7 +218,7 @@ class Ventana(QWidget):
         self._grande_en_sesion = False
         self._novedad_pendiente = None
         # primero el agradecimiento «Somos 100» (si toca) y, al cerrarlo, las novedades de la versión
-        QTimer.singleShot(2500, self._presentaciones_inicio)
+        QTimer.singleShot(2500, self, lambda: self._con_calma(self._presentaciones_inicio))
         # «ya puedes regalar códigos de prueba»: una vez, a donadores y fundadores (cuando se sepa que lo son)
         self._aviso_regalo = None
         self._t_regalo = QTimer(self)
@@ -229,15 +228,20 @@ class Ventana(QWidget):
         self._t_regalo.start(5000)
         # «Feliz cumpleaños»: mi fecha y los amigos que cumplen hoy; mi día, la celebración (una vez al día)
         self._celebracion = None
-        QTimer.singleShot(2000, self._iniciar_cumple)
+        QTimer.singleShot(2000, self, lambda: self._con_calma(self._iniciar_cumple))
         QTimer.singleShot(1500, self.fondo.sincronizar)
         QTimer.singleShot(6000, lambda: self.buscar_version(True))
-        QTimer.singleShot(9000, self._buscar_avisos)
+        QTimer.singleShot(9000, self, lambda: self._con_calma(self._buscar_avisos))
+        QTimer.singleShot(25000, self._cuentas_al_dia)
         # precalentar: cargar con calma lo que usan las páginas pesadas, para que abrirlas la primera vez
         # no se trabe (Ajustes cargaba ~190 módulos de golpe)
-        QTimer.singleShot(12000, self._precalentar)
+        QTimer.singleShot(12000, self, lambda: self._con_calma(self._precalentar))
+        QTimer.singleShot(3000, self, lambda: self._con_calma(self.r.adelantar_actual))
+        QTimer.singleShot(6000, self, lambda: self._con_calma(self._poner_tipos_de_letra))
 
-        QApplication.instance().installEventFilter(_Teclas(self))
+        # Espacio en el mini reproductor (en la ventana ya tiene su atajo). Antes era un filtro de toda la
+        # aplicación: cada evento de cada widget pasaba por Python solo para mirar si era un espacio
+        QShortcut(QKeySequence("Space"), self.mini, activated=self.r.alternar)
         from . import arrastre
         arrastre.instalar()        # arrastrar con el ratón para desplazar, como con el dedo
         self.teclas_multimedia = TeclasMultimedia(self)
@@ -302,18 +306,18 @@ class Ventana(QWidget):
         self.ctx.gamer = self.gamer
 
     def _barra_superior(self):
-        barra = QFrame()
+        barra = _BarraSuperior(self)
         barra.setObjectName("barra_superior")
         barra.setFixedHeight(64)
         h = QHBoxLayout(barra)
         h.setContentsMargins(16, 10, 16, 6)
         h.setSpacing(8)
-        estilo = (f"QPushButton{{background:{C['fondo']};border:none;border-radius:16px;}}"
+        estilo = (f"QPushButton{{background:{C['fondo']};border:none;border-radius:19px;}}"
                   f"QPushButton:hover{{background:{C['superficie2']};}}")
-        self.bt_atras = BotonIcono("atras", 18, "Atrás  (Alt+←)", 32)
+        self.bt_atras = BotonIcono("atras", 19, "Atrás  (Alt+←)", 38)
         self.bt_atras.setStyleSheet(estilo)
         self.bt_atras.clicked.connect(self.atras)
-        self.bt_adelante = BotonIcono("adelante", 18, "Adelante  (Alt+→)", 32)
+        self.bt_adelante = BotonIcono("adelante", 19, "Adelante  (Alt+→)", 38)
         self.bt_adelante.setStyleSheet(estilo)
         self.bt_adelante.clicked.connect(self.adelante)
         h.addWidget(self.bt_atras)
@@ -324,16 +328,16 @@ class Ventana(QWidget):
         self.campo.setPlaceholderText("¿Qué quieres escuchar o ver?  ·  o pega un enlace")
         self.campo.setClearButtonEnabled(True)
         self.campo.setMaximumWidth(560)
-        self.campo.setMinimumWidth(320)
+        self.campo.setMinimumWidth(90)
         self.campo.setFixedHeight(44)
         self.icono_lupa = QAction(iconos.icono("lupa", 20, C["texto2"]), "", self.campo)
         self.campo.addAction(self.icono_lupa, QLineEdit.LeadingPosition)
-        h.addWidget(self.campo, 1)
+        h.addWidget(self.campo, 100)
         h.addStretch(1)
-        self.bt_perfil = BotonIcono("usuario", 19, "Mi perfil", 36)
+        self.bt_perfil = BotonIcono("usuario", 20, "Mi perfil", 42)
         self.bt_perfil.clicked.connect(lambda: self.navegar({"pagina": "perfil"}))
         h.addWidget(self.bt_perfil)
-        self.bt_mensajes = BotonIcono("chat", 19, "Mensajes", 36)
+        self.bt_mensajes = BotonIcono("chat", 20, "Mensajes", 42)
         self.bt_mensajes.clicked.connect(lambda: self.navegar({"pagina": "mensajes"}))
         h.addWidget(self.bt_mensajes)
         # cuántos mensajes sin leer (se mira cada minuto)
@@ -343,25 +347,25 @@ class Ventana(QWidget):
         self._reloj_mensajes.timeout.connect(self._mirar_mensajes)
         self._reloj_mensajes.start()
         QTimer.singleShot(4000, self._mirar_mensajes)
-        self.bt_resumen = BotonIcono("ecualizador", 19, "Tu resumen", 36)
+        self.bt_resumen = BotonIcono("ecualizador", 20, "Tu resumen", 42)
         self.bt_resumen.clicked.connect(lambda: self.navegar({"pagina": "resumen"}))
         h.addWidget(self.bt_resumen)
-        self.bt_descargas = BotonIcono("descargar", 19, "Descargas", 36)
+        self.bt_descargas = BotonIcono("descargar", 20, "Descargas", 42)
         self.bt_descargas.clicked.connect(lambda: self.navegar({"pagina": "descargas"}))
         h.addWidget(self.bt_descargas)
-        self.bt_ajustes = BotonIcono("engranaje", 19, "Ajustes", 36)
+        self.bt_ajustes = BotonIcono("engranaje", 20, "Ajustes", 42)
         self.bt_ajustes.clicked.connect(lambda: self.navegar({"pagina": "ajustes"}))
         h.addWidget(self.bt_ajustes)
         cuenta = getattr(self.ctx, "cuenta", None) or {}
         if cuenta:
             nombre = cuenta.get("nombre") or cuenta.get("usuario") or "?"
             self.bt_cuenta = QPushButton(nombre[:1].upper())
-            self.bt_cuenta.setFixedSize(34, 34)
+            self.bt_cuenta.setFixedSize(40, 40)
             self.bt_cuenta.setCursor(Qt.PointingHandCursor)
             self.bt_cuenta.setToolTip(nombre)
             self.bt_cuenta.setStyleSheet(
                 f"QPushButton{{background:{C['acento']};color:{C['acento_texto']};border:3px solid "
-                f"{C['superficie2']};border-radius:17px;font-weight:900;font-size:14px;padding:0;}}"
+                f"{C['superficie2']};border-radius:20px;font-weight:900;font-size:15px;padding:0;}}"
                 f"QPushButton:hover{{border-color:{C['superficie3']};}}")
             self.bt_cuenta.clicked.connect(self._menu_cuenta)
             h.addWidget(self.bt_cuenta)
@@ -468,28 +472,44 @@ class Ventana(QWidget):
         else:
             QApplication.quit()
 
-    _PRECALENTAR = ("descargador.ui.paginas.juntos",
-                    "descargador.ui.mas_donadores", "descargador.ui.paginas.perfil",
-                    "descargador.ui.paginas.resumen", "descargador.ui.escena.ventana")
+    def _poner_tipos_de_letra(self):
+        """Los tipos de letra de las canciones, ya leídos en un hilo, de uno en uno: abrir «Diseño de letra» en la
+        escena los cargaba todos de golpe."""
+        from . import tipografia_letra
+        if tipografia_letra.calentar_una():
+            QTimer.singleShot(120, self, self._poner_tipos_de_letra)
+        else:
+            QTimer.singleShot(500, self, self._poner_alfabetos)
 
-    def _precalentar(self, i=0):
-        """Un módulo cada 400 ms y solo si no suena nada que pudiera notar el tirón de importar."""
-        import importlib
-        if i > len(self._PRECALENTAR):
+    # títulos que no están en «Segoe UI»: la primera vez Windows busca y carga otra fuente (hasta 180 ms, al
+    # desplazarse por una lista). Se cargan de a uno, con la PC quieta
+    ALFABETOS = ("日本語かな", "한국어", "中文歌曲", "العربية", "русский", "ไทย", "हिन्दी", "🎵🔥💔", "★♪→", "ελληνικά", "עברית")
+
+    def _poner_alfabetos(self, i=0):
+        if i >= len(self.ALFABETOS):
             return
-        if _segundos_sin_tocar() < 4 or (self.isVisible() and self.isActiveWindow() and _segundos_sin_tocar() < 8):
-            # alguien está usando la PC: se espera a un momento quieto para no causar ni un tirón
-            QTimer.singleShot(3000, lambda: self._precalentar(i))
+        if _segundos_sin_tocar() < 1.5:
+            QTimer.singleShot(1500, self, lambda: self._poner_alfabetos(i))
+            return
+        from PySide6.QtGui import QFontMetrics
+        from .componentes import fuente
+        for f in (fuente(14, QFont.DemiBold), fuente(13)):
+            QFontMetrics(f).horizontalAdvance(self.ALFABETOS[i])
+        QTimer.singleShot(200, self, lambda: self._poner_alfabetos(i + 1))
+
+    def _precalentar(self):
+        """Los módulos ya se cargaron solos en un hilo (fluidez.precargar): aquí solo queda construir Ajustes
+        (oculta y por partes), para que abrirla luego sea instantáneo."""
+        if "ajustes" in self.singletons:
+            return
+        if _segundos_sin_tocar() < 4:
+            # alguien está usando la PC: se espera a un momento quieto
+            QTimer.singleShot(3000, self._precalentar)
             return
         try:
-            if i < len(self._PRECALENTAR):
-                importlib.import_module(self._PRECALENTAR[i])
-            elif "ajustes" not in self.singletons:
-                # al final, Ajustes queda construida (oculta): abrirla luego es instantáneo
-                self._fabricar({"pagina": "ajustes"})
+            self._fabricar({"pagina": "ajustes"})
         except Exception:  # noqa: BLE001
             pass
-        QTimer.singleShot(400, lambda: self._precalentar(i + 1))
 
     # ------------------------------------------------------------ navegacion
 
@@ -534,7 +554,7 @@ class Ventana(QWidget):
             w = PaginaDescargas(self.ctx)
         elif pag == "ajustes":
             from .paginas.ajustes import PaginaAjustes
-            w = PaginaAjustes(self.ctx)
+            w = PaginaAjustes(self.ctx, por_partes=True)
         elif pag == "mensajes":
             from .paginas.mensajes import PaginaMensajes
             w = PaginaMensajes(self.ctx)
@@ -545,6 +565,10 @@ class Ventana(QWidget):
             from .letra_viva import PaginaLetra
             w = PaginaLetra(self.ctx)
             w.volver.connect(self.cerrar_letra)
+        elif pag == "sonando":
+            from .sonando import PaginaSonando
+            w = PaginaSonando(self.ctx)
+            w.volver.connect(self.cerrar_sonando)
         elif pag == "vinilo":
             from .vinilo import PaginaVinilo
             w = PaginaVinilo(self.ctx)
@@ -689,12 +713,23 @@ class Ventana(QWidget):
             pagina = self.historia[self.indice][0].get("pagina") if 0 <= self.indice < len(self.historia) else ""
         self.barra.setVisible(not getattr(self, "en_completa", False) and pagina != "video")
 
+    def _con_calma(self, hacer, intentos=180):
+        """Lo que no corre prisa espera a que los módulos estén cargados: nada se importa en este hilo."""
+        from .. import fluidez
+        if fluidez.precargando() and intentos > 0:
+            QTimer.singleShot(500, self, lambda: self._con_calma(hacer, intentos - 1))
+        else:
+            hacer()
+
     def _mirar_mensajes(self):
-        from .paginas.mensajes import chat_de
         from ..hilos import en_segundo_plano
-        c = chat_de(self.ctx)
-        if c is None:
+        sesion = (getattr(self.ctx, "cuenta", None) or {}).get("sesion")
+        if not sesion or not getattr(sesion, "access", ""):
             return
+
+        def contar():
+            from .. import chat          # en su hilo: la página de Mensajes no hace falta para contar
+            return chat.Chat(sesion).sin_leer()
 
         def listo(n):
             self._sin_leer = int(n or 0)
@@ -702,7 +737,7 @@ class Ventana(QWidget):
             self.bt_mensajes.set_activo(en_mensajes or self._sin_leer > 0, punto=self._sin_leer > 0)
             self.bt_mensajes.setToolTip(f"Mensajes ({self._sin_leer} sin leer)" if self._sin_leer else "Mensajes")
 
-        en_segundo_plano(c.sin_leer, ok=listo, error=lambda _e: None, dueno=self, urgente=True)
+        en_segundo_plano(contar, ok=listo, error=lambda _e: None, dueno=self, urgente=True)
 
     def atras(self):
         if self.indice > 0:
@@ -768,6 +803,7 @@ class Ventana(QWidget):
         self.lateral.ir.connect(self.navegar)
         self.lateral.traer_lista.connect(self._traer_lista)
         self.barra.pidio_panel.connect(self.alternar_panel)
+        self.barra.pidio_sonando.connect(self.alternar_sonando)
         self.barra.pidio_letra.connect(self.alternar_letra)
         self.barra.pidio_video.connect(self._ver_video)
         self.barra.pidio_vinilo.connect(self.alternar_vinilo)
@@ -832,7 +868,8 @@ class Ventana(QWidget):
         atajo("Escape", lambda: self.en_completa and self.alternar_completa()
               or self._escape_estudio()
               or self._en_vista_grande() and self.cerrar_vista_grande()
-              or self._en_vinilo() and self.cerrar_vinilo())
+              or self._en_vinilo() and self.cerrar_vinilo()
+              or self._en_sonando() and self.cerrar_sonando())
         atajo("Ctrl+Shift+A", self._anadir_sonando_a_lista)
         atajo("Ctrl+Shift+E", self.abrir_estudio)
         atajo("Ctrl+Shift+N", self._notas_estudio)
@@ -936,6 +973,34 @@ class Ventana(QWidget):
             self.cerrar_vinilo()
         elif self.r.actual is not None:
             self.navegar({"pagina": "vinilo"})
+
+    # ------------------------------------------------------------ el reproductor en grande
+
+    def _en_sonando(self):
+        actual = self.historia[self.indice][0] if 0 <= self.indice < len(self.historia) else {}
+        return actual.get("pagina") == "sonando"
+
+    def abrir_sonando(self):
+        if self.r.actual is None or self._en_sonando():
+            return
+        self.navegar({"pagina": "sonando"})
+        # la carátula ya está en grande: al lado se ve lo que sigue
+        if self.panel_der.isVisible() and self.panel_der.actual == "sonando":
+            self.panel_der.mostrar("cola")
+
+    def alternar_sonando(self):
+        if self._en_sonando():
+            self.cerrar_sonando()
+        else:
+            self.abrir_sonando()
+
+    def cerrar_sonando(self):
+        if self.panel_der.isVisible() and self.ajustes["panel_derecho"] == "sonando":
+            self.panel_der.mostrar("sonando")
+        if self.indice > 0:
+            self.atras()
+        else:
+            self.navegar({"pagina": "inicio"})
 
     def cerrar_vinilo(self):
         if self.indice > 0:
@@ -1116,7 +1181,7 @@ class Ventana(QWidget):
             self.bandeja.showMessage("Descarga completada", t.titulo[:120],
                                      QSystemTrayIcon.Information, 3500)
 
-    def _traer_lista(self):
+    def _traer_lista(self, url=""):
         if self._seguir_importacion_pendiente():
             return
         from .dialogo_listas import DialogoListas
@@ -1125,10 +1190,12 @@ class Ventana(QWidget):
         dialogo.guardar.connect(self._guardar_lista_traida)
         dialogo.a_me_gusta.connect(self._lista_a_me_gusta)
         dialogo.pasar_me_gusta.connect(self._pasar_me_gusta)
+        if url and isinstance(url, str):
+            dialogo.abrir_enlace(url)
         dialogo.exec()
 
     def _pasar_me_gusta(self):
-        """«Pasar tus me gusta»: Spotify, YouTube Music y SoundCloud -> Me gusta de Caudal."""
+        """«Vincular Spotify, YouTube y SoundCloud»: sus me gusta -> Me gusta de Caudal."""
         if self._seguir_importacion_pendiente():
             return
         from .dialogo_me_gusta import DialogoMeGusta
@@ -1136,12 +1203,22 @@ class Ventana(QWidget):
         dialogo.listo.connect(self._lista_a_me_gusta)
         dialogo.exec()
 
+    def _cuentas_al_dia(self):
+        """Lo nuevo de las cuentas vinculadas entra solo, en silencio (como mucho cada 12 horas)."""
+        from .vincular_auto import SincronizadorCuentas
+        try:
+            if getattr(self, "cuentas_auto", None) is None:
+                self.cuentas_auto = SincronizadorCuentas(self.ctx, self)
+            self.cuentas_auto.revisar()
+        except Exception:  # noqa: BLE001 - poner al día nunca debe estorbar
+            pass
+
     def _lista_traida(self, canciones):
         """«Descargar»: las canciones elegidas van a la cola de descargas en MP3."""
         if not canciones:
             return
         for c in canciones:
-            enlace = c.get("url") or ("ytsearch1:" + (c.get("busqueda") or c.get("titulo") or ""))
+            enlace = c.get("url") or c.get("sc_url") or ("ytsearch1:" + (c.get("busqueda") or c.get("titulo") or ""))
             nombre = c.get("titulo") or ""
             if c.get("artista"):
                 nombre = f"{c['artista']} - {nombre}"
@@ -1159,14 +1236,14 @@ class Ventana(QWidget):
         self.ctx.listas_cambio.emit()
         self._mostrar_importacion(trabajo)
 
-    def _lista_a_me_gusta(self, canciones, titulo, servicio, enlace):
+    def _lista_a_me_gusta(self, canciones, titulo, servicio, enlace, cuenta=""):
         """Las canciones traídas van a tus Me gusta (sin repetir las que ya están)."""
         if not canciones:
             return
         from . import dialogo_importacion as DI
         trabajo = DI.nueva(self.ctx.coleccion, canciones,
                            {"tipo": "me_gusta", "servicio": servicio, "enlace": enlace,
-                            "titulo": titulo})
+                            "titulo": titulo, "cuenta": cuenta})
         self._mostrar_importacion(trabajo)
 
     def _seguir_importacion_pendiente(self):

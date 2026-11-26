@@ -115,12 +115,13 @@ class PaginaListaCompartida(Pagina):
         self.e_filtro = QLineEdit()
         self.e_filtro.setObjectName("filtro_lista")
         self.e_filtro.setPlaceholderText("Buscar en la lista")
-        self.e_filtro.setFixedWidth(220)
+        self.e_filtro.setMinimumWidth(110)
+        self.e_filtro.setMaximumWidth(220)
         self.e_filtro.setClearButtonEnabled(True)
         self.e_filtro.addAction(iconos.icono("lupa", 16, C["texto2"]), QLineEdit.LeadingPosition)
         self.e_filtro.setText(self.filtro)
         self.e_filtro.textChanged.connect(self._filtrar)
-        acciones.widget(self.e_filtro)
+        acciones.h.addWidget(self.e_filtro, 2)
         self.cuerpo.addWidget(acciones)
 
         if not self.cargado:

@@ -978,13 +978,13 @@ def test_ventana_entrada_en_la_barra_atajos_y_proteccion_al_cambiar_de_pagina(ap
     v.show()
     app.processEvents()
     # entrada en la barra lateral y en Inicio
-    assert "estudio" in v.lateral.botones and "Modo estudio" in v.lateral.botones["estudio"].text()
+    assert "estudio" in v.lateral.botones and v.lateral.botones["estudio"].texto == "Modo estudio"
     assert any(type(w).__name__ == "TarjetaEstudioInicio" for w in v.findChildren(QWidget))
     # atajo Ctrl+Shift+E
     QTest.keyClick(v, Qt.Key_E, Qt.ControlModifier | Qt.ShiftModifier)
     app.processEvents()
     pag = v.historia[v.indice][1]
-    assert isinstance(pag, PaginaEstudio) and v.lateral.botones["estudio"].isChecked()
+    assert isinstance(pag, PaginaEstudio) and v.lateral.botones["estudio"]._activo
     ctrl = ctx.estudio
     ctrl.mezclador._fabrica = lambda n: MotorFalso(n)
     ctrl.mezclador.generador = SA.Generador(datos / "amb2", segundos=2, empalme=0.5)

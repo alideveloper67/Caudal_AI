@@ -178,7 +178,7 @@ class FilaPista extends StatelessWidget {
           onTap: alPulsar,
           onLongPress: alMantener ?? () => s.hojaPista(context, pista, extra: extraMenu),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: Esp.lado, vertical: 7),
+            padding: const EdgeInsets.fromLTRB(Esp.lado, 7, 4, 7),
             child: Row(children: [
               if (numero != null)
                 SizedBox(
@@ -234,8 +234,8 @@ class FilaPista extends StatelessWidget {
               ),
               IconButton(
                 icon: const Icon(Icons.more_vert_rounded, color: C.texto2),
+                tooltip: 'Opciones',
                 onPressed: () => s.hojaPista(context, pista, extra: extraMenu),
-                visualDensity: VisualDensity.compact,
               ),
             ]),
           ),
@@ -268,7 +268,7 @@ class Tarjeta extends StatelessWidget {
         child: InkWell(
           borderRadius: BorderRadius.circular(8),
           onTap: () => s.abrirElemento(context, el),
-          onLongPress: tipo == 'pista' ? () => s.hojaPista(context, el) : null,
+          onLongPress: () => s.hojaElemento(context, el),
           child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             esMeGusta
                 ? PortadaMeGusta(lado: w)
@@ -401,9 +401,10 @@ Color _hex(String h) {
 // ---------------------------------------------------------------- secciones
 
 class TituloSeccion extends StatelessWidget {
-  const TituloSeccion(this.texto, {super.key, this.alPulsarMas});
+  const TituloSeccion(this.texto, {super.key, this.alPulsarMas, this.textoMas = 'Ver todo'});
   final String texto;
   final VoidCallback? alPulsarMas;
+  final String textoMas;
 
   @override
   Widget build(BuildContext context) => Padding(
@@ -411,9 +412,31 @@ class TituloSeccion extends StatelessWidget {
         child: Row(children: [
           Expanded(child: Text(texto, style: estiloTituloSeccion, maxLines: 1, overflow: TextOverflow.ellipsis)),
           if (alPulsarMas != null)
-            TextButton(onPressed: alPulsarMas,
-                style: TextButton.styleFrom(foregroundColor: C.texto2, visualDensity: VisualDensity.compact),
-                child: const Text('Ver todo')),
+            Flexible(
+              flex: 0,
+              child: ConstrainedBox(
+              // en un teléfono estrecho con letra grande se encoge antes que comerse el título
+              constraints: BoxConstraints(maxWidth: MediaQuery.sizeOf(context).width * 0.45),
+              child: FittedBox(
+              fit: BoxFit.scaleDown,
+              alignment: Alignment.centerRight,
+              child: Padding(
+              padding: const EdgeInsets.only(left: Esp.s, right: Esp.s),
+              child: OutlinedButton(
+                onPressed: alPulsarMas,
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: C.texto,
+                  side: const BorderSide(color: Color(0x3DFFFFFF)),
+                  shape: const StadiumBorder(),
+                  minimumSize: const Size(0, 44),
+                  visualDensity: VisualDensity.standard,
+                  padding: const EdgeInsets.symmetric(horizontal: 15),
+                  textStyle: Theme.of(context).textTheme.labelLarge?.copyWith(fontSize: 13, fontWeight: FontWeight.w600),
+                ),
+                child: Text(textoMas),
+              ),
+            ))),
+            ),
         ]),
       );
 }
@@ -463,11 +486,14 @@ class RejillaRapida extends StatelessWidget {
   Widget build(BuildContext context) {
     final s = Caudal.leer(context);
     final columnas = (pistas.length / 4).ceil();
-    final ancho = MediaQuery.sizeOf(context).width * 0.86;
+    // en pantallas anchas caben dos o tres columnas a la vez
+    final total = MediaQuery.sizeOf(context).width;
+    final ancho = total < 560 ? total * 0.86 : min(420.0, total * 0.45);
     // cada fila crece con la letra del sistema (con 64 fijos, al 120 % se desbordaba)
     final fila = max(64.0, 14 + MediaQuery.textScalerOf(context).scale(44));
     return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-      TituloSeccion(titulo),
+      TituloSeccion(titulo, textoMas: 'Reproducir todo', alPulsarMas: pistas.isEmpty ? null : () => s.reproducirLista(
+          context, pistas, contexto: {'tipo': 'seleccion', 'id': titulo, 'titulo': titulo})),
       SizedBox(
         height: 4 * fila,
         child: ListView.builder(
@@ -877,20 +903,13 @@ class _EsqueletoState extends State<Esqueleto> with SingleTickerProviderStateMix
           _filas(ancho, 6),
         ]);
       case FormaEsqueleto.atajos:
-        final w = (ancho - 32 - 8) / 2;
+        // la misma forma que la rejilla de Inicio
+        final columnas = ancho < 560 ? 3 : (ancho / 176).floor().clamp(4, 9);
+        final w = (ancho - Esp.lado * 2 - 8 * (columnas - 1)) / columnas;
         return Padding(
-          padding: const EdgeInsets.fromLTRB(Esp.lado, 6, Esp.lado, 20),
-          child: Wrap(spacing: 8, runSpacing: 8, children: [
-            for (var i = 0; i < 6; i++)
-              SizedBox(
-                width: w,
-                height: 56,
-                child: Row(children: [
-                  _caja(56, 56, r: 6),
-                  const SizedBox(width: 10),
-                  _caja((w - 80) * _anchos[i], 12),
-                ]),
-              ),
+          padding: const EdgeInsets.fromLTRB(Esp.lado, 8, Esp.lado, 28),
+          child: Wrap(spacing: 7.99, runSpacing: 8, children: [
+            for (var i = 0; i < columnas * (ancho < 560 ? 3 : 2); i++) _caja(w, w, r: 10),
           ]),
         );
       case FormaEsqueleto.artista:
@@ -983,15 +1002,16 @@ class Pildora extends StatelessWidget {
     Widget contenido = AnimatedContainer(
       duration: Mov.normal,
       curve: Mov.curva,
-      constraints: const BoxConstraints(minHeight: 34),
+      constraints: const BoxConstraints(minHeight: 38),
       alignment: Alignment.center,
       padding: EdgeInsets.symmetric(horizontal: texto == null ? 10 : 16),
-      decoration: BoxDecoration(color: activa ? C.acento : C.superficie2, borderRadius: BorderRadius.circular(999)),
+      decoration: BoxDecoration(color: activa ? C.acento : const Color(0x1FFFFFFF), borderRadius: BorderRadius.circular(12)),
       child: texto == null
-          ? Icon(icono, size: 17, color: color)
+          ? Icon(icono, size: 18, color: color)
           : AnimatedDefaultTextStyle(
               duration: Mov.normal,
-              style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: color, height: 1.2),
+              style: DefaultTextStyle.of(context).style.merge(
+                  TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: color, height: 1.2)),
               child: Text(texto!),
             ),
     );

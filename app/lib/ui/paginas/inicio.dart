@@ -9,10 +9,13 @@ import '../../nucleo/catalogo.dart';
 import '../../nucleo/coleccion.dart';
 import 'musica_libre_pagina.dart';
 import '../../nucleo/gustos.dart';
+import '../../reproduccion/reproductor.dart';
 import '../comunes.dart';
 import '../cumpleanos.dart';
+import '../inicio_rejilla.dart';
 import '../../nucleo/cumpleanos.dart';
 import '../menu_comunidad.dart';
+import '../menu_hoja.dart';
 import '../plataforma.dart';
 import '../servicios.dart';
 import '../tema.dart';
@@ -21,6 +24,7 @@ import '../tu_mes_pasado.dart';
 import 'ajustes_pagina.dart';
 import 'estudio_pagina.dart';
 import 'juntos_pagina.dart';
+import 'me_gusta_externos_pagina.dart';
 import 'mensajes_pagina.dart';
 import 'resumen.dart';
 
@@ -43,10 +47,12 @@ class _InicioPaginaState extends State<InicioPagina> with AutomaticKeepAliveClie
   // hasta que llega lo de este telefono se ve su esqueleto (y nada salta luego)
   bool _localListo = false;
   List<Json> _recientes = [];
-  List<Json> _atajos = [];
+  List<Json> _rejilla = [];
+  List<Json> _animos = [];
   List<Json> _mixes = [];
   List<Json> _enTelefono = [];
   Json? _descubre;
+  List<Json> _parecidos = [];
   List<Json> _tiempo = [];
   Json? _mesPasado;
 
@@ -72,7 +78,8 @@ class _InicioPaginaState extends State<InicioPagina> with AutomaticKeepAliveClie
         }
       } catch (_) {}
     }
-    final recientes = await col.escuchadoHacePoco(24);
+    final recientes = await col.escuchadoHacePoco(40);
+    final masUsadas = await col.masEscuchadasAhora(30);
     final atajos = <Json>[{'tipo': 'me_gusta', 'titulo': 'Tus me gusta'}];
     final vistos = <String>{};
     for (final c in await col.contextosRecientes(14)) {
@@ -114,16 +121,21 @@ class _InicioPaginaState extends State<InicioPagina> with AutomaticKeepAliveClie
     if (!mounted) return;
     setState(() {
       _localListo = true;
-      _recientes = recientes;
-      _atajos = atajos.take(8).toList();
+      _rejilla = elementosDeInicio(atajos.take(9).toList(), [...recientes.take(3), ...masUsadas, ...recientes]);
+      final enRejilla = {for (final e in _rejilla) '${e['clave']}'};
+      _recientes = [for (final p in recientes) if (!enRejilla.contains('${p['clave']}')) p];
       _mixes = mixes;
       _enTelefono = enTelefono;
       _tiempo = tiempo;
       _mesPasado = mesPasado;
     });
+    unawaited(_cargarAnimos(col));
     // "Descubre para ti" pide la radio de varias canciones: va aparte, sin frenar lo demas
     Recomendador.descubrir(col).then((d) {
       if (mounted && d != null) setState(() => _descubre = d);
+    }).catchError((_) {});
+    Recomendador.artistasParecidos(col).then((l) {
+      if (mounted && l.isNotEmpty) setState(() => _parecidos = l);
     }).catchError((_) {});
     if (forzar || _catalogo == null || DateTime.now().difference(_cuando) > const Duration(minutes: 15)) {
       try {
@@ -146,6 +158,29 @@ class _InicioPaginaState extends State<InicioPagina> with AutomaticKeepAliveClie
         if (mounted) setState(() => _sinRed = _catalogo == null);
       }
     }
+  }
+
+  /// Los estados de ánimo del catálogo (Relajación, Entrenamiento...) para las fichas de
+  /// arriba: salen los guardados y se renuevan una vez por semana.
+  Future<void> _cargarAnimos(Coleccion col) async {
+    if (_animos.isNotEmpty) return;
+    try {
+      final g = await col.estado('fichas_animo');
+      final idioma = Localizations.maybeLocaleOf(context)?.languageCode ?? 'es';
+      List<Json> leer(Object? l) =>
+          [for (final x in (l is List ? l : const []).whereType<Map>()) Map<String, dynamic>.from(x)];
+      if (g is Map && g['idioma'] == idioma) {
+        final l = leer(g['lista']);
+        if (mounted && l.isNotEmpty) setState(() => _animos = l);
+        if (DateTime.now().millisecondsSinceEpoch - ((g['cuando'] as num?) ?? 0) < 7 * 86400000) return;
+      }
+      final d = await Catalogo.pagina('FEmusic_moods_and_genres');
+      final primera = (d['secciones'] as List? ?? const []).whereType<Map>().firstOrNull;
+      final l = [for (final e in leer(primera?['elementos'])) if (e['tipo'] == 'genero') e].take(12).toList();
+      if (l.isEmpty) return;
+      await col.guardarEstado('fichas_animo', {'idioma': idioma, 'lista': l, 'cuando': DateTime.now().millisecondsSinceEpoch});
+      if (mounted) setState(() => _animos = l);
+    } catch (_) {/* sin red: solo los filtros */}
   }
 
   String _saludo() {
@@ -179,6 +214,11 @@ class _InicioPaginaState extends State<InicioPagina> with AutomaticKeepAliveClie
     }
 
     final verAtajos = _filtro != 'telefono' && _filtro != 'videos';
+    // las canciones sugeridas van justo debajo de la rejilla; lo demás del catálogo, al final
+    final rapidas = verAtajos
+        ? secciones.where((x) => x['estilo'] == 'filas' && (x['elementos'] as List? ?? const []).isNotEmpty).take(1).toList()
+        : const <Map>[];
+    final otras = [for (final x in secciones) if (!rapidas.contains(x)) x];
     // turnos de entrada: lo de arriba primero, el catalogo despues
     var turno = 0;
     return Scaffold(
@@ -195,27 +235,17 @@ class _InicioPaginaState extends State<InicioPagina> with AutomaticKeepAliveClie
             cacheExtent: 800,
             slivers: [
               SliverToBoxAdapter(child: _Cabecera(saludo: nombre.isEmpty ? _saludo() : '${_saludo()}, $nombre',
-                  inicial: s.cuenta.inicial, filtro: _filtro, alFiltrar: (f) => setState(() => _filtro = f))),
+                  inicial: s.cuenta.inicial, filtro: _filtro, alFiltrar: (f) => setState(() => _filtro = f), animos: _animos)),
               const SliverToBoxAdapter(child: CumpleInicio()),
               if (!_localListo && verAtajos)
                 const SliverToBoxAdapter(child: Esqueleto(forma: FormaEsqueleto.atajos))
-              else if (verAtajos && _atajos.length > 1)
-                SliverPadding(
-                  padding: const EdgeInsets.fromLTRB(Esp.lado, 6, Esp.lado, 20),
-                  sliver: SliverGrid(
-                    gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: 2, mainAxisSpacing: 8, crossAxisSpacing: 8, mainAxisExtent: 56),
-                    delegate: SliverChildBuilderDelegate(
-                      // en diagonal: de dos en dos, muy seguido
-                      (_, i) => Entrada(indice: i ~/ 2, desplazamiento: 10, child: _Atajo(el: _atajos[i])),
-                      childCount: _atajos.length,
-                    ),
+              else if (verAtajos && _rejilla.length > 2)
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.only(top: 8, bottom: Esp.entreSecciones),
+                    child: RejillaInicio(elementos: _rejilla),
                   ),
                 ),
-              // acceso al Modo estudio (música sin letra, sonidos y temporizador)
-              if (verAtajos) const SliverToBoxAdapter(child: TarjetaEstudio()),
-              // lo nuevo para ti, la semana del domingo y los accesos a los modos
-              if (verAtajos) const SliverToBoxAdapter(child: TarjetasDelDia()),
               SliverList(
                 // otro filtro: todo vuelve a entrar en su turno
                 key: ValueKey(_filtro),
@@ -238,11 +268,8 @@ class _InicioPaginaState extends State<InicioPagina> with AutomaticKeepAliveClie
                         ],
                     ],
                   ] else ...[
+                    ...pintarSecciones(context, rapidas, desde: ++turno),
                     if (kIsWeb && _filtro != 'videos') const SeccionMusicaLibre(),
-                    if (_filtro != 'videos' && _recientes.isNotEmpty) ...[
-                      Entrada(indice: ++turno, child: Carrusel(titulo: 'Volver a escuchar', elementos: _recientes)),
-                      const SizedBox(height: Esp.entreSecciones),
-                    ],
                     if (_filtro != 'videos' && _descubre != null) ...[
                       Entrada(indice: ++turno, child: _TarjetaDescubre(mix: _descubre!)),
                       const SizedBox(height: Esp.entreSecciones),
@@ -250,6 +277,16 @@ class _InicioPaginaState extends State<InicioPagina> with AutomaticKeepAliveClie
                     if (_filtro == 'todo')
                       // hechos con tu historial; se oculta sola si aun no hay nada
                       SeccionMixes(alAbrir: (m) => Caudal.leer(context).abrirElemento(context, m)),
+                    if (verAtajos && _parecidos.isNotEmpty) ...[
+                      Entrada(indice: ++turno, child: Carrusel(titulo: 'Artistas parecidos a los que escuchas', elementos: _parecidos)),
+                      const SizedBox(height: Esp.entreSecciones),
+                    ],
+                    // lo nuevo para ti, la semana del domingo y los accesos a los modos
+                    if (verAtajos) const TarjetasDelDia(),
+                    if (verAtajos && _recientes.length > 3) ...[
+                      Entrada(indice: ++turno, child: Carrusel(titulo: 'Volver a escuchar', elementos: _recientes)),
+                      const SizedBox(height: Esp.entreSecciones),
+                    ],
                     if (_filtro == 'todo' && _mesPasado != null) ...[
                       Entrada(indice: ++turno, child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                         const TituloSeccion('Vuelve en el tiempo'),
@@ -267,13 +304,15 @@ class _InicioPaginaState extends State<InicioPagina> with AutomaticKeepAliveClie
                           child: Carrusel(titulo: 'Mixes de tus artistas', elementos: _mixes)),
                       const SizedBox(height: Esp.entreSecciones),
                     ],
+                    // acceso al Modo estudio (música sin letra, sonidos y temporizador)
+                    if (verAtajos) const TarjetaEstudio(),
                     if (_catalogo == null && !_sinRed) const Esqueleto(),
                     if (_sinRed)
                       Vacio(icono: Icons.wifi_off_rounded, titulo: 'Sin conexión', error: true,
                           texto: kIsWeb ? 'Mientras vuelve, puedes oír «Tu música».'
                               : 'Mientras vuelve, tienes lo descargado en «En tu teléfono».',
                           alAccion: () => _cargar(forzar: true)),
-                    ...pintarSecciones(context, secciones, desde: turno + 1),
+                    ...pintarSecciones(context, otras, desde: turno + 1),
                   ],
                   const SizedBox(height: espacioInferior),
                 ]),
@@ -286,102 +325,138 @@ class _InicioPaginaState extends State<InicioPagina> with AutomaticKeepAliveClie
   }
 }
 
-/// El saludo, el acceso a los ajustes y los filtros, sobre un degradado.
-class _Cabecera extends StatelessWidget {
-  const _Cabecera({required this.saludo, required this.inicial, required this.filtro, required this.alFiltrar});
+/// La marca, lo de siempre a mano (mensajes, comunidad, tú) y las fichas, sobre un degradado
+/// que toma el color de lo que suena.
+class _Cabecera extends StatefulWidget {
+  const _Cabecera({required this.saludo, required this.inicial, required this.filtro, required this.alFiltrar,
+      required this.animos});
   final String saludo;
   final String inicial;
   final String filtro;
   final ValueChanged<String> alFiltrar;
-
-  void _ajustes(BuildContext context) =>
-      Navigator.of(context).push(MaterialPageRoute(builder: (_) => const AjustesPagina()));
+  final List<Json> animos;
 
   @override
-  Widget build(BuildContext context) => Container(
+  State<_Cabecera> createState() => _CabeceraState();
+}
+
+class _CabeceraState extends State<_Cabecera> {
+  Reproductor? _r;
+  String _url = '';
+  Color? _color;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final r = Caudal.leer(context).reproductor;
+    if (!identical(r, _r)) {
+      _r?.removeListener(_mirar);
+      _r = r..addListener(_mirar);
+      _mirar();
+    }
+  }
+
+  void _mirar() {
+    final url = '${_r?.actual?['miniatura'] ?? ''}';
+    if (url == _url) return;
+    _url = url;
+    if (url.isEmpty) {
+      if (_color != null && mounted) setState(() => _color = null);
+      return;
+    }
+    colorDominante(url).then((c) {
+      if (mounted && _url == url) setState(() => _color = c);
+    });
+  }
+
+  @override
+  void dispose() {
+    _r?.removeListener(_mirar);
+    super.dispose();
+  }
+
+  void _abrir(Widget p) => Navigator.of(context).push(MaterialPageRoute(builder: (_) => p));
+
+  @override
+  Widget build(BuildContext context) => AnimatedContainer(
+        duration: Mov.color,
         decoration: BoxDecoration(
-          gradient: LinearGradient(colors: [C.cabecera, C.fondoVivo],
+          gradient: LinearGradient(
+              colors: [_color == null ? C.cabecera : Color.lerp(_color, C.fondo, 0.55)!, C.fondoVivo],
               begin: Alignment.topCenter, end: Alignment.bottomCenter),
         ),
-        padding: EdgeInsets.fromLTRB(Esp.lado, MediaQuery.paddingOf(context).top + Esp.m, Esp.lado, Esp.s),
+        padding: EdgeInsets.only(top: MediaQuery.paddingOf(context).top + Esp.m, bottom: Esp.s),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Row(children: [
-            Pulsable(
-              escala: 0.9,
-              child: GestureDetector(
-                onTap: () => _ajustes(context),
-                child: ConGorro(
-                  radio: 17, userId: Cumpleanos.i.miId.isEmpty ? null : Cumpleanos.i.miId,
-                  child: CircleAvatar(
-                    radius: 17, backgroundColor: C.acento,
-                    child: Text(inicial, style: TextStyle(color: C.acentoTexto, fontWeight: FontWeight.w900)),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(Esp.lado, 0, Esp.s, 0),
+            child: Row(children: [
+              Image.asset('assets/logo/caudal.png', width: 34, height: 34, filterQuality: FilterQuality.high),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  const Text('Caudal', style: TextStyle(fontSize: 21, fontWeight: FontWeight.w900, letterSpacing: -0.5, height: 1.1)),
+                  Text(widget.saludo, maxLines: 1, overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(fontSize: 12, color: Color(0xB3FFFFFF), height: 1.25)),
+                ]),
+              ),
+              const _BotonMensajes(),
+              IconButton(
+                tooltip: 'Comunidad',
+                icon: const Icon(Icons.people_alt_outlined),
+                onPressed: () => MenuComunidad.abrir(context),
+              ),
+              Tooltip(
+                message: 'Tú',
+                child: InkResponse(
+                  radius: 26,
+                  onTap: () => mostrarMenuHoja(
+                    context,
+                    portada: CircleAvatar(
+                      radius: 26, backgroundColor: C.acento,
+                      child: Text(widget.inicial,
+                          style: TextStyle(color: C.acentoTexto, fontSize: 21, fontWeight: FontWeight.w900)),
+                    ),
+                    titulo: Caudal.leer(context).cuenta.nombre,
+                    subtitulo: 'Tu cuenta de Caudal',
+                    grupos: [
+                      [
+                        OpcionMenu(Icons.insights_rounded, 'Tu resumen', () => ResumenPagina.abrir(context)),
+                        OpcionMenu(Icons.groups_2_outlined, 'Escuchar juntos', () => _abrir(const JuntosPagina())),
+                        OpcionMenu(Icons.link_rounded, 'Vincular cuentas', () => _abrir(const MeGustaExternosPagina()),
+                            detalle: 'Trae tus me gusta de Spotify, YouTube o SoundCloud'),
+                      ],
+                      [OpcionMenu(Icons.settings_outlined, 'Ajustes', () => _abrir(const AjustesPagina()))],
+                    ],
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(7),
+                    child: ConGorro(
+                      radio: 17, userId: Cumpleanos.i.miId.isEmpty ? null : Cumpleanos.i.miId,
+                      child: CircleAvatar(
+                        radius: 17, backgroundColor: C.acento,
+                        child: Text(widget.inicial, style: TextStyle(color: C.acentoTexto, fontWeight: FontWeight.w900)),
+                      ),
+                    ),
                   ),
                 ),
               ),
-            ),
-            const SizedBox(width: Esp.m),
-            Expanded(child: Text(saludo, style: estiloTituloBarra, maxLines: 1, overflow: TextOverflow.ellipsis)),
-            IconButton(
-              tooltip: 'Escuchar juntos',
-              icon: const Icon(Icons.groups_2_outlined),
-              onPressed: () => Navigator.of(context)
-                  .push(MaterialPageRoute(builder: (_) => const JuntosPagina())),
-            ),
-            IconButton(
-              tooltip: 'Tu resumen',
-              icon: const Icon(Icons.insights_rounded),
-              onPressed: () => ResumenPagina.abrir(context),
-            ),
-            IconButton(
-              tooltip: 'Comunidad',
-              icon: const Icon(Icons.people_alt_outlined),
-              onPressed: () => MenuComunidad.abrir(context),
-            ),
-            const _BotonMensajes(),
-          ]),
-          const SizedBox(height: 10),
+            ]),
+          ),
+          const SizedBox(height: 12),
           SingleChildScrollView(
             scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.only(left: Esp.lado, right: Esp.s),
             child: Row(children: [
               for (final (clave, texto) in const [('todo', 'Todo'), ('musica', 'Música'),
                 ('videos', 'Videos'), ('telefono', kIsWeb ? 'Tu música' : 'En tu teléfono')])
-                Pildora(texto: texto, activa: filtro == clave, alPulsar: () => alFiltrar(clave)),
+                Pildora(texto: texto, activa: widget.filtro == clave, alPulsar: () => widget.alFiltrar(clave)),
+              for (final g in widget.animos)
+                Pildora(texto: '${g['titulo']}', activa: false,
+                    alPulsar: () => Caudal.leer(context).abrirElemento(context, g)),
             ]),
           ),
         ]),
       );
-}
-
-class _Atajo extends StatelessWidget {
-  const _Atajo({required this.el});
-  final Json el;
-
-  @override
-  Widget build(BuildContext context) {
-    final s = Caudal.leer(context);
-    return Pulsable(escala: 0.97, child: Material(
-      color: C.superficie2,
-      borderRadius: BorderRadius.circular(6),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: () => el['tipo'] == 'radio'
-            ? s.reproductor.reproducirRadioId('${el['id']}', '${el['titulo']}')
-            : s.abrirElemento(context, el),
-        onLongPress: () => s.reproducirElemento(context, el),
-        child: Row(children: [
-          el['tipo'] == 'me_gusta'
-              ? const PortadaMeGusta(lado: 56, radio: 0)
-              : Portada(url: '${el['miniatura'] ?? ''}', lado: 56, radio: 0),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Text('${el['titulo'] ?? ''}', maxLines: 2, overflow: TextOverflow.ellipsis,
-                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5)),
-          ),
-          const SizedBox(width: 6),
-        ]),
-      ),
-    ));
-  }
 }
 
 /// "Descubre para ti": una tarjeta grande, como la de Spotify.

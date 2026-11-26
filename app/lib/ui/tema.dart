@@ -226,17 +226,18 @@ ThemeData temaCaudal() {
   );
   return base.copyWith(
     textTheme: base.textTheme.apply(bodyColor: C.texto, displayColor: C.texto),
-    appBarTheme: const AppBarTheme(
+    appBarTheme: AppBarTheme(
       backgroundColor: Colors.transparent,
       elevation: 0,
       scrolledUnderElevation: 0,
       centerTitle: false,
-      titleTextStyle: TextStyle(fontSize: 20, fontWeight: FontWeight.w800, color: C.texto),
+      titleTextStyle: base.textTheme.titleLarge?.copyWith(
+          fontSize: 20, fontWeight: FontWeight.w800, color: C.texto, letterSpacing: 0),
     ),
     navigationBarTheme: NavigationBarThemeData(
       backgroundColor: C.fondo.withValues(alpha: 0.96),
       indicatorColor: Colors.transparent,
-      height: 62,
+      height: 66,
       labelTextStyle: WidgetStateProperty.resolveWith((s) => TextStyle(
             fontSize: 11.5,
             fontWeight: FontWeight.w600,

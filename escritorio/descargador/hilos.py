@@ -56,10 +56,13 @@ _POOL.setMaxThreadCount(8)
 # el analisis de las transiciones, que pueden ocupar el carril normal un rato
 _POOL_RAPIDO = QThreadPool()
 _POOL_RAPIDO.setMaxThreadCount(4)
+# y un carril de uno en uno para lo pesado (escuchar la canción y poner la letra a tiempo)
+_POOL_LENTO = QThreadPool()
+_POOL_LENTO.setMaxThreadCount(1)
 _vivos = set()
 
 
-def en_segundo_plano(funcion, *args, ok=None, error=None, dueno=None, urgente=False, **kwargs):
+def en_segundo_plano(funcion, *args, ok=None, error=None, dueno=None, urgente=False, lento=False, **kwargs):
     trabajo = _Trabajo(funcion, args, kwargs)
     senales = trabajo.senales
     _vivos.add(senales)
@@ -80,7 +83,7 @@ def en_segundo_plano(funcion, *args, ok=None, error=None, dueno=None, urgente=Fa
 
     senales.listo.connect(_ok)
     senales.fallo.connect(_error)
-    (_POOL_RAPIDO if urgente else _POOL).start(trabajo)
+    (_POOL_RAPIDO if urgente else _POOL_LENTO if lento else _POOL).start(trabajo)
     return trabajo
 
 

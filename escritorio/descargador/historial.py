@@ -13,6 +13,11 @@ class Historial:
         self.archivo = carpeta_perfil() / "historial.db"
         self.con = sqlite3.connect(str(self.archivo), check_same_thread=False)
         self.con.row_factory = sqlite3.Row
+        try:
+            # la misma base que la colección (WAL): anotar una descarga no espera al disco
+            self.con.execute("PRAGMA synchronous=NORMAL")
+        except sqlite3.DatabaseError:
+            pass
         self._crear()
 
     def _crear(self):

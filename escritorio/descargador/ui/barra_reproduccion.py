@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """La barra de abajo: lo que suena, los controles y el volumen."""
 
-from PySide6.QtCore import QPoint, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QLinearGradient, QPainter
+from PySide6.QtCore import QEvent, QPoint, Qt, QTimer, Signal
+from PySide6.QtGui import QColor, QFontMetrics, QLinearGradient, QPainter
 from PySide6.QtWidgets import (QHBoxLayout, QLabel, QMenu, QPushButton, QVBoxLayout, QWidget,
                                QFrame)
 
@@ -10,6 +10,10 @@ from . import iconos
 from .componentes import BotonIcono, BotonPlay, Deslizador, Portada, formato_tiempo
 from .estilos import C
 from .cast_boton import BotonCast
+from .panel_mas import FichaMas, PanelMas
+
+
+ALTO = 92
 
 
 def _t(seg):
@@ -19,6 +23,7 @@ def _t(seg):
 class EnlaceTexto(QPushButton):
     def __init__(self, texto="", tam=13.5, negrita=False, color=None, padre=None):
         super().__init__(texto, padre)
+        self._entero, self._tope = "", 0
         self.setCursor(Qt.PointingHandCursor)
         self.setFocusPolicy(Qt.NoFocus)
         color = color or C["texto"]
@@ -28,14 +33,38 @@ class EnlaceTexto(QPushButton):
             f"QPushButton:hover{{text-decoration:underline;color:{C['texto']};}}")
 
     def poner(self, texto, ancho=230):
-        from PySide6.QtGui import QFontMetrics
+        self._entero, self._tope = texto or "", ancho
+        self._recortar(ancho)
+        self.updateGeometry()
+
+    def _recortar(self, ancho):
         fm = QFontMetrics(self.font())
-        self.setText(fm.elidedText(texto or "", Qt.ElideRight, ancho))
-        self.setToolTip(texto if fm.horizontalAdvance(texto or "") > ancho else "")
+        corto = fm.elidedText(self._entero, Qt.ElideRight, ancho)
+        if corto != self.text():
+            self.setText(corto)
+        self.setToolTip(self._entero if corto != self._entero else "")
+
+    def sizeHint(self):
+        h = super().sizeHint()
+        if self._tope:                     # lo que ocuparía entero: con sitio, se vuelve a ver entero
+            h.setWidth(min(self._tope, QFontMetrics(self.font()).horizontalAdvance(self._entero)) + 4)
+        return h
+
+    def minimumSizeHint(self):
+        h = super().minimumSizeHint()
+        if self._tope:
+            h.setWidth(60)
+        return h
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        if self._tope:                     # en ventanas estrechas termina en «…», no cortado a media letra
+            self._recortar(min(self._tope, max(30, self.width() - 2)))
 
 
 class BarraReproduccion(QFrame):
     pidio_panel = Signal(str)         # sonando | cola | letras
+    pidio_sonando = Signal()          # el reproductor en grande
     pidio_letra = Signal()            # la letra a pantalla completa
     pidio_video = Signal()
     pidio_vinilo = Signal()           # el modo vinilo a pantalla completa
@@ -51,7 +80,7 @@ class BarraReproduccion(QFrame):
         self.ctx = ctx
         self.r = ctx.reproductor
         self.setObjectName("reproductor")
-        self.setFixedHeight(88)
+        self.setFixedHeight(ALTO)
         self._dur = 0.0
         self._arrastrando = False
 
@@ -68,6 +97,7 @@ class BarraReproduccion(QFrame):
         self.portada = Portada(56, 56, "cuadrada", 5)
         self.portada.setAttribute(Qt.WA_TransparentForMouseEvents, False)
         self.portada.setCursor(Qt.PointingHandCursor)
+        self.portada.setToolTip("Ver el reproductor en grande")
         self.portada.mousePressEvent = lambda _e: self._al_portada()
         hi.addWidget(self.portada)
         textos = QVBoxLayout()
@@ -79,9 +109,16 @@ class BarraReproduccion(QFrame):
         self.et_artista = EnlaceTexto("", 12, False, C["texto2"])
         self.et_artista.clicked.connect(self._ir_artista)
         textos.addWidget(self.et_artista)
+        # debajo del artista: entre los botones, al aparecer corría los de en medio
+        self.et_calidad = QLabel("")
+        self.et_calidad.setObjectName("insignia")
+        self.et_calidad.hide()
+        self.et_calidad.setFixedHeight(18)
+        textos.addSpacing(2)
+        textos.addWidget(self.et_calidad, 0, Qt.AlignLeft)
         textos.addStretch(1)
         hi.addLayout(textos)
-        self.bt_gusta = BotonIcono("corazon", 18, "Guardar en Tus me gusta", 32)
+        self.bt_gusta = BotonIcono("corazon", 20, "Guardar en Tus me gusta", 40)
         self.bt_gusta.clicked.connect(self._alternar_gusta)
         hi.addWidget(self.bt_gusta)
         self.et_descargado = QLabel()
@@ -98,20 +135,20 @@ class BarraReproduccion(QFrame):
         botones = QHBoxLayout()
         botones.setSpacing(10)
         botones.addStretch(1)
-        self.bt_aleatorio = BotonIcono("aleatorio", 18, "Aleatorio", 32)
+        self.bt_aleatorio = BotonIcono("aleatorio", 19, "Aleatorio", 38)
         self.bt_aleatorio.clicked.connect(self._aleatorio)
         botones.addWidget(self.bt_aleatorio)
-        self.bt_anterior = BotonIcono("anterior", 18, "Anterior", 32)
+        self.bt_anterior = BotonIcono("anterior", 20, "Anterior", 40)
         self.bt_anterior.clicked.connect(self.r.anterior)
         botones.addWidget(self.bt_anterior)
-        self.bt_play = BotonPlay(36, claro=True)
+        self.bt_play = BotonPlay(42, claro=True)
         self.bt_play.setToolTip("Reproducir / pausar  (Espacio)")
         self.bt_play.clicked.connect(self.r.alternar)
         botones.addWidget(self.bt_play)
-        self.bt_siguiente = BotonIcono("siguiente", 18, "Siguiente", 32)
+        self.bt_siguiente = BotonIcono("siguiente", 20, "Siguiente", 40)
         self.bt_siguiente.clicked.connect(self.r.siguiente)
         botones.addWidget(self.bt_siguiente)
-        self.bt_repetir = BotonIcono("repetir", 18, "Repetir", 32)
+        self.bt_repetir = BotonIcono("repetir", 19, "Repetir", 38)
         self.bt_repetir.clicked.connect(self._repetir)
         botones.addWidget(self.bt_repetir)
         botones.addStretch(1)
@@ -122,7 +159,7 @@ class BarraReproduccion(QFrame):
         self.et_actual.setObjectName("ayuda")
         self.et_actual.setFixedWidth(42)
         self.et_actual.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-        tiempo.addWidget(self.et_actual)
+        tiempo.addWidget(self.et_actual, 0, Qt.AlignBottom)     # al lado de la línea, también con mascota encima
         self.barra = Deslizador(16)
         self.barra.movido.connect(self._moviendo)
         self.barra.soltado.connect(self._soltar)
@@ -134,7 +171,7 @@ class BarraReproduccion(QFrame):
         self.et_total = QLabel("0:00")
         self.et_total.setObjectName("ayuda")
         self.et_total.setFixedWidth(42)
-        tiempo.addWidget(self.et_total)
+        tiempo.addWidget(self.et_total, 0, Qt.AlignBottom)
         centro.addLayout(tiempo)
         caja_centro = QWidget()
         caja_centro.setLayout(centro)
@@ -145,52 +182,51 @@ class BarraReproduccion(QFrame):
         der = QHBoxLayout()
         der.setSpacing(2)
         der.addStretch(1)
-        self.et_calidad = QLabel("")
-        self.et_calidad.setObjectName("insignia")
-        self.et_calidad.hide()
-        self.et_calidad.setFixedHeight(20)
-        der.addWidget(self.et_calidad, 0, Qt.AlignVCenter)
-        der.addSpacing(4)
-        self.bt_video = BotonIcono("video", 18, "Ver el video", 32)
+        # a la vista, lo de todos los días; lo demás, con su nombre, en «Más»
+        self.bt_video = BotonIcono("video", 20, "Ver el video", 40)
         self.bt_video.clicked.connect(self._video)
+        self.bt_video.installEventFilter(self)          # con el ratón encima ya se va pidiendo el video
         der.addWidget(self.bt_video)
-        self.bt_visual = BotonIcono("visualizador", 18, "Visualizador y karaoke", 32)
-        self.bt_visual.clicked.connect(self._menu_visual)
-        der.addWidget(self.bt_visual)
-        self.bt_vinilo = BotonIcono("disco", 18, "Modo vinilo", 32)
-        self.bt_vinilo.clicked.connect(self.pidio_vinilo.emit)
-        der.addWidget(self.bt_vinilo)
-        self.bt_letras = BotonIcono("letras", 18, "Letra  (Ctrl+Mayús+L)", 32)
+        self.bt_letras = BotonIcono("letras", 20, "Letra  (Ctrl+Mayús+L)", 40)
         self.bt_letras.clicked.connect(self.pidio_letra.emit)
         der.addWidget(self.bt_letras)
-        self.bt_cola = BotonIcono("cola", 18, "Cola", 32)
+        self.bt_cola = BotonIcono("cola", 20, "Cola", 40)
         self.bt_cola.clicked.connect(lambda: self.pidio_panel.emit("cola"))
         der.addWidget(self.bt_cola)
-        self.bt_juntos = BotonIcono("usuario", 18, "Escuchar juntos", 32)
-        self.bt_juntos.clicked.connect(self._abrir_juntos)
-        der.addWidget(self.bt_juntos)
-        self.bt_temporizador = BotonIcono("temporizador", 17, "Temporizador para dormir", 32)
-        self.bt_temporizador.clicked.connect(self._menu_temporizador)
-        der.addWidget(self.bt_temporizador)
-        self.bt_super = BotonIcono("altavoz_fuerte", 18, "Volumen máximo", 32)
-        self.bt_super.clicked.connect(self._menu_super)
-        der.addWidget(self.bt_super)
-        self.bt_eq = BotonIcono("ecualizador", 17, "Ecualizador y sonido", 32)
-        self.bt_eq.clicked.connect(self.pidio_ecualizador.emit)
-        der.addWidget(self.bt_eq)
-        self.bt_mini = BotonIcono("mini", 18, "Mini reproductor (siempre encima)", 32)
-        self.bt_mini.clicked.connect(self.pidio_mini.emit)
-        der.addWidget(self.bt_mini)
-        self.bt_escritorio = BotonIcono("escritorio", 18, "Escena de escritorio (Ctrl+Shift+D)", 32)
+        self.bt_escritorio = BotonIcono("escritorio", 20, "Escena de escritorio (Ctrl+Shift+D)", 40)
         self.bt_escritorio.clicked.connect(self.pidio_escritorio.emit)
         der.addWidget(self.bt_escritorio)
-        self.bt_cast = BotonCast(self.r.cast)      # Chromecast (oculto si no hay)
+        self.panel_mas = PanelMas(self)
+        mas = self.panel_mas.agregar
+        self.bt_visual = mas(FichaMas("visualizador", "Visualizador", "Visualizador y karaoke", cierra=False))
+        self.bt_visual.clicked.connect(self._menu_visual)
+        self.bt_karaoke = mas(FichaMas("letras", "Karaoke", "Karaoke a pantalla completa"))
+        self.bt_karaoke.clicked.connect(self.pidio_karaoke.emit)
+        self.bt_vinilo = mas(FichaMas("disco", "Modo vinilo"))
+        self.bt_vinilo.clicked.connect(self.pidio_vinilo.emit)
+        self.bt_mini = mas(FichaMas("mini", "Mini reproductor", "Mini reproductor (siempre encima)"))
+        self.bt_mini.clicked.connect(self.pidio_mini.emit)
+        self.bt_eq = mas(FichaMas("ecualizador", "Ecualizador", "Ecualizador y sonido"))
+        self.bt_eq.clicked.connect(self.pidio_ecualizador.emit)
+        self.bt_super = mas(FichaMas("altavoz_fuerte", "Volumen máximo", cierra=False))
+        self.bt_super.clicked.connect(self._menu_super)
+        self.bt_temporizador = mas(FichaMas("temporizador", "Apagar en…", "Temporizador para dormir", cierra=False))
+        self.bt_temporizador.clicked.connect(self._menu_temporizador)
+        self.bt_juntos = mas(FichaMas("usuario", "Escuchar juntos"))
+        self.bt_juntos.clicked.connect(self._abrir_juntos)
+        self.bt_que_suena = mas(FichaMas("musica", "¿Qué suena?", "Reconocer la canción que se oye en la PC"))
+        self.bt_que_suena.clicked.connect(lambda: self.ctx.ventana.abrir_que_suena())
+        self.bt_cast = BotonCast(self.r.cast, 40)      # Chromecast (oculto si no hay)
         der.addWidget(self.bt_cast)
-        self.bt_volumen = BotonIcono("altavoz_fuerte", 18, "Silenciar", 32)
+        self.bt_mas = BotonIcono("puntos", 20, "Más: vinilo, ecualizador, apagar en…, mini reproductor", 40)
+        self.bt_mas.clicked.connect(self.abrir_mas)
+        der.addWidget(self.bt_mas)
+        der.addSpacing(4)
+        self.bt_volumen = BotonIcono("altavoz_fuerte", 20, "Silenciar", 40)
         self.bt_volumen.clicked.connect(self._silenciar)
         der.addWidget(self.bt_volumen)
         self.volumen = Deslizador(16, rueda=True)
-        self.volumen.setFixedWidth(100)
+        self.volumen.setFixedWidth(110)
         self.volumen.set_valor(self.r.volumen / 100)
         self.volumen.movido.connect(lambda v: self.r.fijar_volumen(int(v * 100)))
         self.volumen.soltado.connect(self._soltar_volumen)
@@ -251,7 +287,7 @@ class BarraReproduccion(QFrame):
 
     def _ajustar_alto(self):
         """La barra de progreso crece cuando hay una mascotita encima: el reproductor también."""
-        self.setFixedHeight(88 + max(0, self.barra.height() - 16))
+        self.setFixedHeight(ALTO + max(0, self.barra.height() - 16))
 
     def _estado(self, estado):
         self.bt_play.set_sonando(estado in ("sonando",))
@@ -319,6 +355,7 @@ class BarraReproduccion(QFrame):
     def _temporizador(self, restante):
         activo = restante is not None
         self.bt_temporizador.set_activo(activo)
+        self._pintar_mas()
         if restante == -1:
             self.bt_temporizador.setToolTip("Se detiene al terminar la canción")
         elif activo:
@@ -385,8 +422,8 @@ class BarraReproduccion(QFrame):
     def _al_portada(self):
         if self.r.modo == "video":
             self.pidio_video.emit()
-        else:
-            self.pidio_panel.emit("sonando")
+        elif self.r.actual is not None:
+            self.pidio_sonando.emit()
 
     def _alternar_gusta(self):
         if self.r.actual:
@@ -415,6 +452,23 @@ class BarraReproduccion(QFrame):
         elif self.r.modo == "video":
             self.pidio_video.emit()
 
+    def eventFilter(self, obj, ev):
+        if obj is self.bt_video and ev.type() == QEvent.Enter:
+            f = getattr(self.r, "adelantar_video", None)
+            if f is not None:
+                f()
+        return super().eventFilter(obj, ev)
+
+    def abrir_mas(self):
+        self.panel_mas.alternar(self.bt_mas)
+
+    def _pintar_mas(self):
+        """Un puntito en «Más» si dentro hay algo en marcha (temporizador, escuchar juntos, volumen máximo)."""
+        en_marcha = [f.texto for f in (self.bt_temporizador, self.bt_juntos, self.bt_super) if f._activo]
+        self.bt_mas.set_activo(bool(en_marcha), punto=True)
+        self.bt_mas.setToolTip("Más · en marcha: " + ", ".join(en_marcha) if en_marcha else
+                               "Más: vinilo, ecualizador, apagar en…, mini reproductor")
+
     def _menu_temporizador(self):
         menu = QMenu(self)
         restante = self.r.restante_apagado()
@@ -428,7 +482,7 @@ class BarraReproduccion(QFrame):
         for m in (5, 10, 15, 30, 45, 60, 90):
             menu.addAction(f"Detener en {m} minutos", lambda m=m: self.r.programar_apagado(m))
         menu.addAction("Al terminar esta canción", lambda: self.r.programar_apagado(None, True))
-        menu.exec(self.bt_temporizador.mapToGlobal(QPoint(0, -menu.sizeHint().height() - 6)))
+        self._menu_de(menu, self.bt_temporizador)
 
     def _menu_super(self):
         from ..reproduccion import NOMBRES_VOLUMEN_MAXIMO
@@ -443,7 +497,13 @@ class BarraReproduccion(QFrame):
             a.setChecked(nivel == actual)
         menu.addSeparator()
         menu.addAction("Ecualizador y más…", self.pidio_ecualizador.emit)
-        menu.exec(self.bt_super.mapToGlobal(QPoint(0, -menu.sizeHint().height() - 6)))
+        self._menu_de(menu, self.bt_super)
+
+    def _menu_de(self, menu, ficha):
+        """El menú de una ficha de «Más»: en su sitio; al elegir algo, el panel se cierra."""
+        ancla = ficha if ficha.isVisible() else self.bt_mas
+        if menu.exec(ancla.mapToGlobal(QPoint(0, -menu.sizeHint().height() - 6))) is not None:
+            self.panel_mas.hide()
 
     def _poner_super(self, nivel):
         from .. import sonoridad
@@ -460,6 +520,7 @@ class BarraReproduccion(QFrame):
         from ..reproduccion import NOMBRES_VOLUMEN_MAXIMO
         nivel = self.ctx.ajustes.get("volumen_maximo")
         self.bt_super.set_activo(nivel in sonoridad.NIVELES)
+        self._pintar_mas()
         self.bt_super.setToolTip("Volumen máximo: "
                                  + NOMBRES_VOLUMEN_MAXIMO.get(nivel, "Apagado").lower())
 
@@ -474,6 +535,7 @@ class BarraReproduccion(QFrame):
     def _pintar_juntos(self, g):
         s = g.sala
         self.bt_juntos.set_activo(s is not None)
+        self._pintar_mas()
         self.bt_juntos.setToolTip(f"Escuchar juntos · sala {s.codigo}" if s else "Escuchar juntos")
 
     def _menu_visual(self):
@@ -490,7 +552,7 @@ class BarraReproduccion(QFrame):
             menu.addSeparator()
             aviso = menu.addAction("Exclusivo para donadores")
             aviso.setEnabled(False)
-        menu.exec(self.bt_visual.mapToGlobal(QPoint(0, -menu.sizeHint().height() - 6)))
+        self._menu_de(menu, self.bt_visual)
 
     # ------------------------------------------------------------ colores de la carátula
 

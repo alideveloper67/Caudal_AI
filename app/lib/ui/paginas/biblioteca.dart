@@ -182,7 +182,7 @@ class _BibliotecaPaginaState extends State<BibliotecaPagina> with AutomaticKeepA
                 ),
               ),
               const SizedBox(width: Esp.m),
-              const Text('Tu biblioteca', style: estiloTituloBarra),
+              const Flexible(child: Text('Tu biblioteca', maxLines: 1, overflow: TextOverflow.ellipsis, style: estiloTituloBarra)),
             ]),
             actions: [
               IconButton(
@@ -198,9 +198,9 @@ class _BibliotecaPaginaState extends State<BibliotecaPagina> with AutomaticKeepA
               IconButton(tooltip: 'Nueva lista', icon: const Icon(Icons.add_rounded, size: 28), onPressed: _nuevaLista),
             ],
             bottom: PreferredSize(
-              preferredSize: const Size.fromHeight(50),
+              preferredSize: const Size.fromHeight(56),
               child: SizedBox(
-                height: 50,
+                height: 56,
                 child: ListView(scrollDirection: Axis.horizontal, padding: const EdgeInsets.fromLTRB(Esp.lado, 2, Esp.lado, 6),
                     children: [
                   if (_filtro != null)
@@ -317,9 +317,9 @@ class _Item extends StatelessWidget {
           onTap: () => compartida
               ? abrirListaCompartida(context, el['compartida'] as ListaCompartida)
               : s.abrirElemento(context, el),
-          onLongPress: compartida ? null : () => s.reproducirElemento(context, el),
+          onLongPress: compartida ? null : () => s.hojaElemento(context, el),
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: Esp.lado, vertical: 7),
+            padding: const EdgeInsets.fromLTRB(Esp.lado, 7, 4, 7),
             child: Row(children: [
               portada,
               const SizedBox(width: 13),
@@ -341,6 +341,12 @@ class _Item extends StatelessWidget {
                 ]),
               ])),
               if (sonando) Icon(Icons.volume_up_rounded, color: C.acento, size: 20),
+              if (!compartida)
+                IconButton(
+                  tooltip: 'Opciones',
+                  icon: const Icon(Icons.more_vert_rounded, color: C.texto2),
+                  onPressed: () => s.hojaElemento(context, el),
+                ),
             ]),
           ),
         );

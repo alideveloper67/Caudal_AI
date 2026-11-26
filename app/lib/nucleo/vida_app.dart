@@ -9,6 +9,8 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/scheduler.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 
 /// ¿Se esta viendo la app? Con la ventanita flotante o la cortina de
@@ -29,6 +31,31 @@ class VidaApp {
     b.addObserver(_vigia = _Vigia());
     final s = b.lifecycleState;
     if (s != null) primerPlano.value = seVe(s);
+    // Android avisa cuando la pantalla de Caudal vuelve (también si la música seguía sonando sin ella)
+    if (defaultTargetPlatform == TargetPlatform.android) {
+      const MethodChannel('caudal/vida').setMethodCallHandler((llamada) async {
+        if (llamada.method == 'repintar') repintar();
+        return null;
+      });
+    }
+  }
+
+  /// Pide cuadros nuevos aunque Flutter crea que no ha cambiado nada. Al abrir Caudal desde el ícono con la
+  /// música sonando en segundo plano, la pantalla nueva se engancha al motor que ya estaba en marcha; si el
+  /// primer cuadro llega antes que su superficie, se quedaba toda negra hasta tocar algo (o para siempre).
+  static void repintar() {
+    void ya() {
+      try {
+        SchedulerBinding.instance.scheduleForcedFrame();
+        for (final v in WidgetsBinding.instance.renderViews) {
+          v.markNeedsPaint();
+        }
+      } catch (_) {}
+    }
+    ya();
+    for (final ms in const [120, 400, 1200]) {
+      Timer(Duration(milliseconds: ms), ya);
+    }
   }
 
   /// Si con ese estado la app cuenta como vista.
@@ -40,7 +67,12 @@ class _Vigia with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     VidaApp.primerPlano.value = VidaApp.seVe(state);
+    if (state == AppLifecycleState.resumed) VidaApp.repintar();
   }
+
+  // la superficie nueva llega con su tamaño: también se repinta
+  @override
+  void didChangeMetrics() => VidaApp.repintar();
 }
 
 /// Un sondeo cada [cada] que solo corre con la app en primer plano y la

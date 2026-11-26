@@ -37,6 +37,7 @@ import 'bateria_ajuste.dart';
 import 'copia_seguridad_pagina.dart';
 import 'despertador_ajuste.dart';
 import 'donar.dart';
+import 'me_gusta_externos_pagina.dart';
 import 'mezclador_ajustes.dart';
 import 'mezclador_pagina.dart';
 import 'modo_gamer_pagina.dart';
@@ -227,6 +228,12 @@ class _AjustesPaginaState extends State<AjustesPagina> {
             title: const Text('Cambiar la contraseña'),
             onTap: s.cuenta.sesion == null ? null : _cambiarContrasena,
           ),
+        ListTile(
+          leading: const Icon(Icons.link_rounded, color: C.texto2),
+          title: const Text('Vincular cuentas'),
+          subtitle: const Text('Tus me gusta de Spotify, YouTube Music y SoundCloud', style: estiloSecundario),
+          onTap: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MeGustaExternosPagina())),
+        ),
         ListTile(
           leading: const Icon(Icons.logout_rounded, color: C.error),
           title: const Text('Cerrar sesión', style: TextStyle(color: C.error)),

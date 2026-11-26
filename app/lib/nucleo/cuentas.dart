@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
@@ -9,7 +10,11 @@ import 'red.dart';
 /// con la sesion guardada (la biblioteca local funciona igual).
 class Cuenta {
   Cuenta({required this.id, required this.usuario, required this.nombre, this.sesion,
-      this.sinConexion = false, this.google = false});
+      this.sinConexion = false, this.google = false}) {
+    // el token de renovación cambia al usarse y el viejo deja de valer: se guarda en ese mismo momento
+    // (antes, en la siguiente sincronización; si Android cerraba la app antes, pedía iniciar sesión)
+    sesion?.alRenovar = () => Cuentas.actualizarRecordada(this);
+  }
 
   final String id;
   final String usuario;
@@ -175,21 +180,55 @@ class Cuentas {
     try {
       if (await (sinRed ?? Red.comprobarSinRed)()) return _sinConexion(g);
     } catch (_) {}
+    final pedido = (renovar ?? Nube.renovar)('${g['refresh']}');
     try {
-      final s = await (renovar ?? Nube.renovar)('${g['refresh']}').timeout(espera);
+      final s = await pedido.timeout(espera);
       final c = Cuenta(id: '${g['id']}', usuario: '${g['usuario']}', nombre: '${g['nombre']}',
           sesion: s, google: g['google'] == true);
       await recordar(c);
+      return c;
+    } on TimeoutException {
+      // se entra ya, pero la renovación sigue en marcha: si llega, su token se guarda (el viejo ya no vale)
+      final c = _sinConexion(g);
+      unawaited(pedido.then((s) async {
+        final mia = c.sesion!;
+        if (mia.refresh != '${g['refresh']}') return;      // ya se renovó por otro lado
+        mia.acceso = s.acceso;
+        mia.refresh = s.refresh;
+        mia.expira = s.expira;
+        await actualizarRecordada(c);
+      }).catchError((Object _) {}));
       return c;
     } on SinConexion {
       // OJO: SinConexion es un ErrorNube; va antes para que la falta de red nunca cierre la sesión
       return _sinConexion(g);
     } on ErrorNube {
-      // solo llega aquí lo que la nube dijo de verdad: esta sesión ya no vale
+      // solo llega aquí lo que la nube dijo de verdad: esta sesión ya no vale… salvo que otra copia de
+      // Caudal la haya renovado mientras tanto: se prueba con lo último guardado antes de rendirse
+      final p = await SharedPreferences.getInstance();
+      try {
+        await p.reload();
+      } catch (_) {}
+      final otra = await _guardada();
+      if (otra != null && '${otra['refresh']}' != '${g['refresh']}') {
+        try {
+          final s = await (renovar ?? Nube.renovar)('${otra['refresh']}').timeout(espera);
+          final c = Cuenta(id: '${otra['id']}', usuario: '${otra['usuario']}', nombre: '${otra['nombre']}',
+              sesion: s, google: otra['google'] == true);
+          await recordar(c);
+          return c;
+        } on SinConexion {
+          return _sinConexion(otra);
+        } on ErrorNube {
+          // de verdad ya no vale
+        } catch (_) {
+          return _sinConexion(otra);
+        }
+      }
       await olvidar();
       return null;
     } catch (_) {
-      // SinConexion, la espera agotada o cualquier otra cosa rara: se entra sin conexión
+      // cualquier otra cosa rara: se entra sin conexión
       return _sinConexion(g);
     }
   }

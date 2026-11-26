@@ -109,12 +109,26 @@ class SeccionMascotas(QFrame):
         self.botones = {}
         self._poner("", "Ninguna", None, 0)
         for i, m in enumerate(M.catalogo_de(gestor.ctx), start=1):
-            cuadros = M.cuadros(m["clave"])
-            self._poner(m["clave"], m["nombre"], cuadros[0] if cuadros else None, i, m.get("origen", ""))
+            self._poner(m["clave"], m["nombre"], None, i, m.get("origen", ""))
+        # los dibujos, de a pocos: leerlos todos seguidos paraba la ventana
+        self._sin_dibujo = [m["clave"] for m in M.catalogo_de(gestor.ctx)]
+        self._t_dibujos = QTimer(self)
+        self._t_dibujos.setInterval(0)
+        self._t_dibujos.timeout.connect(self._mas_dibujos)
+        self._t_dibujos.start()
         for c in range(COLUMNAS):
             self.rejilla.setColumnStretch(c, 1)
         gestor.cambiada.connect(self.refrescar)
         self.refrescar()
+
+    def _mas_dibujos(self):
+        tanda, self._sin_dibujo = self._sin_dibujo[:1], self._sin_dibujo[1:]       # de uno en uno: cada dibujo se lee del disco
+        for clave in tanda:
+            cuadros = M.cuadros(clave)
+            if cuadros and clave in self.botones:
+                self.botones[clave].setIcon(QIcon(cuadros[0]))
+        if not self._sin_dibujo:
+            self._t_dibujos.stop()
 
     def _poner(self, clave, nombre, pm, i, origen=""):
         b = QToolButton()

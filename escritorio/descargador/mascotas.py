@@ -30,7 +30,8 @@ _PIXMAPS = {}
 # el catálogo se lee una vez y se guarda en memoria: la barra lo consultaba en cada cuadro
 # (decenas de veces por segundo). Se vuelve a leer solo si cambia el archivo (o la carpeta ARTE).
 _CATALOGO = {"ruta": None, "huella": None, "mirado": 0.0, "lista": [], "indice": {}, "version": 0}
-MIRAR_CADA = 1.0      # segundos entre comprobaciones de la fecha del archivo
+MIRAR_CADA = 60.0     # segundos entre comprobaciones del archivo (preguntar al disco cada segundo, en el
+                      # hilo que pinta, llegó a parar la interfaz 220 ms con el disco ocupado)
 
 
 def _catalogo_vivo():
@@ -239,6 +240,36 @@ COLORES_ARCOIRIS = ("#ff0000", "#ff9900", "#ffff00", "#33ff00", "#0099ff", "#663
 
 
 _REDUCIDAS = {}
+_EN_HILO = {}                 # (clave, i, ancho, alto) -> QImage ya reducida en un hilo (falta pasarla a QPixmap)
+_PREPARANDO = set()           # claves que un hilo está reduciendo ahora
+
+
+def preparar_reducidas(datos, ancho, alto):
+    """Reduce todos los cuadros de una mascota grande en un hilo (QImage se puede usar fuera de la interfaz).
+    Hacerlo al pintar paraba el karaoke más de medio segundo la primera vez."""
+    import threading
+    clave = (datos or {}).get("clave")
+    if not clave or clave in _PREPARANDO or ancho <= 0 or alto <= 0:
+        return
+    _PREPARANDO.add(clave)
+
+    def trabajo():
+        try:
+            from PySide6.QtCore import Qt
+            from PySide6.QtGui import QImage
+            hoja = QImage(str(ARTE / f"{clave}.png"))
+            if hoja.isNull() or hoja.height() <= alto * 2:
+                return
+            n = num_cuadros(por_clave(clave))
+            a = hoja.width() // n
+            for i in range(n):
+                _EN_HILO[(clave, i, ancho, alto)] = hoja.copy(i * a, 0, a, hoja.height()).scaled(
+                    ancho, alto, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+        except Exception:  # noqa: BLE001 - se reducirá al pintar, como antes
+            pass
+        finally:
+            _PREPARANDO.discard(clave)
+    threading.Thread(target=trabajo, name="mascota-reducir", daemon=True).start()
 
 
 def _reducida(clave, i, pm, ancho, alto, dpr):
@@ -253,7 +284,11 @@ def _reducida(clave, i, pm, ancho, alto, dpr):
         from PySide6.QtGui import QPixmap
         if len(_REDUCIDAS) > 256:
             _REDUCIDAS.clear()
-        img = pm.toImage().scaled(ancho, alto, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
+        img = _EN_HILO.pop(clave_c, None)
+        if img is None and clave in _PREPARANDO:
+            return pm                     # un hilo la está reduciendo: mientras, la de siempre (un instante)
+        if img is None:
+            img = pm.toImage().scaled(ancho, alto, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
         r = QPixmap.fromImage(img)
         r.setDevicePixelRatio(dpr)
         _REDUCIDAS[clave_c] = r

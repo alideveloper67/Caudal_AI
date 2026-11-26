@@ -4,7 +4,7 @@
 import subprocess
 import sys
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFrame, QHBoxLayout, QLabel,
                                QLineEdit, QMessageBox, QPushButton, QSlider, QSpinBox, QVBoxLayout,
                                QWidget)
@@ -79,11 +79,70 @@ def _interruptor(valor):
     return c
 
 
+def _escena_abierta():
+    import sys
+    m = sys.modules.get("descargador.ui.escena.ventana")
+    return m is not None and m.hay_abierta()
+
+
 class PaginaAjustes(Pagina):
-    def __init__(self, ctx, padre=None):
+    def __init__(self, ctx, padre=None, por_partes=False):
         super().__init__(ctx, padre)
         self.titulo = "Ajustes"
         self.a = ctx.ajustes
+        # son cientos de controles: de golpe, la ventana se quedaba parada al abrir. Por partes, lo que se ve
+        # sale ya y el resto se va añadiendo debajo entre cuadro y cuadro
+        self._partes = self._construir()
+        if por_partes:
+            self._construyendo = True
+            for _ in range(2):
+                next(self._partes, None)
+            self._construyendo = False
+            self._t_partes = QTimer(self)
+            self._t_partes.setInterval(12)
+            self._t_partes.timeout.connect(self._otra_parte)
+            self._t_partes.start()
+        else:
+            self.terminar()
+
+    def _otra_parte(self):
+        if self._partes is None:             # ya la terminó alguien que pidió un control
+            self._t_partes.stop()
+            return
+        if not self.isVisible() and _escena_abierta():
+            self._t_partes.setInterval(1500)     # se prepara por adelantado: que no dé tirones en la escena
+            return
+        self._t_partes.setInterval(12)
+        self._construyendo = True
+        try:
+            next(self._partes)
+        except StopIteration:
+            self._t_partes.stop()
+            self._partes = None
+        finally:
+            self._construyendo = False
+
+    def terminar(self):
+        """Lo que quede por construir, ya."""
+        partes, self._partes = self._partes, None
+        self._construyendo = True
+        try:
+            for _ in partes or ():
+                pass
+        finally:
+            self._construyendo = False
+
+    def __getattr__(self, nombre):
+        # alguien pide un control que aún no se construyó: se termina la página y se le da
+        d = self.__dict__
+        if d.get("_partes") is not None and not d.get("_construyendo") and not nombre.startswith("__"):
+            self.terminar()
+            if nombre in d:
+                return d[nombre]
+        raise AttributeError(f"'{type(self).__name__}' object has no attribute '{nombre}'")
+
+    def _construir(self):
+        ctx = self.ctx
         a = self.a
         t = QLabel("Ajustes")
         t.setObjectName("titulo_pagina")
@@ -100,6 +159,7 @@ class PaginaAjustes(Pagina):
         self.selector_aspecto.cambio.connect(self._mascota_del_fondo)
         s.v.addWidget(self.selector_aspecto)
         self.cuerpo.addWidget(s)
+        yield
 
         # ---------------- fondo de Caudal (solo Donador o Fundador de Caudal: si no, ni aparece)
         gestor_fondo = getattr(ctx, "fondo", None)
@@ -109,19 +169,23 @@ class PaginaAjustes(Pagina):
             self.seccion_fondo = SeccionFondo(gestor_fondo, self.lienzo)
             self.cuerpo.addWidget(self.seccion_fondo)
             gestor_fondo.verificar_permiso()
+            yield
         gestor_mascota = getattr(ctx, "mascota", None)
         if gestor_mascota is not None:
             from ..mascotas_ajuste import SeccionMascotas
             self.cuerpo.addWidget(SeccionMascotas(gestor_mascota, self.lienzo))
+            yield
         # marco animado, efecto del nombre y tema de colores (donadores; el resto lo prueba con candado)
         if getattr(ctx, "premium", None) is not None:
             from ..personalizar_ajuste import SeccionPersonalizar
             self.seccion_personalizar = SeccionPersonalizar(ctx)
             self.cuerpo.addWidget(self.seccion_personalizar)
+            yield
             # letra con efectos, pared de agradecimiento y mascota propia (con candado para el resto)
             from ..mas_donadores import SeccionMasDonadores
             self.seccion_mas_donadores = SeccionMasDonadores(ctx)
             self.cuerpo.addWidget(self.seccion_mas_donadores)
+            yield
 
         # ---------------- reproduccion
         s = Seccion("Reproducción")
@@ -213,6 +277,7 @@ class PaginaAjustes(Pagina):
         s.fila("Mis artistas favoritos", "Los artistas que elegiste al crear tu cuenta. Caudal los "
                                          "usa para recomendarte música parecida.", self.bt_gustos)
         self.cuerpo.addWidget(s)
+        yield
 
         # ---------------- sonido
         s = Seccion("Sonido")
@@ -309,6 +374,7 @@ class PaginaAjustes(Pagina):
         s.fila("Despertador", "Despiértate con tu música: hora, días y qué suena. Caudal tiene que "
                               "estar abierto (aunque sea en la bandeja).", bt_despertador)
         self.cuerpo.addWidget(s)
+        yield
 
         # ---------------- escena de escritorio
         s = Seccion("Escena de escritorio")
@@ -346,6 +412,7 @@ class PaginaAjustes(Pagina):
         s.fila("Videoclip de fondo", "Si se apaga, el fondo es la carátula en movimiento "
                "(gasta menos internet y procesador).", self.escena_video)
         self.cuerpo.addWidget(s)
+        yield
 
         # ---------------- letra de las canciones
         self._seccion_letra()
@@ -376,6 +443,7 @@ class PaginaAjustes(Pagina):
         self._conectar(self.notificar, "notificar_al_terminar")
         s.fila("Avisar al terminar cada descarga", "", self.notificar)
         self.cuerpo.addWidget(s)
+        yield
         # Discord: solo si la función está disponible en esta versión (si no, no aparece)
         from ..discord_ajuste import seccion_discord
         sec_discord = seccion_discord(ctx)
@@ -448,6 +516,7 @@ class PaginaAjustes(Pagina):
             lambda: self._poner("idioma_subtitulos", self.idiomas.text().strip() or "es"))
         s.fila("Idiomas de los subtítulos", "Códigos separados por comas: es, en, pt", self.idiomas)
         self.cuerpo.addWidget(s)
+        yield
 
         # ---------------- descarga inteligente
         s = Seccion("Descarga inteligente")
@@ -470,9 +539,19 @@ class PaginaAjustes(Pagina):
         self.et_inteligente.setWordWrap(True)
         s.fila("Cómo va", "", self.et_inteligente)
         self.cuerpo.addWidget(s)
+        yield
         self._preparar_inteligente()
 
         # ---------------- cuenta
+        s = Seccion("Tus otras cuentas de música")
+        bt_vincular = QPushButton("Vincular")
+        bt_vincular.setCursor(Qt.PointingHandCursor)
+        bt_vincular.clicked.connect(lambda: ctx.ventana._pasar_me_gusta())
+        s.fila("Vincular Spotify, YouTube y SoundCloud",
+               "Sus me gusta pasan a los tuyos de Caudal, sin repetir. También desde un archivo.", bt_vincular)
+        self.cuerpo.addWidget(s)
+        yield
+
         s = Seccion("Tu cuenta de YouTube (opcional)")
         nota = QLabel("Sin cuenta todo funciona. Con tu sesión de YouTube (si tienes Premium) "
                       "llega el audio de 256 kbps y los videos con restricción de edad. Caudal "
@@ -482,7 +561,7 @@ class PaginaAjustes(Pagina):
         nota.setObjectName("secundario")
         s.v.addWidget(nota)
         self.navegador = _combo(NAVEGADORES, a["navegador_cookies"], 200)
-        self._conectar(self.navegador, "navegador_cookies")
+        self._conectar(self.navegador, "navegador_cookies", self._navegador_cookies)
         s.fila("Usar la sesión de", "", self.navegador)
         caja_ck = QWidget()
         hk = QHBoxLayout(caja_ck)
@@ -503,6 +582,7 @@ class PaginaAjustes(Pagina):
         self.proxy.editingFinished.connect(lambda: self._poner("proxy", self.proxy.text().strip()))
         s.fila("Proxy", "Para contenido bloqueado en tu país.", self.proxy)
         self.cuerpo.addWidget(s)
+        yield
 
         # ---------------- almacenamiento
         s = Seccion("Almacenamiento y privacidad")
@@ -530,10 +610,12 @@ class PaginaAjustes(Pagina):
         fila_aviso_errores(s)
         fila_logros(s, ctx, self)
         self.cuerpo.addWidget(s)
+        yield
 
         # ---------------- copia de seguridad (import local: copia_seguridad_ui importa Seccion de este módulo)
         from ..copia_seguridad_ui import SeccionCopia
         self.cuerpo.addWidget(SeccionCopia(ctx, self.lienzo))
+        yield
 
         # ---------------- donar (para todos; discreto)
         s = Seccion("Apoya a Caudal")
@@ -562,6 +644,7 @@ class PaginaAjustes(Pagina):
             bt_que.clicked.connect(lambda: abrir_que_cancion(ctx, self))
             s.fila("¿Qué canción era?", "Busca en lo que escuchaste por fecha y por texto (donadores).", bt_que)
         self.cuerpo.addWidget(s)
+        yield
 
         # ---------------- motor
         s = Seccion("Motor y versión")
@@ -588,6 +671,7 @@ class PaginaAjustes(Pagina):
         s.fila("Volver a los ajustes de fábrica", "Tus listas, me gusta y descargas no se tocan.",
                bt_defecto)
         self.cuerpo.addWidget(s)
+        yield
         self.cuerpo.addStretch(1)
         self._pintar_motor()
         self._pintar_cache()
@@ -810,9 +894,14 @@ class PaginaAjustes(Pagina):
     def showEvent(self, ev):
         # la página se guarda entre visitas: al volver, se refresca lo que pudo cambiar fuera
         super().showEvent(ev)
-        if getattr(self, "_ya_mostrada", False):
-            self._pintar_cache()
+        if self.__dict__.get("_ya_mostrada") and "et_cache" in self.__dict__:
+            self._pintar_cache()             # (si aún no se construyó, ya sale al día)
         self._ya_mostrada = True
+
+    def _navegador_cookies(self):
+        from ... import cookies_navegador
+        cookies_navegador.olvidar()
+        cookies_navegador.empezar(self.a["navegador_cookies"])
 
     def _pintar_cache(self):
         # miles de portadas en disco: sumarlas en el hilo de la interfaz trababa Ajustes al abrir
@@ -848,20 +937,18 @@ class PaginaAjustes(Pagina):
                 v_yt = yt_dlp.version.__version__
             except Exception:
                 v_yt = "no disponible"
-            return v_yt, ruta_ffmpeg()
+            try:
+                import locale
+                locale.setlocale(locale.LC_NUMERIC, "C")
+                m = self.ctx.reproductor.audio[0].mpv if self.ctx.reproductor.audio else None
+                v_mpv = m.mpv_version if m is not None else "cargado"
+            except Exception:
+                v_mpv = "cargado"
+            return v_yt, ruta_ffmpeg(), v_mpv
 
         def pintar(res):
-            v_yt, ff = res
-            mod = mpv_carga.modulo()
-            if mod is not None:
-                try:
-                    import locale
-                    locale.setlocale(locale.LC_NUMERIC, "C")
-                    m = self.ctx.reproductor.audio[0].mpv if self.ctx.reproductor.audio else None
-                    v_mpv = m.mpv_version if m is not None else "cargado"
-                except Exception:
-                    v_mpv = "cargado"
-            else:
+            v_yt, ff, v_mpv = res
+            if mpv_carga.modulo() is None:
                 v_mpv = "NO ENCONTRADO: " + (mpv_carga.error() or "")
             self.et_motor.setText(f"yt-dlp {v_yt}\nReproductor: {v_mpv}\n"
                                   f"ffmpeg: {ff or 'NO ENCONTRADO'}")

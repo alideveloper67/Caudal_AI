@@ -5,7 +5,7 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton
 
 from .. import iconos
 from ...hilos import en_segundo_plano
-from ..componentes import Chip, Esqueleto, Pagina, _borrar_layout
+from ..componentes import Chip, Esqueleto, FilaDesplazable, Pagina, _borrar_layout
 from ..estilos import C
 from .comun import Rejilla
 
@@ -32,32 +32,39 @@ class PaginaBiblioteca(Pagina):
         t.setStyleSheet("font-size:30px;font-weight:900;")
         cab.addWidget(t)
         cab.addStretch(1)
+        self.cuerpo.addLayout(cab)
+        acciones = FilaDesplazable()
         nueva = QPushButton("  Crear una lista")
         nueva.setObjectName("contorno")
         nueva.setIcon(iconos.icono("mas", 15, C["texto"]))
         nueva.clicked.connect(ctx.crear_lista)
+        acciones.agregar(nueva)
+        vincular = QPushButton("  Vincular cuentas")
+        vincular.setObjectName("contorno")
+        vincular.setIcon(iconos.icono("enlace", 15, C["texto"]))
+        vincular.setToolTip("Vincular Spotify, YouTube y SoundCloud: sus me gusta pasan a los tuyos")
+        vincular.clicked.connect(lambda: ctx.ventana._pasar_me_gusta())
+        acciones.agregar(vincular)
         importar = QPushButton("  Importar de tu PC")
         importar.setObjectName("contorno")
         importar.setIcon(iconos.icono("carpeta", 15, C["texto"]))
         importar.setToolTip("Canciones que ya tienes en la computadora (MP3, M4A, FLAC...)")
         importar.clicked.connect(ctx.importar_de_pc)
-        cab.addWidget(importar)
+        acciones.agregar(importar)
         traer = QPushButton("  Traer una lista")
         traer.setObjectName("contorno")
         traer.setIcon(iconos.icono("anadir_lista", 15, C["texto"]))
         traer.setToolTip("De Spotify, Apple Music o YouTube Music")
         traer.clicked.connect(lambda: ctx.ventana._traer_lista())
-        cab.addWidget(traer)
+        acciones.agregar(traer)
         codigo = QPushButton("  Tengo un código")
         codigo.setObjectName("contorno")
         codigo.setIcon(iconos.icono("compartir", 15, C["texto"]))
         codigo.setToolTip("Unirte a una lista que te compartieron")
         codigo.clicked.connect(lambda: ctx.tengo_un_codigo())
-        cab.addWidget(codigo)
-        cab.addWidget(nueva)
-        self.cuerpo.addLayout(cab)
-        chips = QHBoxLayout()
-        chips.setSpacing(8)
+        acciones.agregar(codigo)
+        self.cuerpo.addWidget(acciones)
+        chips = FilaDesplazable()
         self.chips = {}
         for clave, texto in (("todo", "Todo"), ("listas", "Listas"), ("compartidas", "Compartidas"),
                              ("albumes", "Álbumes"),
@@ -65,10 +72,9 @@ class PaginaBiblioteca(Pagina):
             c = Chip(texto)
             c.setChecked(clave == self.filtro)
             c.clicked.connect(lambda _=False, k=clave: self._filtrar(k))
-            chips.addWidget(c)
+            chips.agregar(c)
             self.chips[clave] = c
-        chips.addStretch(1)
-        self.cuerpo.addLayout(chips)
+        self.cuerpo.addWidget(chips)
         from PySide6.QtWidgets import QVBoxLayout, QWidget
         self.zona = QWidget()
         self.zv = QVBoxLayout(self.zona)

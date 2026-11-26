@@ -75,8 +75,8 @@ class ColaLista extends StatelessWidget {
         ReorderableDragStartListener(
           index: indice,
           child: const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-            child: Icon(Icons.drag_handle_rounded, color: C.texto3, semanticLabel: 'Arrastrar para reordenar'),
+            padding: EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+            child: Icon(Icons.drag_handle_rounded, color: C.texto2, semanticLabel: 'Arrastrar para reordenar'),
           ),
         ),
       ])); 

@@ -11,7 +11,6 @@ import 'package:caudal/nucleo/huella_cancion.dart';
 import 'package:caudal/nucleo/importacion.dart';
 import 'package:caudal/nucleo/importar.dart';
 import 'package:caudal/nucleo/nube.dart';
-import 'package:caudal/nucleo/servicios_externos.dart';
 import 'package:caudal/nucleo/sincronizacion.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -121,39 +120,6 @@ void main() {
       expect(l.titulo, 'Grande');
       expect(l.completa, isTrue);
     });
-
-    test('PKCE: la huella es la del verificador y pide solo leer', () {
-      final v = CuentaSpotify.nuevoVerificador();
-      expect(v.length, 96);
-      final u = CuentaSpotify.urlAutorizar('cid', v, 'est');
-      expect(u.queryParameters['code_challenge_method'], 'S256');
-      expect(u.queryParameters['redirect_uri'], 'caudal://spotify');
-      expect(u.queryParameters['scope'], contains('user-library-read'));
-      expect(u.queryParameters.containsKey('client_secret'), isFalse);
-    });
-
-    test('PKCE: la vuelta canjea el código sin secreto y guarda la sesión', () async {
-      ServiciosExternos.pedir = (u) async => _json({'spotify_client_id': 'cid'});
-      ServiciosExternos.olvidarConfig();
-      final url = await CuentaSpotify.empezar();
-      Map<String, String>? cuerpo;
-      CuentaSpotify.canjear = (u, c) async {
-        cuerpo = c;
-        return _json({'access_token': 'A', 'refresh_token': 'R', 'expires_in': 3600});
-      };
-      await CuentaSpotify.volvio('caudal://spotify?code=XYZ&state=${url.queryParameters['state']}');
-      expect(cuerpo!['code_verifier'], isNotEmpty);
-      expect(cuerpo!.containsKey('client_secret'), isFalse);
-      expect(await CuentaSpotify.conectada(), isTrue);
-      expect(await CuentaSpotify.token(), 'A');
-    });
-
-    test('PKCE: si el estado no coincide no se conecta', () async {
-      ServiciosExternos.pedir = (u) async => _json({'spotify_client_id': 'cid'});
-      ServiciosExternos.olvidarConfig();
-      await CuentaSpotify.empezar();
-      expect(() => CuentaSpotify.volvio('caudal://spotify?code=XYZ&state=otro'), throwsA(isA<ErrorServicio>()));
-    });
   });
 
   group('SoundCloud', () {
@@ -199,18 +165,26 @@ void main() {
       expect(l.canciones.first.artista, 'Artista 0');
       Importar.red = (u, c) async {
         if (u.host == 'caudal-musica.netlify.app') return _json({'error': 'sin_credenciales'});
+        if (u.path == '/oembed') {
+          final id = u.queryParameters['url']!.split('/').last;
+          if (id == '101') return http.Response('no', 404);
+          return _json({'title': 'Otro - Canción $id by chillhop', 'author_name': 'chillhop'});
+        }
         return http.Response.bytes(utf8.encode(pagina), 200);
       };
+      // las que la página no enseña se preguntan a oEmbed, en su orden; la privada falta y se dice
       final l2 = await Importar.leer('https://soundcloud.com/chillhop/sets/chill');
+      expect(l2.canciones.length, 47);
+      expect((l2.canciones[5].titulo, l2.canciones[5].artista), ('Canción 100', 'Otro'));
       expect(l2.completa, isFalse);
-      expect(l2.aviso, contains('5 de sus 48'));
+      expect(l2.aviso, contains('47 de sus 48'));
       expect(() => Importar.leer('https://soundcloud.com/chillhop/likes'), throwsA(isA<ErrorImportar>()));
     });
   });
 
   test('los me gusta de YouTube explican cómo pasarlos', () {
     expect(() => Importar.leer('https://music.youtube.com/playlist?list=LM'),
-        throwsA(predicate((e) => '$e'.contains('Agregar a playlist'))));
+        throwsA(predicate((e) => '$e'.contains('Vincular cuentas'))));
   });
 
   group('emparejar', () {

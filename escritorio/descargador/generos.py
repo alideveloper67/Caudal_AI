@@ -111,10 +111,19 @@ def _texto_pista(p):
         (p or {}).get("genero"))))
 
 
+_ENTERAS = {}
+
+
 def _tiene(clave, texto):
     # una palabra corta solo cuenta entera; una larga, donde aparezca
     if len(clave) <= 5:
-        return re.search(r"(?<![a-z0-9])" + re.escape(clave.strip()) + r"(?![a-z0-9])", texto) is not None
+        corta = clave.strip()
+        if corta not in texto:
+            return False                    # lo normal: sin gastar en el patrón
+        patron = _ENTERAS.get(corta)
+        if patron is None:
+            patron = _ENTERAS[corta] = re.compile(r"(?<![a-z0-9])" + re.escape(corta) + r"(?![a-z0-9])")
+        return patron.search(texto) is not None
     return clave in texto
 
 

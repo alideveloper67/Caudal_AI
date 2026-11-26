@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (QButtonGroup, QFrame, QHBoxLayout, QLabel, QLineE
 from . import dialogo_portada, iconos, imagenes
 from .componentes import MIME_PISTAS, BotonIcono, _borrar_layout, fuente
 from .estilos import C
+from .panel_mas import FichaMas, PanelMas
 
 
 class ItemBiblioteca(QWidget):
@@ -195,12 +196,13 @@ class PanelLateral(QWidget):
     traer_lista = Signal()
 
     NAV = [("inicio", "Inicio", "casa"), ("explorar", "Explorar", "brujula"),
-           ("directorio", "Perfiles de Caudal", "usuario"),
-           ("comunidad", "Música de la comunidad", "musica"),
-           ("mezclador", "Mezclador", "ecualizador"),
-           ("estudio", "Modo estudio", "graduado"),
-           ("gamer", "Modo gamer", "mando"),
            ("descargas", "Descargar videos", "descargar")]
+    # lo que no se usa a diario, en su ventanita: desplegado en la columna, en ventanas bajas quedaba aplastado
+    NAV_MAS = [("directorio", "Perfiles de Caudal", "usuario"),
+               ("comunidad", "Música de la comunidad", "musica"),
+               ("mezclador", "Mezclador", "ecualizador"),
+               ("estudio", "Modo estudio", "graduado"),
+               ("gamer", "Modo gamer", "mando")]
 
     def __init__(self, ctx, padre=None):
         super().__init__(padre)
@@ -230,17 +232,23 @@ class PanelLateral(QWidget):
         self.grupo = QButtonGroup(self)
         self.grupo.setExclusive(True)
         self.botones = {}
-        for clave, texto, icono in self.NAV:
-            b = QPushButton(f"   {texto}")
-            b.setObjectName("nav")
-            b.setCheckable(True)
-            b.setIcon(iconos.icono_estados(icono, 20, C["texto2"], C["texto"]))
-            b.setCursor(Qt.PointingHandCursor)
-            b.setFocusPolicy(Qt.NoFocus)
-            b.clicked.connect(lambda _=False, c=clave: self.ir.emit({"pagina": c}))
-            self.grupo.addButton(b)
-            self.botones[clave] = b
-            vn.addWidget(b)
+        for datos in self.NAV:
+            vn.addWidget(self._boton_nav(*datos))
+        self.bt_mas = QPushButton("   Más de Caudal")
+        self.bt_mas.setObjectName("nav")
+        self.bt_mas.setCursor(Qt.PointingHandCursor)
+        self.bt_mas.setFocusPolicy(Qt.NoFocus)
+        self.bt_mas.setCheckable(True)
+        self.bt_mas.setMinimumHeight(38)
+        self.bt_mas.setIcon(iconos.icono_estados("cuadricula", 20, C["texto2"], C["texto"]))
+        self.bt_mas.setToolTip("Perfiles, comunidad, mezclador, modo estudio y modo gamer")
+        self.bt_mas.clicked.connect(self._abrir_mas)
+        vn.addWidget(self.bt_mas)
+        self.panel_mas = PanelMas(self, "Más de Caudal", "derecha")
+        for clave, texto, icono in self.NAV_MAS:
+            f = self.panel_mas.agregar(FichaMas(icono, texto))
+            f.clicked.connect(lambda _=False, c=clave: self.ir.emit({"pagina": c}))
+            self.botones[clave] = f
         # «Revisión de música»: solo la ve la cuenta de moderación (se consulta en segundo plano)
         self.bt_revision = QPushButton("   Revisión de música")
         self.bt_revision.setObjectName("nav")
@@ -275,14 +283,14 @@ class PanelLateral(QWidget):
         t.clicked.connect(lambda: self.ir.emit({"pagina": "biblioteca"}))
         cab.addWidget(t)
         cab.addStretch(1)
-        mas = BotonIcono("mas", 18, "Crear una lista o traer una de otra app", 32)
+        mas = BotonIcono("mas", 20, "Crear una lista o traer una de otra app", 38)
         mas.clicked.connect(lambda: self._menu_crear(mas))
         cab.addWidget(mas)
         vb.addLayout(cab)
 
         chips = QHBoxLayout()
         chips.setContentsMargins(6, 0, 0, 0)
-        chips.setSpacing(6)
+        chips.setSpacing(5)
         self.filtro_tipo = None
         self.chips = {}
         for clave, texto in (("listas", "Listas"), ("albumes", "Álbumes"),
@@ -292,7 +300,7 @@ class PanelLateral(QWidget):
             c.setCheckable(True)
             c.setCursor(Qt.PointingHandCursor)
             c.setFocusPolicy(Qt.NoFocus)
-            c.setStyleSheet("QPushButton#chip{padding:4px 9px;font-size:12px;border-radius:12px;}")
+            c.setStyleSheet("QPushButton#chip{padding:6px 9px;font-size:12.5px;border-radius:13px;}")
             from PySide6.QtWidgets import QSizePolicy
             c.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
             c.clicked.connect(lambda _=False, k=clave: self._filtrar(k))
@@ -337,6 +345,26 @@ class PanelLateral(QWidget):
         ctx.reproductor.pista_cambio.connect(self._repintar_items)
         self.refrescar()
 
+    def _boton_nav(self, clave, texto, icono):
+        b = QPushButton(f"   {texto}")
+        b.setObjectName("nav")
+        b.setCheckable(True)
+        b.setMinimumHeight(38)
+        b.setIcon(iconos.icono_estados(icono, 20, C["texto2"], C["texto"]))
+        b.setCursor(Qt.PointingHandCursor)
+        b.setFocusPolicy(Qt.NoFocus)
+        b.clicked.connect(lambda _=False, c=clave: self.ir.emit({"pagina": c}))
+        self.grupo.addButton(b)
+        self.botones[clave] = b
+        return b
+
+    def _abrir_mas(self):
+        self.bt_mas.setChecked(self._en_mas())       # marcado solo si se está en una de dentro, no por pulsarlo
+        self.panel_mas.alternar(self.bt_mas)
+
+    def _en_mas(self):
+        return (self.destino_actual or {}).get("pagina") in {c for c, _t, _i in self.NAV_MAS}
+
     def _repintar_items(self, *_a):
         for i in self.items:
             i.update()
@@ -357,7 +385,7 @@ class PanelLateral(QWidget):
         menu.addAction(iconos.icono("anadir_lista", 16, C["texto2"]), "Crear una lista",
                        self.ctx.crear_lista)
         menu.addAction(iconos.icono("descargar", 16, C["texto2"]),
-                       "Traer una lista de Spotify, Apple Music o YouTube…", self.traer_lista.emit)
+                       "Traer una lista de Spotify, SoundCloud, Apple Music o YouTube…", self.traer_lista.emit)
         menu.exec(boton.mapToGlobal(boton.rect().bottomLeft()))
 
     def _ver_si_modera(self):
@@ -381,13 +409,16 @@ class PanelLateral(QWidget):
         self.destino_actual = destino
         pagina = (destino or {}).get("pagina")
         boton = self.botones.get(pagina)
-        if boton:
+        if boton is not None and not self._en_mas():
             boton.setChecked(True)
         else:
             self.grupo.setExclusive(False)
-            for b in self.botones.values():
+            for b in self.grupo.buttons():
                 b.setChecked(False)
             self.grupo.setExclusive(True)
+        self.bt_mas.setChecked(self._en_mas())
+        for clave, _t, _i in self.NAV_MAS:
+            self.botones[clave].set_activo(clave == pagina)      # se ve en cuál se está
         for it in self.items:
             it.activo = self._coincide(it.el, destino)
             it.update()

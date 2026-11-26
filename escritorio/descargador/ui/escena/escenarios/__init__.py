@@ -4,6 +4,8 @@
 ESCENARIOS: clave -> (nombre visible, "modulo:Clase"). Se importan al elegirse (no al abrir la escena).
 """
 import importlib
+import os
+import threading
 
 ESCENARIOS = {
     "retro": ("Retro", "descargador.ui.escena.escenarios.retro:EscenarioRetro"),
@@ -21,6 +23,44 @@ ESCENARIOS = {
     "goku": ("Goku", "descargador.ui.escena.escenarios.imagenes:EscenarioGoku"),
     "propia": ("Mi imagen o GIF", "descargador.ui.escena.escenarios.propia:EscenarioPropia"),
 }
+
+
+_calentadas = False
+
+
+def calentar():
+    """Lee en un hilo las ilustraciones (solo leerlas: quedan en la memoria del sistema), para que elegir un
+    escenario no espere al disco."""
+    global _calentadas
+    if _calentadas:
+        return
+    _calentadas = True
+
+    def leer():
+        try:
+            from .imagen_motor import CARPETA
+            for nombre in os.listdir(CARPETA):
+                with open(os.path.join(CARPETA, nombre), "rb") as f:
+                    while f.read(1 << 20):
+                        pass
+        except OSError:
+            pass
+    threading.Thread(target=leer, name="escenarios", daemon=True).start()
+
+
+def preparacion(clave):
+    """Lo que conviene hacer en un hilo antes de crear(clave) para que no dé un tirón, o None si no hace falta."""
+    datos = ESCENARIOS.get(clave)
+    if not datos or not datos[1].split(":")[0].endswith(".imagenes"):
+        return None
+
+    def hacer():
+        from . import imagen_motor
+        modulo, clase = datos[1].split(":")
+        nombre = getattr(importlib.import_module(modulo), clase).IMAGEN
+        if nombre:
+            imagen_motor.adelantar(nombre)
+    return hacer
 
 
 def crear(clave):

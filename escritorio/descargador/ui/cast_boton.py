@@ -106,9 +106,12 @@ class BotonCast(QPushButton):
         p.end()
 
     def abrir(self):
-        if self._hoja is not None and self._hoja.isVisible():
-            self._hoja.close()
-            return
+        try:
+            if self._hoja is not None and self._hoja.isVisible():
+                self._hoja.close()
+                return
+        except RuntimeError:                 # la hoja ya se había destruido sola
+            self._hoja = None
         self._hoja = HojaCast(self.control, self.window())
         self._hoja.mostrar_junto_a(self)
 

@@ -239,7 +239,7 @@ def test_enganche_en_ventana_principal():
     ruta = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                         "descargador", "ui", "ventana.py")
     texto = open(ruta, encoding="utf-8").read()
-    assert "QTimer.singleShot(2500, self._presentaciones_inicio)" in texto
+    assert "QTimer.singleShot(2500, self, lambda: self._con_calma(self._presentaciones_inicio))" in texto
     assert "revisar_hito_100(self, despues=self._avisar_novedades)" in texto
 
 

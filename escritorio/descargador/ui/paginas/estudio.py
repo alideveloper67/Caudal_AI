@@ -218,6 +218,11 @@ class TarjetaEstudioInicio(QWidget):
         self._t.setInterval(16)
         self._t.timeout.connect(self._paso)
 
+    def compacta(self):
+        """Más baja y discreta (en Inicio va al lado de «Tu resumen»)."""
+        self.setFixedHeight(84)
+        self.update()
+
     def _paso(self):
         self._encima += (self._objetivo - self._encima) * 0.25
         if abs(self._encima - self._objetivo) < 0.01:
@@ -261,23 +266,28 @@ class TarjetaEstudioInicio(QWidget):
         p.restore()
         # icono en círculo
         p.setBrush(QColor(255, 255, 255, 34))
-        p.drawEllipse(QRectF(26, r.center().y() - 28, 56, 56))
-        p.drawPixmap(int(26 + 14), int(r.center().y() - 14), iconos.pixmap("graduado", 28, "#FFFFFF"))
-        x = 104
+        chica = self.height() < 100
+        p.setPen(Qt.NoPen)
+        arriba, mitad = (10, 26) if chica else (20, 28)      # dónde empieza el texto y radio del círculo
+        p.drawEllipse(QRectF(18 if chica else 26, r.center().y() - (22 if chica else 28), mitad * 2 - (8 if chica else 0),
+                             mitad * 2 - (8 if chica else 0)))
+        p.drawPixmap(int(18 + 10 if chica else 26 + 14), int(r.center().y() - (12 if chica else 14)),
+                     iconos.pixmap("graduado", 24 if chica else 28, "#FFFFFF"))
+        x = 78 if chica else 104
         p.setPen(QColor(255, 255, 255, 190))
         p.setFont(fuente(11.5, QFont.Bold))
-        p.drawText(QRectF(x, 20, r.width() - x - 80, 16), Qt.AlignLeft | Qt.AlignVCenter,
+        p.drawText(QRectF(x, arriba, r.width() - x - 60, 16), Qt.AlignLeft | Qt.AlignVCenter,
                    "MODO ESTUDIO")
         p.setPen(QColor("#FFFFFF"))
-        p.setFont(fuente(22, QFont.Bold, True))
-        p.drawText(QRectF(x, 36, r.width() - x - 80, 30), Qt.AlignLeft | Qt.AlignVCenter,
+        p.setFont(fuente(18 if chica else 22, QFont.Bold, True))
+        p.drawText(QRectF(x, arriba + 16, r.width() - x - 60, 26 if chica else 30), Qt.AlignLeft | Qt.AlignVCenter,
                    "Concéntrate con calma")
         f = fuente(13)
         p.setFont(f)
         p.setPen(QColor(255, 255, 255, 210))
         texto = self.texto_datos or "Música sin letra, sonidos que relajan y descansos a tu ritmo"
-        ancho = int(r.width() - x - 80)
-        p.drawText(QRectF(x, 68, ancho, 22), Qt.AlignLeft | Qt.AlignVCenter,
+        ancho = int(r.width() - x - 60)
+        p.drawText(QRectF(x, arriba + (42 if chica else 48), ancho, 22), Qt.AlignLeft | Qt.AlignVCenter,
                    QFontMetrics(f).elidedText(texto, Qt.ElideRight, ancho))
         lado = 22
         px = r.right() - 28 - lado + 4 * self._encima

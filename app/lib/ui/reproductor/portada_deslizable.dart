@@ -18,10 +18,14 @@ class PortadaDeslizable extends StatefulWidget {
     required this.alSiguiente,
     required this.alAnterior,
     required this.alDobleToque,
+    this.alto,
   });
 
   final Json pista;
   final double lado;
+
+  /// Si se da, la carátula va a sangre: con ese alto, sin esquinas ni sombra.
+  final double? alto;
 
   /// Por donde entra la portada nueva: 1 desde la derecha (siguiente), -1 desde
   /// la izquierda (anterior).
@@ -102,11 +106,11 @@ class _PortadaDeslizableState extends State<PortadaDeslizable> with SingleTicker
               layoutBuilder: apilar,
               child: Container(
                 key: clave,
-                decoration: const BoxDecoration(
+                decoration: widget.alto != null ? null : const BoxDecoration(
                   borderRadius: BorderRadius.all(Radius.circular(8)),
                   boxShadow: [BoxShadow(color: Color(0x66000000), blurRadius: 26, offset: Offset(0, 12))],
                 ),
-                child: Portada(url: url, lado: widget.lado, radio: 8),
+                child: Portada(url: url, lado: widget.lado, alto: widget.alto, radio: widget.alto != null ? 0 : 8),
               ),
             ),
           ),

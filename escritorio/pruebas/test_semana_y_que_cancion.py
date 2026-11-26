@@ -280,9 +280,16 @@ def test_cuadro_busca_y_reproduce(app):
     d.deleteLater()
 
 
-def test_cuadro_filtra_por_calendario_y_por_palabras_de_fecha(app):
+def test_cuadro_filtra_por_calendario_y_por_palabras_de_fecha(app, monkeypatch):
     from PySide6.QtCore import QDate
     from descargador.ui import dialogo_que_cancion as D
+    class Reloj(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return AHORA                                           # «ayer» es el de estas escuchas
+    monkeypatch.setattr(D, "datetime", Reloj)
+    buscar = D.Q.buscar
+    monkeypatch.setattr(D.Q, "buscar", lambda *a: buscar(*a, ahora=AHORA))
     ctx = _Ctx()
     d = D.DialogoQueCancion(ctx, historial=historial())
     d.usar_fechas.setChecked(True)

@@ -5,6 +5,7 @@ esa salida tiene un ajuste del ecualizador avanzado asignado, lo pone solo (dona
 from PySide6.QtCore import QObject, QTimer, Signal
 
 from .. import eq_avanzado, salida_audio
+from ..hilos import en_segundo_plano
 
 
 class VigiaSalida(QObject):
@@ -18,6 +19,7 @@ class VigiaSalida(QObject):
         self._leer = leer or salida_audio.salida_actual
         self.tipo = None
         self.nombre = ""
+        self._preguntando = False
         self._reloj = QTimer(self)
         self._reloj.setInterval(self.CADA_MS)
         self._reloj.timeout.connect(self.mirar)
@@ -31,7 +33,22 @@ class VigiaSalida(QObject):
         return bool(g is not None and g.premium)
 
     def mirar(self):
-        datos = self._leer()
+        if self._leer is not salida_audio.salida_actual:
+            return self._llego(self._leer())
+        # preguntarle a Windows por la salida puede tardar (un bluetooth que se conecta): en otro hilo
+        if self._preguntando:
+            return
+        self._preguntando = True
+
+        def listo(datos):
+            self._preguntando = False
+            self._llego(datos)
+
+        def fallo(_e):
+            self._preguntando = False
+        en_segundo_plano(self._leer, ok=listo, error=fallo, dueno=self, urgente=True)
+
+    def _llego(self, datos):
         if not datos:
             return
         antes, ahora = self.tipo, datos.get("tipo")

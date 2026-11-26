@@ -41,6 +41,12 @@ class _R extends ChangeNotifier implements Reproductor {
   @override
   Json? contexto;
   @override
+  List<Json> proximas = [];
+  @override
+  int pos = 0;
+  @override
+  List<Json> get siguientesDeContexto => const [];
+  @override
   EstadoRepro estado = EstadoRepro.sonando;
   @override
   bool aleatorio = false;

@@ -37,10 +37,22 @@ class _ListaAjena implements Exception {
 }
 
 class CancionExterna {
-  CancionExterna({required this.titulo, this.artista = '', this.duracion = 0, this.pista});
+  CancionExterna({required this.titulo, this.artista = '', this.duracion = 0, this.pista, this.videoId = '', String? clave})
+      : claveExterna = clave ??
+            (videoId.isNotEmpty
+                ? 'yt:$videoId'
+                : '${pista?['clave'] ?? ''}'.startsWith('yt:')
+                    ? '${pista!['clave']}'
+                    : '$artista|$titulo'.toLowerCase().replaceAll(RegExp(r'\s+'), ' ').trim());
   final String titulo;
   final String artista;
   final int duracion;
+
+  /// De YouTube cuando solo se sabe su id (los archivos de Google Takeout).
+  final String videoId;
+
+  /// Para reconocerla la próxima vez sin volver a buscarla (no cambia al emparejarla).
+  final String claveExterna;
 
   /// Ya resuelta (las listas de YouTube traen la pista tal cual).
   Map<String, dynamic>? pista;
@@ -50,6 +62,8 @@ class CancionExterna {
 
   Map<String, dynamic> aJson() => {
         't': titulo,
+        'k': claveExterna,
+        if (videoId.isNotEmpty) 'v': videoId,
         if (artista.isNotEmpty) 'a': artista,
         if (duracion > 0) 'd': duracion,
         if (pista != null) 'p': pista,
@@ -58,6 +72,8 @@ class CancionExterna {
   static CancionExterna deJson(Map m) => CancionExterna(
       titulo: '${m['t'] ?? ''}',
       artista: '${m['a'] ?? ''}',
+      videoId: '${m['v'] ?? ''}',
+      clave: m['k'] is String ? m['k'] as String : null,
       duracion: (m['d'] as num?)?.toInt() ?? 0,
       pista: m['p'] is Map ? Map<String, dynamic>.from(m['p'] as Map) : null);
 }
@@ -274,7 +290,7 @@ class Importar {
   // ------------------------------------------------------------ Spotify
 
   static const avisoSpotifySinConexion = 'Spotify solo deja ver 50 canciones sin su conexión oficial. '
-      'Si la lista es tuya, conecta tu cuenta de Spotify en «Pasar tus me gusta» y vuelve a traerla.';
+      'Si la lista es tuya, conecta tu cuenta de Spotify en «Vincular cuentas» y vuelve a traerla.';
   static const avisoSpotifyAjena = 'Spotify ya no deja a otras apps leer listas de otras personas: llegaron '
       'las 50 que muestra su página. Copia la lista a una tuya en Spotify, conecta tu cuenta y tráela otra vez.';
 
@@ -291,7 +307,7 @@ class Importar {
     // 1. tu cuenta de Spotify: tus listas y las colaborativas, enteras
     String tuyo = '';
     try {
-      tuyo = await CuentaSpotify.token();
+      tuyo = await const CuentaExterna(ServicioMusica.spotify).token();
     } catch (_) {}
     if (tuyo.isNotEmpty) {
       try {
@@ -404,16 +420,100 @@ class Importar {
       ];
 
   /// Tus «Canciones que te gustan» de Spotify (hace falta tu cuenta conectada).
-  static Future<ListaExterna> meGustaSpotify({void Function(int)? alAvanzar}) async {
-    final token = await CuentaSpotify.token();
-    if (token.isEmpty) throw const ErrorImportar('Conecta tu cuenta de Spotify para traer tus me gusta.');
+  /// Tus me gusta de una cuenta vinculada, todos.
+  static Future<ListaExterna> meGustaDe(ServicioMusica servicio, {void Function(int)? alAvanzar}) async {
+    final String token;
     try {
-      final c = await spotifyPaginado('$_apiSpotify/me/tracks?limit=50', token, alAvanzar: alAvanzar);
-      return ListaExterna(plataforma: 'Spotify', titulo: 'Me gusta de Spotify', canciones: c, meGusta: true);
-    } on _ListaAjena {
-      throw const ErrorImportar('Spotify no dejó leer tus me gusta. Vuelve a conectar tu cuenta; si sigue igual, '
-          'pide al dueño de Caudal que te añada como usuario de la app.');
+      token = await CuentaExterna(servicio).token();
+    } on ErrorServicio catch (e) {
+      throw ErrorImportar(e.mensaje);
     }
+    if (token.isEmpty) throw ErrorImportar('Vincula tu cuenta de ${servicio.nombre} para traer tus me gusta.');
+    try {
+      final c = await switch (servicio) {
+        ServicioMusica.spotify => spotifyPaginado('$_apiSpotify/me/tracks?limit=50', token, alAvanzar: alAvanzar),
+        ServicioMusica.youtube => youtubeMeGusta(token, alAvanzar: alAvanzar),
+        ServicioMusica.soundcloud => soundcloudMeGusta(token, alAvanzar: alAvanzar),
+      };
+      return ListaExterna(plataforma: servicio.nombre, titulo: 'Me gusta de ${servicio.nombre}', canciones: c, meGusta: true);
+    } on _ListaAjena {
+      throw ErrorImportar('${servicio.nombre} no dejó leer tus me gusta. Desvincula tu cuenta y vuelve a vincularla.');
+    }
+  }
+
+  /// «Música que te gusta» con la API oficial de YouTube: los videos a los que diste me gusta
+  /// que YouTube clasifica como música (categoría 10).
+  static Future<List<CancionExterna>> youtubeMeGusta(String token, {void Function(int)? alAvanzar}) =>
+      paginar<CancionExterna>((cursor) async {
+        final r = await _pedir(
+            Uri.https('www.googleapis.com', '/youtube/v3/videos', {
+              'part': 'snippet,contentDetails',
+              'myRating': 'like',
+              'maxResults': '50',
+              if (cursor != null) 'pageToken': '$cursor',
+            }),
+            cabeceras: {'Authorization': 'Bearer $token'});
+        if (r.statusCode == 401 || r.statusCode == 403) throw const _ListaAjena();
+        if (r.statusCode != 200) throw const ErrorImportar('YouTube no contestó bien. Prueba otra vez en un rato.');
+        final d = jsonDecode(utf8.decode(r.bodyBytes)) as Map;
+        final salida = <CancionExterna>[];
+        for (final v in (d['items'] as List? ?? const []).whereType<Map>()) {
+          final c = cancionYouTube(v);
+          if (c != null) salida.add(c);
+        }
+        final sig = d['nextPageToken'];
+        return (salida, sig is String && sig.isNotEmpty ? sig : null);
+      }, alAvanzar: alAvanzar);
+
+  /// Un video de la API de YouTube como canción (null si no es música).
+  static CancionExterna? cancionYouTube(Map v) {
+    final sn = v['snippet'];
+    final id = '${v['id'] ?? ''}';
+    if (sn is! Map || id.length != 11 || '${sn['categoryId']}' != '10') return null;
+    var titulo = _limpiar(sn['title']);
+    final canal = _limpiar(sn['channelTitle']);
+    var artista = canal.replaceFirst(RegExp(r'\s+-\s+Topic$'), '');
+    if (artista == canal) {
+      // no es el canal automático de la canción: el título suele ser «Artista - Canción»
+      final c = cancionDeLinea(titulo);
+      if (c != null && c.artista.isNotEmpty) {
+        titulo = c.titulo;
+        artista = c.artista;
+      }
+    }
+    if (titulo.isEmpty) return null;
+    final dur = _duracionIso('${(v['contentDetails'] as Map?)?['duration'] ?? ''}');
+    return CancionExterna(
+        titulo: titulo,
+        artista: artista,
+        duracion: dur,
+        pista: Catalogo.nuevaPista(id, titulo: titulo, artistas: [{'nombre': artista, 'id': ''}], duracion: dur));
+  }
+
+  /// Tus me gusta de SoundCloud con su API oficial.
+  static Future<List<CancionExterna>> soundcloudMeGusta(String token, {void Function(int)? alAvanzar}) {
+    const base = 'https://api.soundcloud.com/';
+    return paginar<CancionExterna>((cursor) async {
+      final http.Response r;
+      try {
+        r = await _pedir(Uri.parse('${cursor ?? '${base}me/likes/tracks?limit=200&linked_partitioning=true'}'),
+            cabeceras: {'Authorization': 'OAuth $token', 'Accept': 'application/json; charset=utf-8'});
+      } on ErrorImportar {
+        if (kIsWeb) throw const ErrorImportar('El navegador no dejó leer SoundCloud. Sincroniza desde la app del teléfono o de Windows.');
+        rethrow;
+      }
+      if (r.statusCode == 401 || r.statusCode == 403) throw const _ListaAjena();
+      if (r.statusCode != 200) throw const ErrorImportar('SoundCloud no contestó bien. Prueba otra vez en un rato.');
+      final d = jsonDecode(utf8.decode(r.bodyBytes));
+      final filas = d is Map ? d['collection'] : d;
+      final canciones = [
+        for (final f in (filas is List ? filas : const []).whereType<Map>())
+          if (_limpiar((f['track'] is Map ? f['track'] as Map : f)['title']).isNotEmpty)
+            cancionSoundcloud(f['track'] is Map ? f['track'] as Map : f)
+      ];
+      final sig = d is Map ? '${d['next_href'] ?? ''}' : '';
+      return (canciones, sig.startsWith(base) ? sig : null);
+    }, alAvanzar: alAvanzar);
   }
 
   /// Separado para probarlo con una página guardada.
@@ -452,8 +552,8 @@ class Importar {
 
   // ------------------------------------------------------------ SoundCloud
 
-  static const mensajeSoundcloudSinConexion = 'Para leer los me gusta de SoundCloud hace falta su conexión '
-      'oficial, y el dueño de Caudal aún no la activó. Mientras tanto, pasa esas canciones a una lista pública de SoundCloud.';
+  static const mensajeSoundcloudSinConexion = 'Los me gusta de un perfil de SoundCloud se traen desde Caudal para '
+      'Windows. Aquí, pasa esas canciones a una lista pública de SoundCloud y pega el enlace de la lista.';
 
   /// ('lista' | 'me_gusta' | 'perfil' | 'cancion' | 'corto' | '', ruta)
   static (String, String) tipoSoundcloud(String url) {
@@ -518,14 +618,80 @@ class Importar {
     if (tipo == 'corto') {
       throw const ErrorImportar('Abre ese enlace corto en el navegador y pega aquí la dirección larga de la lista.');
     }
+    if (tipo == 'cancion') {
+      final una = await _soundcloudOembed(limpio);
+      if (una == null) throw const ErrorImportar('SoundCloud no mostró eso. Comprueba que sea público.');
+      return ListaExterna(plataforma: 'SoundCloud', titulo: una.titulo, autor: una.artista, canciones: [una]);
+    }
     final html = await _pagina(limpio, 'SoundCloud');
     final (lista, total) = leerSoundcloudPagina(html);
-    return lista.canciones.length >= total
-        ? lista
-        : ListaExterna(plataforma: 'SoundCloud', titulo: lista.titulo, autor: lista.autor, canciones: lista.canciones,
-            completa: false,
-            aviso: 'SoundCloud solo muestra completas ${lista.canciones.length} de sus $total canciones sin su '
-                'conexión oficial, que el dueño de Caudal aún no activó.');
+    if (lista.canciones.length >= total) return lista;
+    // la página solo trae completas unas pocas: del resto da su número, y quién es cada una lo dice oEmbed
+    // (la API pública de SoundCloud, sin clave)
+    final enteras = await _soundcloudEnteras(_soundcloudPistas(html));
+    return ListaExterna(plataforma: 'SoundCloud', titulo: lista.titulo, autor: lista.autor, canciones: enteras,
+        completa: enteras.length >= total,
+        aviso: enteras.length >= total ? '' : 'Se leyeron ${enteras.length} de sus $total canciones: las demás son '
+            'privadas o ya no están en SoundCloud.');
+  }
+
+  /// Las pistas de la página tal como vienen: unas con título y otras solo con su número.
+  static List<Map> _soundcloudPistas(String html) {
+    final m = RegExp(r'window\.__sc_hydration\s*=\s*(\[.*?\]);\s*</script>', dotAll: true).firstMatch(html);
+    try {
+      final h = jsonDecode(m!.group(1)!);
+      for (final x in (h as List).whereType<Map>()) {
+        if (x['hydratable'] == 'playlist' && x['data'] is Map) {
+          return ((x['data'] as Map)['tracks'] as List? ?? const []).whereType<Map>().toList();
+        }
+      }
+    } catch (_) {}
+    return const [];
+  }
+
+  static Future<List<CancionExterna>> _soundcloudEnteras(List<Map> pistas) async {
+    final salida = List<CancionExterna?>.filled(pistas.length, null);
+    var siguiente = 0;
+    Future<void> obrero() async {
+      while (siguiente < pistas.length) {
+        final i = siguiente++;
+        final t = pistas[i];
+        if (_limpiar(t['title']).isNotEmpty) {
+          salida[i] = cancionSoundcloud(t);
+        } else if (t['id'] != null) {
+          salida[i] = await _soundcloudOembed('https://api.soundcloud.com/tracks/${t['id']}');
+        }
+      }
+    }
+
+    await Future.wait([for (var i = 0; i < 8; i++) obrero()]);
+    return salida.whereType<CancionExterna>().toList();
+  }
+
+  /// Quién es una canción de SoundCloud (null: no existe, es privada o no se pudo preguntar).
+  static Future<CancionExterna?> _soundcloudOembed(String enlace) async {
+    final uri = Uri.https('soundcloud.com', '/oembed', {'format': 'json', 'url': enlace});
+    for (var intento = 0; intento < 3; intento++) {
+      try {
+        final r = await red(uri, {'User-Agent': _agente});
+        if (r.statusCode == 429 || r.statusCode >= 500) {
+          await Future<void>.delayed(Duration(milliseconds: 700 * (intento + 1)));
+          continue;
+        }
+        if (r.statusCode != 200) return null;
+        final d = jsonDecode(utf8.decode(r.bodyBytes, allowMalformed: true)) as Map;
+        final autor = _limpiar(d['author_name']);
+        var titulo = _limpiar(d['title']);
+        if (autor.isNotEmpty && titulo.endsWith(' by $autor')) {
+          titulo = titulo.substring(0, titulo.length - ' by $autor'.length).trim();
+        }
+        if (titulo.isEmpty) return null;
+        return cancionSoundcloud({'title': titulo, 'user': {'username': autor}});
+      } catch (_) {
+        await Future<void>.delayed(Duration(milliseconds: 500 * (intento + 1)));
+      }
+    }
+    return null;
   }
 
   /// Lo que trae la página pública de una lista: las primeras canciones completas y
@@ -638,9 +804,9 @@ class Importar {
 
   // ------------------------------------------------------------ YouTube
 
-  static const mensajeMeGustaYouTube = 'Tus «Me gusta» de YouTube Music son privados y Caudal no tiene permiso '
-      'para leerlos. En YouTube Music abre «Música que te gusta», toca ⋮ › «Agregar a playlist», crea una lista '
-      'pública o no listada y pega aquí su enlace.';
+  static const mensajeMeGustaYouTube = 'Tus «Me gusta» de YouTube Music son privados: ese enlace solo lo abres tú. '
+      'Tráelos desde «Vincular cuentas» (Biblioteca), o pásalos en YouTube Music a una lista pública o no listada y '
+      'pega aquí su enlace.';
 
   static Future<ListaExterna> _youtube(String url) async {
     final u = Uri.tryParse(url);
@@ -677,6 +843,16 @@ class Importar {
   static Future<Map<String, dynamic>?> resolverUna(CancionExterna c,
       {Future<List<Map<String, dynamic>>> Function(String consulta)? buscar, int reintentos = 3}) async {
     if (c.pista != null) return c.pista;
+    if (c.videoId.isNotEmpty) {
+      for (var intento = 0; intento < reintentos; intento++) {
+        try {
+          return await Catalogo.pistaDe(c.videoId).timeout(const Duration(seconds: 20));
+        } catch (_) {
+          if (intento + 1 < reintentos) await dormir(Duration(milliseconds: 800 * (1 << intento)));
+        }
+      }
+      return null;
+    }
     final consulta = c.busqueda.trim();
     if (consulta.isEmpty) return null;
     final b = buscar ??

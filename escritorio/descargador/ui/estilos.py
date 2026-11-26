@@ -539,11 +539,11 @@ QPushButton#enlace:hover {{
 QPushButton#chip {{
     background: {C['superficie2']};
     border: none;
-    border-radius: 13px;
-    padding: 5px 13px;
+    border-radius: 15px;
+    padding: 8px 16px;
     color: {C['texto']};
     font-weight: 600;
-    font-size: 12.5px;
+    font-size: 13px;
 }}
 QPushButton#chip:hover {{
     background: {C['superficie3']};
@@ -555,10 +555,10 @@ QPushButton#chip:checked {{
 QPushButton#filtro {{
     background: {C['superficie2']};
     border: none;
-    border-radius: 13px;
-    padding: 5px 13px;
+    border-radius: 15px;
+    padding: 8px 16px;
     color: {C['texto']};
-    font-size: 12.5px;
+    font-size: 13px;
     font-weight: 600;
 }}
 QPushButton#filtro:hover {{
@@ -571,8 +571,8 @@ QPushButton#filtro:checked {{
 QPushButton#nav {{
     background: transparent;
     border: none;
-    border-radius: 8px;
-    padding: 9px 12px;
+    border-radius: 10px;
+    padding: 11px 12px;
     text-align: left;
     color: {C['texto2']};
     font-size: 14px;
@@ -580,6 +580,7 @@ QPushButton#nav {{
 }}
 QPushButton#nav:hover {{
     color: {C['texto']};
+    background: rgba(255, 255, 255, 0.06);
 }}
 QPushButton#nav:checked {{
     color: {C['texto']};
@@ -819,13 +820,13 @@ QRadioButton {{
 QMenu {{
     background: {C['superficie3']};
     border: 1px solid {C['borde_claro']};
-    border-radius: 8px;
-    padding: 4px;
+    border-radius: 12px;
+    padding: 6px;
 }}
 QMenu::item {{
-    padding: 9px 26px 9px 12px;
-    border-radius: 4px;
-    font-size: 13px;
+    padding: 11px 30px 11px 14px;
+    border-radius: 8px;
+    font-size: 13.5px;
 }}
 QMenu::item:selected {{
     background: rgba(255, 255, 255, 0.10);

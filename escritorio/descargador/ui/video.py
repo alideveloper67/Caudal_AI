@@ -393,9 +393,10 @@ class VistaVideo(QWidget):
     # ------------------------------------------------------------ pintado
 
     def en_ambiente(self):
-        """¿Toca el modo ambiente? Cuando suena solo el audio, o cuando el video
-        se esta viendo en el mini reproductor."""
-        return self.r.modo != "video" or self.r.destino_video != "principal"
+        """¿Toca el modo ambiente? Cuando suena solo el audio, cuando el video se esta viendo en el mini
+        reproductor y mientras el video aún carga (la canción sigue sonando: mejor la portada que negro)."""
+        return (self.r.modo != "video" or self.r.destino_video != "principal"
+                or bool(getattr(self.r, "_traspaso", None)))
 
     # métodos ligados (no lambdas): PySide suelta la conexión sola al destruir el widget
     def _estado_play(self, e):
@@ -408,6 +409,9 @@ class VistaVideo(QWidget):
     def _escena(self):
         ambiente = self.en_ambiente()
         self.escena.setCurrentWidget(self.ambiente if ambiente else self.pantalla)
+        if ambiente and self.r.modo == "video" and getattr(self.r, "_traspaso", None):
+            # el video está cargando: se mira cada poco y entra en cuanto suena en su sitio
+            QTimer.singleShot(80, self, self._escena)
         solo_audio = self.r.modo != "video"
         self.bt_audio.setText("  Ver el video" if solo_audio else "  Solo audio")
         self.bt_audio.setIcon(iconos.icono("video" if solo_audio else "musica", 15, C["texto"]))
@@ -571,6 +575,8 @@ class VistaVideo(QWidget):
             self._caidos_previos = None
             return
         info = self.motor.info_video()
+        if not info:
+            return                       # primera lectura: aún no se sabe nada
         caidos = info.get("caidos") or 0
         fps = info.get("fps") or 30
         if self._caidos_previos is None:

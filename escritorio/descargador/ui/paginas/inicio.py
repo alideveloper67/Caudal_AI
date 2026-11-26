@@ -7,22 +7,25 @@ from datetime import datetime, timedelta
 from PySide6.QtCore import QObject, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import (QColor, QFont, QFontMetrics, QLinearGradient, QPainter, QPainterPath,
                            QPixmap)
-from PySide6.QtWidgets import (QApplication, QGridLayout, QHBoxLayout, QLabel, QMenu,
-                               QPushButton, QWidget)
+from PySide6.QtWidgets import (QApplication, QBoxLayout, QLabel, QMenu, QPushButton, QVBoxLayout,
+                               QWidget)
 
 from ... import catalogo
 from ...hilos import en_segundo_plano
 from .. import iconos, imagenes
-from ..componentes import (BarraAcciones, Cabecera, Carrusel, Chip, ListaPistas, Pagina, Tarjeta,
-                           formato_duracion_larga, fuente)
+from ..componentes import (BarraAcciones, Cabecera, Carrusel, Chip, FilaDesplazable, ListaPistas,
+                           Pagina, RejillaRapida, Tarjeta, formato_duracion_larga, fuente)
 from ..estilos import C
-from .comun import Atajo, cache, guardar_cache, pintar_secciones
+from .comun import cache, guardar_cache, pintar_secciones
+from .rejilla_portadas import (FILAS, RejillaPortadas, clave_de, columnas_para, mezclar,
+                               paginas_para)
 
 _INTENTO_MIXES = {}
 
 
 _INTENTO_DESCUBRE = {}
 _INTENTO_GUSTOS = {}
+_INTENTO_PARECIDOS = {}
 
 
 def _con_copia(col, funcion):
@@ -47,6 +50,87 @@ def _armar_mixes_hoy(c):
     return lista, completos, historial
 
 
+_TIPOS_ATAJO = ("album", "lista", "mi_lista", "radio", "artista")
+
+
+def atajos_de(c):
+    """Lo que abres a menudo: tus me gusta, lo último que pusiste y tus listas."""
+    elementos = [{"tipo": "me_gusta", "especial": "me_gusta", "titulo": "Tus me gusta"}]
+    vistos = set()
+    recientes = None
+    for x in c.contextos_recientes(16):
+        clave = (x.get("tipo"), str(x.get("id")))
+        if clave in vistos or x.get("tipo") not in _TIPOS_ATAJO or not x.get("titulo"):
+            continue
+        vistos.add(clave)
+        el = {"tipo": x["tipo"], "id": x["id"], "titulo": x["titulo"], "miniatura": x.get("miniatura") or ""}
+        if x["tipo"] == "mi_lista":
+            portadas = c.portadas_de_lista(x["id"], 1)
+            el["miniatura"] = portadas[0] if portadas else ""
+        elif x["tipo"] == "radio" and not el["miniatura"]:
+            recientes = recientes if recientes is not None else c.escuchado_hace_poco(60)
+            el["miniatura"] = next((p.get("miniatura") or "" for p in recientes
+                                    if p.get("video_id") == x.get("id")), "")
+        elementos.append(el)
+    for l in c.listas()[:8]:
+        clave = ("mi_lista", str(l["id"]))
+        if clave not in vistos:
+            vistos.add(clave)
+            portadas = c.portadas_de_lista(l["id"], 1)
+            elementos.append({"tipo": "mi_lista", "id": l["id"], "titulo": l["nombre"],
+                              "miniatura": portadas[0] if portadas else ""})
+    return elementos
+
+
+def lo_tuyo(c, solo_musica=False):
+    """Todo lo de arriba de Inicio de una vez (va en segundo plano, con la copia de la base):
+    {"rejilla", "recientes", "mixes_artistas"}."""
+    recientes = c.escuchado_hace_poco(90)
+    usadas = c.mas_escuchadas(24, 30)
+    if solo_musica:
+        recientes = [p for p in recientes if not p.get("es_video")]
+        usadas = [p for p in usadas if not p.get("es_video")]
+    # lo que más repites estos días, alternado con lo último que sonó
+    canciones, vistas = [], set()
+    for i in range(max(len(usadas), len(recientes[:40]))):
+        for lista in (usadas, recientes[:40]):
+            if i < len(lista) and lista[i].get("clave") not in vistas:
+                vistas.add(lista[i].get("clave"))
+                canciones.append(lista[i])
+    return {"rejilla": mezclar(atajos_de(c), canciones), "recientes": recientes,
+            "mixes_artistas": mixes_de_artistas(c)}
+
+
+def mixes_de_artistas(c):
+    salida = []
+    historial = c.escuchado_hace_poco(150) + c.lista_me_gusta(limite=100)
+    vistos = set()
+    for a in c.artistas_frecuentes(14):
+        # el mismo artista con dos fichas salía dos veces
+        if a["nombre"].strip().lower() in vistos or len(salida) >= 8:
+            continue
+        vistos.add(a["nombre"].strip().lower())
+        portada = next((p.get("miniatura") for p in historial
+                        if any(x.get("id") == a["id"] for x in p.get("artistas") or [])), "")
+        salida.append({"tipo": "artista", "id": a["id"], "titulo": f"Mix de {a['nombre']}",
+                       "subtitulo": f"{a['nombre']} y artistas parecidos", "miniatura": portada})
+    return salida
+
+
+def canciones_para_ti(mixes, tope=48):
+    """Una canción de cada mix por vuelta, sin repetir: «Canciones para ti»."""
+    salida, vistas = [], set()
+    largos = [m.get("pistas") or [] for m in mixes or []]
+    for i in range(max((len(x) for x in largos), default=0)):
+        for lista in largos:
+            if i < len(lista) and len(salida) < tope:
+                k = lista[i].get("video_id") or lista[i].get("clave")
+                if k and k not in vistas:
+                    vistas.add(k)
+                    salida.append(lista[i])
+    return salida
+
+
 def saludo():
     h = time.localtime().tm_hour
     if 5 <= h < 12:
@@ -66,34 +150,29 @@ class PaginaInicio(Pagina):
 
     def _construir(self):
         ctx = self.ctx
-        col = ctx.coleccion
-        cab = QHBoxLayout()
         cuenta = getattr(ctx, "cuenta", None) or {}
         nombre = (cuenta.get("nombre") or "").split(" ")[0]
         t = QLabel(f"{saludo()}, {nombre}" if nombre else saludo())
         t.setObjectName("titulo_pagina")
-        t.setStyleSheet("font-size:30px;font-weight:900;")
-        cab.addWidget(t)
-        cab.addStretch(1)
-        self.cuerpo.addLayout(cab)
+        t.setStyleSheet("font-size:26px;font-weight:900;")
+        t.setMinimumWidth(10)
+        self.cuerpo.setSpacing(16)
+        self.cuerpo.addWidget(t)
         from ..cumpleanos_ui import AvisoCumple      # «Hoy es tu cumple» y los amigos que cumplen hoy
         self.cuerpo.addWidget(AvisoCumple(ctx))
 
-        chips = QHBoxLayout()
-        chips.setSpacing(8)
+        chips = FilaDesplazable()
         self.chips = {}
         for clave, texto in (("todo", "Todo"), ("musica", "Música"), ("videos", "Videos"),
                              ("disco", "En tu disco")):
             c = Chip(texto)
             c.setChecked(clave == self.filtro)
             c.clicked.connect(lambda _=False, k=clave: self._filtrar(k))
-            chips.addWidget(c)
+            chips.agregar(c)
             self.chips[clave] = c
-        chips.addStretch(1)
-        self.cuerpo.addLayout(chips)
+        self.cuerpo.addWidget(chips)
 
         self.zona = QWidget()
-        from PySide6.QtWidgets import QVBoxLayout
         self.zv = QVBoxLayout(self.zona)
         self.zv.setContentsMargins(0, 0, 0, 0)
         self.zv.setSpacing(30)
@@ -116,23 +195,21 @@ class PaginaInicio(Pagina):
         ctx = self.ctx
         col = ctx.coleccion
         if self.filtro in ("todo", "musica"):
-            self._atajos()
-            self._tarjeta_estudio()
-            from PySide6.QtWidgets import QVBoxLayout
-            self.caja_recientes = QWidget()
-            self.v_recientes = QVBoxLayout(self.caja_recientes)
-            self.v_recientes.setContentsMargins(0, 0, 0, 0)
-            self.zv.addWidget(self.caja_recientes)
-            self._pintar_recientes()
+            self.rejilla = RejillaPortadas(ctx)
+            self.rejilla.abrir.connect(self._abrir_atajo)
+            self.rejilla.reproducir.connect(self._reproducir_atajo)
+            self.rejilla.hide()
+            self.zv.addWidget(self.rejilla)
+            self.caja_para_ti, self.v_para_ti = self._caja()
+            self.caja_recientes, self.v_recientes = self._caja()
             self._mixes_diarios()
+            self._artistas_parecidos()
             self._gustos_inicio()
             self._descubre()
             self._maquina_del_tiempo()
-            self._banner_resumen()
-            mixes = self._mixes()
-            if mixes:
-                self.zv.addWidget(Carrusel(ctx, "Mixes de tus artistas", mixes,
-                                           subtitulo="sus radios, con artistas parecidos"))
+            self.caja_artistas, self.v_artistas = self._caja()
+            self._extras()
+            self._pedir_lo_tuyo()
         if self.filtro == "disco":
             musica = col.descargadas(True)
             videos = col.descargadas(False)
@@ -163,27 +240,67 @@ class PaginaInicio(Pagina):
             self.zv.addWidget(self.et_cargando)
             en_segundo_plano(catalogo.inicio, ok=self._llego, error=self._sin_red, dueno=self)
 
+    def _caja(self):
+        """Un hueco en su sitio para algo que llega después; sin nada no ocupa."""
+        caja = QWidget()
+        v = QVBoxLayout(caja)
+        v.setContentsMargins(0, 0, 0, 0)
+        caja.hide()
+        self.zv.addWidget(caja)
+        return caja, v
+
+    def _pedir_lo_tuyo(self, solo_arriba=False):
+        """Lee lo tuyo en segundo plano (la interfaz no espera a la base) y lo pinta al llegar."""
+        self._pedido = getattr(self, "_pedido", 0) + 1
+        n, musica = self._pedido, self.filtro == "musica"
+        en_segundo_plano(_con_copia, self.ctx.coleccion, lambda c: lo_tuyo(c, musica),
+                         ok=lambda r: self._lo_tuyo_listo(n, r, solo_arriba),
+                         error=lambda _e: None, dueno=self)
+
+    def _lo_tuyo_listo(self, n, r, solo_arriba):
+        from ..componentes import _borrar_layout
+        if n != self._pedido or self.filtro not in ("todo", "musica"):
+            return                       # entretanto se cambió de ficha
+        try:
+            self.rejilla.poner(r["rejilla"] if len(r["rejilla"]) > 1 else [])
+            self._recientes = r["recientes"]
+            self._pintar_recientes()
+            if solo_arriba:
+                return
+            _borrar_layout(self.v_artistas)
+            self.caja_artistas.setVisible(bool(r["mixes_artistas"]))
+            if r["mixes_artistas"]:
+                self.v_artistas.addWidget(Carrusel(self.ctx, "Mixes de tus artistas", r["mixes_artistas"],
+                                                   subtitulo="sus radios, con artistas parecidos"))
+        except RuntimeError:
+            pass                         # la página se rehizo mientras llegaban
+
     def _pintar_recientes(self):
+        """«Volver a escuchar»: lo último que sonó y que no está ya en la rejilla de arriba."""
         from ..componentes import _borrar_layout
         _borrar_layout(self.v_recientes)
-        recientes = [p for p in self.ctx.coleccion.escuchado_hace_poco(24)
-                     if self.filtro == "todo" or not p.get("es_video")]
-        self.caja_recientes.setVisible(bool(recientes))
-        if recientes:
-            self.v_recientes.addWidget(Carrusel(self.ctx, "Volver a escuchar", recientes,
-                                                subtitulo="lo último que sonó"))
+        columnas = columnas_para(max(300, self.viewport().width() - 48))
+        ya = {clave_de(el) for el in self.rejilla.elementos[:paginas_para(
+            len(self.rejilla.elementos), columnas) * columnas * FILAS]}
+        quedan = [p for p in getattr(self, "_recientes", []) if clave_de(dict(p, tipo="pista")) not in ya][:24]
+        self.caja_recientes.setVisible(len(quedan) >= 4)
+        if len(quedan) >= 4:
+            self.v_recientes.addWidget(Carrusel(self.ctx, "Volver a escuchar", quedan))
+
+    def _pintar_para_ti(self, pistas):
+        from ..componentes import _borrar_layout
+        _borrar_layout(self.v_para_ti)
+        self.caja_para_ti.setVisible(len(pistas) >= 4)
+        if len(pistas) >= 4:
+            self.v_para_ti.addWidget(RejillaRapida(self.ctx, "Canciones para ti", pistas, columnas=4))
 
     def refrescar_recientes(self):
-        """Pulsar «Inicio» estando en Inicio: se pone al día «Volver a escuchar» y se sube arriba,
-        sin rehacer toda la página (antes se rehacía entera: mixes, máquina del tiempo...)."""
-        caja = getattr(self, "caja_recientes", None)
-        if self.filtro not in ("todo", "musica") or caja is None:
+        """Pulsar «Inicio» estando en Inicio: se pone al día lo de arriba y se sube, sin rehacer
+        toda la página (mixes, máquina del tiempo...)."""
+        if self.filtro not in ("todo", "musica") or getattr(self, "rejilla", None) is None:
             self._pintar()
         else:
-            try:
-                self._pintar_recientes()
-            except RuntimeError:
-                self._pintar()
+            self._pedir_lo_tuyo(solo_arriba=True)
         self.verticalScrollBar().setValue(0)
 
     def _llego(self, datos):
@@ -209,6 +326,14 @@ class PaginaInicio(Pagina):
             secciones = [s for s in secciones
                          if not all(e.get("tipo") == "pista" and e.get("es_video")
                                     for e in s["elementos"])]
+        if self.filtro in ("todo", "musica") and not self._hay_para_ti:
+            # sin historial todavía: «Canciones para ti» sale de la selección del catálogo
+            primera = next((s for s in secciones if s.get("estilo") == "filas" and s.get("elementos")
+                            and all(e.get("tipo") == "pista" for e in s["elementos"])), None)
+            if primera is not None:
+                self._del_catalogo = list(primera["elementos"])
+                if self._mixes_vistos:
+                    self._pintar_para_ti(self._del_catalogo)
 
         pintar_secciones(self.ctx, self.zv, secciones)
 
@@ -224,52 +349,6 @@ class PaginaInicio(Pagina):
             except RuntimeError:
                 pass
 
-    def _atajos(self):
-        col = self.ctx.coleccion
-        elementos = [{"tipo": "me_gusta", "especial": "me_gusta", "titulo": "Tus me gusta"}]
-        vistos = set()
-        for c in col.contextos_recientes(12):
-            clave = (c.get("tipo"), str(c.get("id")))
-            if clave in vistos or c.get("tipo") not in ("album", "lista", "mi_lista", "radio",
-                                                         "artista"):
-                continue
-            vistos.add(clave)
-            el = {"tipo": c["tipo"], "id": c["id"], "titulo": c.get("titulo") or "",
-                  "miniatura": c.get("miniatura") or ""}
-            if c["tipo"] == "mi_lista":
-                portadas = col.portadas_de_lista(c["id"], 1)
-                el["miniatura"] = portadas[0] if portadas else ""
-            if c["tipo"] == "radio":
-                el["miniatura"] = el["miniatura"] or self._portada_radio(c)
-            elementos.append(el)
-        for l in col.listas()[:8]:
-            clave = ("mi_lista", str(l["id"]))
-            if clave not in vistos:
-                vistos.add(clave)
-                portadas = col.portadas_de_lista(l["id"], 1)
-                elementos.append({"tipo": "mi_lista", "id": l["id"], "titulo": l["nombre"],
-                                  "miniatura": portadas[0] if portadas else ""})
-        elementos = elementos[:8]
-        if len(elementos) < 2:
-            return
-        caja = QWidget()
-        rej = QGridLayout(caja)
-        rej.setContentsMargins(0, 0, 0, 0)
-        rej.setSpacing(8)
-        columnas = 4 if len(elementos) > 4 else 2
-        for i, el in enumerate(elementos):
-            a = Atajo(self.ctx, el)
-            a.abrir.connect(self._abrir_atajo)
-            a.reproducir.connect(self.ctx.reproducir_elemento)
-            rej.addWidget(a, i // columnas, i % columnas)
-        self.zv.addWidget(caja)
-
-    def _portada_radio(self, c):
-        for p in self.ctx.coleccion.escuchado_hace_poco(40):
-            if p.get("video_id") == c.get("id"):
-                return p.get("miniatura") or ""
-        return ""
-
     def _abrir_atajo(self, el):
         if el.get("tipo") == "radio":
             if el.get("id") and len(str(el["id"])) == 11:
@@ -282,17 +361,30 @@ class PaginaInicio(Pagina):
         else:
             self.ctx.abrir_elemento(el)
 
+    def _reproducir_atajo(self, el):
+        if el.get("tipo") == "pista":
+            r = self.ctx.reproductor
+            if self.rejilla.es_la_que_suena(el):
+                r.alternar()
+            else:
+                self.ctx.reproducir_elemento(el)
+        elif el.get("tipo") == "radio":
+            self._abrir_atajo(el)
+        elif self.rejilla.es_la_que_suena(el):
+            self.ctx.reproductor.alternar()
+        else:
+            self.ctx.reproducir_elemento(el)
+
     # ------------------------------------------------------------ mixes diarios
 
     def _mixes_diarios(self):
         """Tus mixes diarios: salen al momento con lo tuyo y, cuando llega la
         radio de YouTube Music, se completan (una vez al dia)."""
-        from PySide6.QtWidgets import QVBoxLayout
         col = self.ctx.coleccion
-        self.caja_mixes = QWidget()
-        self.v_mixes = QVBoxLayout(self.caja_mixes)
-        self.v_mixes.setContentsMargins(0, 0, 0, 0)
-        self.zv.addWidget(self.caja_mixes)
+        self._hay_para_ti = False
+        self._mixes_vistos = False
+        self._del_catalogo = []
+        self.caja_mixes, self.v_mixes = self._caja()
         # leer la base y armar los mixes va en segundo plano: aparecen al llegar
         en_segundo_plano(_con_copia, col, _armar_mixes_hoy, ok=self._mixes_hoy_listos,
                          error=lambda _e: None, dueno=self)
@@ -319,12 +411,8 @@ class PaginaInicio(Pagina):
 
     def _descubre(self):
         """«Descubre para ti»: canciones nuevas elegidas por lo que escuchas."""
-        from PySide6.QtWidgets import QVBoxLayout
         from ... import recomendador as rc
-        self.caja_descubre = QWidget()
-        self.v_descubre = QVBoxLayout(self.caja_descubre)
-        self.v_descubre.setContentsMargins(0, 0, 0, 0)
-        self.zv.addWidget(self.caja_descubre)
+        self.caja_descubre, self.v_descubre = self._caja()
         guardado = self.ctx.coleccion.estado(rc.CLAVE_DESCUBRE, None) or {}
         from ... import mixes as mx
         if guardado.get("dia") == mx.clave_dia(datetime.now()) and guardado.get("mix"):
@@ -338,14 +426,10 @@ class PaginaInicio(Pagina):
 
     def _gustos_inicio(self):
         """«Porque te gustan tus artistas»: sugerencias de los artistas favoritos elegidos."""
-        from PySide6.QtWidgets import QVBoxLayout
         from ... import recomendador as rc
         if not rc.leer_gustos(self.ctx.coleccion):
             return
-        self.caja_gustos = QWidget()
-        self.v_gustos = QVBoxLayout(self.caja_gustos)
-        self.v_gustos.setContentsMargins(0, 0, 0, 0)
-        self.zv.addWidget(self.caja_gustos)
+        self.caja_gustos, self.v_gustos = self._caja()
         guardado = self.ctx.coleccion.estado(rc.CLAVE_PARA_TI, None) or {}
         from ... import mixes as mx
         if guardado.get("dia") == mx.clave_dia(datetime.now()) and guardado.get("mix"):
@@ -356,6 +440,28 @@ class PaginaInicio(Pagina):
         _INTENTO_GUSTOS["t"] = time.time()
         en_segundo_plano(_con_copia, self.ctx.coleccion, rc.sugerencias_gustos,
                          ok=self._pintar_gustos, error=lambda _e: None, dueno=self)
+
+    def _artistas_parecidos(self):
+        """«Artistas parecidos a los que escuchas»: gente nueva para ti, y a quién se parece cada uno."""
+        from ... import recomendador as rc
+        self.caja_parecidos, self.v_parecidos = self._caja()
+        if time.time() - _INTENTO_PARECIDOS.get("t", 0) < 600 and _INTENTO_PARECIDOS.get("vacio"):
+            return                   # hace un momento no había red (o historial): no se insiste en cada vuelta
+        en_segundo_plano(_con_copia, self.ctx.coleccion, rc.artistas_parecidos, ok=self._pintar_parecidos,
+                         error=lambda _e: None, dueno=self)
+
+    def _pintar_parecidos(self, lista):
+        from ..componentes import _borrar_layout
+        _INTENTO_PARECIDOS.update(t=time.time(), vacio=len(lista or []) < 4)
+        try:
+            if len(lista or []) < 4:
+                return
+            _borrar_layout(self.v_parecidos)
+            self.v_parecidos.addWidget(Carrusel(self.ctx, "Artistas parecidos a los que escuchas", lista,
+                                                subtitulo="gente nueva para ti"))
+            self.caja_parecidos.show()
+        except RuntimeError:
+            pass
 
     def _pintar_gustos(self, mix):
         if not mix:
@@ -379,12 +485,8 @@ class PaginaInicio(Pagina):
         """Lee hasta un año de escuchas: si hoy ya se calculó sale al momento; si no, se calcula
         en segundo plano (con su propia conexión a la base) y aparece en su sitio al terminar."""
         from ... import recomendador as rc
-        from PySide6.QtWidgets import QVBoxLayout
         col = self.ctx.coleccion
-        caja = QWidget()
-        v = QVBoxLayout(caja)
-        v.setContentsMargins(0, 0, 0, 0)
-        self.zv.addWidget(caja)
+        caja, v = self._caja()
         self.caja_tiempo, self.v_tiempo = caja, v
         lista = rc.maquina_del_tiempo_en_memoria(col)
         if lista is not None:
@@ -427,6 +529,7 @@ class PaginaInicio(Pagina):
             alto = max(alto, tj.height())
         car.area.setFixedHeight(alto + 2)
         v.addWidget(car)
+        v.parentWidget().show()
 
     def _mixes_listos(self, nuevos):
         from ... import mixes as mx
@@ -442,7 +545,12 @@ class PaginaInicio(Pagina):
     def _pintar_mixes(self, lista):
         from ..componentes import _borrar_layout
         _borrar_layout(self.v_mixes)
+        self._mixes_vistos = True
+        para_ti = canciones_para_ti(lista)
+        self._hay_para_ti = len(para_ti) >= 8
+        self._pintar_para_ti(para_ti if self._hay_para_ti else (self._del_catalogo or para_ti))
         if not lista:
+            self.caja_mixes.hide()
             return
         car = Carrusel(self.ctx, "Tus mixes diarios", [],
                        subtitulo="hechos para ti · se renuevan cada día")
@@ -457,6 +565,14 @@ class PaginaInicio(Pagina):
             alto = max(alto, tj.height())
         car.area.setFixedHeight(alto + 2)
         self.v_mixes.addWidget(car)
+        self.caja_mixes.show()
+
+    def _extras(self):
+        """Modo estudio y tu resumen: dos accesos pequeños, uno al lado del otro."""
+        self.caja_extras = _DosColumnas()
+        self.zv.addWidget(self.caja_extras)
+        self._tarjeta_estudio()
+        self._banner_resumen()
 
     def _tarjeta_estudio(self):
         """La entrada calmada al Modo estudio, con lo que llevas hoy si ya estudiaste."""
@@ -470,49 +586,52 @@ class PaginaInicio(Pagina):
                 if est.racha() > 1:
                     texto += f"  ·  {est.racha()} días seguidos"
             t = TarjetaEstudioInicio(texto)
+            t.compacta()
             t.clicked.connect(lambda: self.ctx.navegar({"pagina": "estudio"}))
-            self.zv.addWidget(t)
+            self.caja_extras.agregar(t)
         except Exception:  # noqa: BLE001 - una tarjeta nunca debe romper Inicio
             pass
 
     def _banner_resumen(self):
         """El resumen de la semana se calcula en segundo plano; el banner aparece al llegar."""
-        from PySide6.QtWidgets import QVBoxLayout
         from ... import mixes as mx
-        caja = QWidget()
-        v = QVBoxLayout(caja)
-        v.setContentsMargins(0, 0, 0, 0)
-        self.zv.addWidget(caja)
-        caja.hide()
 
         def calcular(c):
             return mx.calcular_resumen(mx.leer_historial(
                 c, desde=datetime.now() - timedelta(days=8)), "semana")
+
+        caja = self.caja_extras
 
         def listo(r):
             if r["vacio"]:
                 return
             try:
                 b = BannerResumen(r)
+                b.setFixedHeight(84)
                 b.clicked.connect(lambda: self.ctx.navegar({"pagina": "resumen"}))
-                v.addWidget(b)
-                caja.show()
+                caja.agregar(b)
             except RuntimeError:
                 pass
         en_segundo_plano(_con_copia, self.ctx.coleccion, calcular, ok=listo,
                          error=lambda _e: None, dueno=self)
 
-    def _mixes(self):
-        col = self.ctx.coleccion
-        salida = []
-        historial = col.escuchado_hace_poco(150) + col.lista_me_gusta(limite=100)
-        for a in col.artistas_frecuentes(8):
-            portada = next((p.get("miniatura") for p in historial
-                            if any(x.get("id") == a["id"] for x in p.get("artistas") or [])), "")
-            salida.append({"tipo": "artista", "id": a["id"], "titulo": f"Mix de {a['nombre']}",
-                           "subtitulo": f"{a['nombre']} y artistas parecidos",
-                           "miniatura": portada})
-        return salida
+
+class _DosColumnas(QWidget):
+    """Dos tarjetas en fila; si no caben, una debajo de la otra."""
+
+    def __init__(self, padre=None):
+        super().__init__(padre)
+        self.h = QBoxLayout(QBoxLayout.LeftToRight, self)
+        self.h.setContentsMargins(0, 0, 0, 0)
+        self.h.setSpacing(12)
+
+    def agregar(self, w):
+        w.setMinimumWidth(10)
+        self.h.addWidget(w, 1)
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self.h.setDirection(QBoxLayout.LeftToRight if self.width() >= 640 else QBoxLayout.TopToBottom)
 
 
 # ---------------------------------------------------------------- mixes
@@ -820,20 +939,24 @@ class BannerResumen(QWidget):
             p.drawEllipse(QRectF(cx - rad, cy - rad, rad * 2, rad * 2))
         p.restore()
         datos = self.r
+        dy = (self.height() - 96) / 2
         p.setPen(QColor(255, 255, 255, 200))
         p.setFont(fuente(11.5, QFont.Bold))
-        p.drawText(QRectF(24, 16, r.width() - 48, 18), Qt.AlignLeft | Qt.AlignVCenter,
-                   "TU RESUMEN · SIEMPRE DISPONIBLE")
+        p.drawText(QRectF(24, 16 + dy, r.width() - 48, 18), Qt.AlignLeft | Qt.AlignVCenter,
+                   "TU RESUMEN")
         p.setPen(QColor("#FFFFFF"))
-        p.setFont(fuente(24, QFont.Black, True))
+        f = fuente(24 if dy >= 0 else 20, QFont.Black, True)
+        p.setFont(f)
         minutos = f"{datos['minutos']:,}".replace(",", ".")
-        p.drawText(QRectF(24, 34, r.width() - 48, 32), Qt.AlignLeft | Qt.AlignVCenter,
-                   f"{minutos} {'minuto' if datos['minutos'] == 1 else 'minutos'} esta semana")
+        p.drawText(QRectF(24, 34 + dy, r.width() - 90, 32), Qt.AlignLeft | Qt.AlignVCenter,
+                   QFontMetrics(f).elidedText(
+                       f"{minutos} {'minuto' if datos['minutos'] == 1 else 'minutos'} esta semana",
+                       Qt.ElideRight, int(r.width() - 90)))
         top = datos["top_artistas"][0]["nombre"] if datos["top_artistas"] else ""
         p.setPen(QColor(255, 255, 255, 215))
         p.setFont(fuente(13))
         texto = (f"Tu artista: {top}  ·  " if top else "") + "Mira tu semana, tu mes o tu año"
-        p.drawText(QRectF(24, 66, r.width() - 120, 20), Qt.AlignLeft | Qt.AlignVCenter,
+        p.drawText(QRectF(24, 66 + dy, r.width() - 120, 20), Qt.AlignLeft | Qt.AlignVCenter,
                    QFontMetrics(fuente(13)).elidedText(texto, Qt.ElideRight, int(r.width() - 120)))
         lado = 22
         x = r.right() - 24 - lado + 4 * self._encima

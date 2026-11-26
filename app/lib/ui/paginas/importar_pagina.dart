@@ -336,8 +336,8 @@ class _ImportarPaginaState extends State<ImportarPagina> {
           alignment: Alignment.centerLeft,
           child: TextButton.icon(
             onPressed: () => Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MeGustaExternosPagina())),
-            icon: const Icon(Icons.favorite_border_rounded),
-            label: const Text('Pasar tus me gusta de Spotify, YouTube Music o SoundCloud'),
+            icon: const Icon(Icons.link_rounded),
+            label: const Text('Vincular Spotify, YouTube Music o SoundCloud'),
           ),
         ),
         const SizedBox(height: Esp.xl),

@@ -524,6 +524,8 @@ def test_las_muestras_son_de_verdad(app):
     def zona(m):
         img = QImage(m.width(), m.height(), QImage.Format_ARGB32_Premultiplied)
         img.fill(0)
+        if m._pm is None:
+            m.construir()                # en la app le llega su turno (selector_letra._Turnos)
         m.render(img)
         z = m.zona().toRect()
         return img.copy(z.adjusted(0, 0, -30, 0))

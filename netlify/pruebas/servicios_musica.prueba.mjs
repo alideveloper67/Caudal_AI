@@ -3,6 +3,7 @@
 import assert from 'node:assert/strict';
 import { configuracion } from '../functions/servicios.mjs';
 import { crearManejador as spotify, pistasDePagina } from '../functions/spotify.mjs';
+import { manejador as vincular, destino } from '../functions/vincular.mjs';
 import { crearManejador as soundcloud, tipoDe, cancion as cancionSC } from '../functions/soundcloud.mjs';
 
 let fallos = 0;
@@ -11,7 +12,7 @@ const json = (d, status = 200, h = {}) => new Response(JSON.stringify(d), { stat
 const get = (ruta) => new Request('https://x.test' + ruta);
 
 console.log('servicios');
-ok(JSON.stringify(configuracion({})) === JSON.stringify({ spotify_client_id: '', spotify: false, soundcloud: false }), 'sin variables: nada activado');
+ok(JSON.stringify(configuracion({})) === JSON.stringify({ spotify_client_id: '', spotify: false, soundcloud: false, soundcloud_client_id: '', youtube_client_id: '' }), 'sin variables: nada activado');
 const c = configuracion({ SPOTIFY_CLIENT_ID: ' abc ', SOUNDCLOUD_CLIENT_ID: 'x', SOUNDCLOUD_CLIENT_SECRET: 'y' });
 ok(c.spotify_client_id === 'abc' && !c.spotify && c.soundcloud, 'el client_id de Spotify es público; el secreto no se entrega');
 ok(!JSON.stringify(configuracion({ SPOTIFY_CLIENT_ID: 'a', SPOTIFY_CLIENT_SECRET: 'SECRETO' })).includes('SECRETO'), 'el secreto nunca sale');
@@ -107,6 +108,35 @@ ok(cancionSC({ title: 'Grupo - Tema', duration: 61000, user: { username: 'sub' }
   ok(todas.length === total, `5321 me gusta llegan enteros (${todas.length})`);
   const raro = await (await h(get('/api/soundcloud?cursor=' + encodeURIComponent('https://evil.example/x')))).json();
   ok(raro.error === 'enlace', 'el cursor solo puede ser de api.soundcloud.com');
+}
+
+console.log('vincular');
+{
+  const d = (q) => destino(new URLSearchParams(q));
+  const azar = 'x'.repeat(32);
+  ok(d({ state: `a-youtube-${azar}`, code: 'c d' }) === `caudal://vincular?servicio=youtube&state=a-youtube-${azar}&code=c+d`, 'vuelve a la app');
+  ok(d({ state: `e-spotify-${azar}`, error: 'access_denied' }).startsWith('http://127.0.0.1:43821/vincular?servicio=spotify'), 'vuelve al escritorio');
+  ok(d({ state: `w-soundcloud-${azar}`, code: 'c' }).startsWith('https://caudal-musica.netlify.app/app/?vincular=1&servicio=soundcloud'), 'vuelve a la web');
+  for (const malo of ['', 'x', `z-spotify-${azar}`, 'a-spotify-corto', `a-otro-${azar}`, `a-spotify-${azar}/../`, `https://evil.example`]) ok(d({ state: malo, code: 'c' }) === '', `no redirige con «${malo.slice(0, 20)}»`);
+  const env = { YOUTUBE_CLIENT_ID: 'id', YOUTUBE_CLIENT_SECRET: 'SECRETO', SOUNDCLOUD_CLIENT_ID: 'i2', SOUNDCLOUD_CLIENT_SECRET: 's2' };
+  const post = (x) => new Request('https://x.test/api/vincular', { method: 'POST', body: typeof x === 'string' ? x : JSON.stringify(x) });
+  let visto;
+  const h = vincular(async (url, o) => { visto = { url, cuerpo: new URLSearchParams(o.body) }; return json({ access_token: 'A', refresh_token: 'R', expires_in: 10 }); }, env);
+  const r = await (await h(post({ servicio: 'youtube', code: 'c', verificador: 'v' }))).json();
+  ok(r.access === 'A' && r.refresh === 'R' && r.caduca_en === 10 && !JSON.stringify(r).includes('SECRETO'), 'canjea el código y no enseña el secreto');
+  ok(visto.url === 'https://oauth2.googleapis.com/token' && visto.cuerpo.get('code_verifier') === 'v' && visto.cuerpo.get('redirect_uri').endsWith('/api/vincular'), 'con PKCE y la vuelta de siempre');
+  await h(post({ servicio: 'soundcloud', refresh: 'R1' }));
+  ok(visto.url === 'https://secure.soundcloud.com/oauth/token' && visto.cuerpo.get('grant_type') === 'refresh_token', 'renueva SoundCloud');
+  ok((await h(post({ servicio: 'spotify', code: 'c', verificador: 'v' }))).status === 400, 'Spotify no pasa por aquí');
+  ok((await h(post({ servicio: '__proto__', refresh: 'x' }))).status === 400, 'un servicio raro no entra');
+  ok((await h(post('no es json'))).status === 400, 'sin json, 400');
+  ok((await h(post({ servicio: 'youtube', code: 'c' }))).status === 400, 'sin verificador no hay canje');
+  ok((await (await vincular(async () => json({}), {})(post({ servicio: 'youtube', refresh: 'R' }))).json()).error === 'sin_credenciales', 'sin activar lo dice');
+  ok((await (await vincular(async () => json({ error: 'invalid_grant' }, 400), env)(post({ servicio: 'youtube', refresh: 'R' }))).json()).error === 'caducado', 'permiso quitado');
+  ok((await (await vincular(async () => json({}, 503), env)(post({ servicio: 'youtube', refresh: 'R' }))).json()).error === 'servicio', 'un fallo pasajero no es caducado');
+  const g = await h(new Request(`https://x.test/api/vincular?state=a-youtube-${azar}&code=c`));
+  ok(g.status === 302 && g.headers.get('location').startsWith('caudal://'), 'redirige');
+  ok((await h(new Request('https://x.test/api/vincular?state=nada'))).status === 400, 'sin estado nuestro no redirige');
 }
 
 if (fallos) {

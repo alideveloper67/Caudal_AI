@@ -18,14 +18,18 @@ import time
 import shiboken6
 from PySide6.QtCore import QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QPainter
-from PySide6.QtWidgets import QPushButton, QWidget
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QWidget
 
-from .. import mascotas
+from .. import karaoke_audio, mascotas
 from ..paleta_caratula import colores_de
 from .componentes import a_la_vista
 from .letra_viva import FPS_DORMIDO, LienzoLetra, paleta_de
 from .vista_grande import BOTON, VistaGrande, ahorrando
 
+MANDO = ("QPushButton{border:none;border-radius:16px;padding:6px 13px;font-size:13px;font-weight:800;color:#FFFFFF;"
+         "background:transparent;}"
+         "QPushButton:hover{background:rgba(255,255,255,0.18);}"
+         "QPushButton:checked{background:#FFFFFF;color:#06070A;}")
 MS_MASCOTA = 140
 LADO_MASCOTA = 230
 NOTAS = ("♪", "♫", "♬")
@@ -134,6 +138,11 @@ class MascotaCantante(QWidget):
         d = mascota_para(self.ctx)
         # sin estelas ni arcoíris: solo la mascota (el rastro suelto parecía un artefacto)
         self.datos = dict(d, estela=None, arcoiris=False) if d else None
+        if self.datos:
+            esc = max(1, round((LADO_MASCOTA * 0.62) / max(1, self.datos["alto"])))
+            dpr = self.devicePixelRatioF() or 1.0
+            mascotas.preparar_reducidas(self.datos, round(self.datos["ancho"] * esc * dpr),
+                                        round(self.datos["alto"] * esc * dpr))
         self._actualizar_estado()
 
     def hideEvent(self, e):
@@ -193,9 +202,10 @@ class PaginaKaraoke(VistaGrande):
     def __init__(self, ctx, padre=None):
         super().__init__(ctx, padre)
         self.colores = colores_de(ctx)
-        self.lienzo = LienzoKaraoke(ctx, self.colores, self)
+        from .karaoke_escenario import LienzoEscenario
+        self.lienzo = LienzoEscenario(ctx, self.colores, self, ctx.ajustes.get("karaoke_vista", "lista"))
         self.lienzo.margen_arriba = 64
-        self.lienzo.margen_abajo = 130        # la letra termina (y se desvanece) sobre la franja de controles
+        self.lienzo.margen_abajo = 176        # la letra termina (y se desvanece) sobre la franja de controles
         self.lienzo.installEventFilter(self)
         self.lienzo.setMouseTracking(True)
         self.lienzo.lower()
@@ -224,10 +234,194 @@ class PaginaKaraoke(VistaGrande):
         self.bt_diseno.setFocusPolicy(Qt.NoFocus)
         self.bt_diseno.clicked.connect(self._abrir_diseno)
         self.fila_cab.insertWidget(3, self.bt_diseno, 0, Qt.AlignVCenter)
+        self._crear_mandos()
         # el estado de la mascota sigue a la letra (cada línea nueva cambia entre cantar y tararear)
         # método ligado (no lambda): al destruirse la página Qt lo desconecta solo y no se llama
         # sobre un objeto ya borrado («Internal C++ object (PaginaKaraoke) already deleted»)
         self.r.posicion_cambio.connect(self._al_posicion)
+
+    # ------------------------------------------------------------ mandos: voz, tono, velocidad, micrófono y vista
+    def _crear_mandos(self):
+        self.tono = 0
+        self.mandos = QWidget(self)
+        self.mandos.setAttribute(Qt.WA_TranslucentBackground)
+        self.mandos.setMouseTracking(True)
+        self.mandos.installEventFilter(self)
+        h = QHBoxLayout(self.mandos)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(10)
+        h.addStretch(1)
+
+        def grupo():
+            g = QFrame()
+            g.setObjectName("mando")
+            g.setStyleSheet("QFrame#mando{background:rgba(8,9,16,0.55);border-radius:21px;}")
+            hg = QHBoxLayout(g)
+            hg.setContentsMargins(6, 5, 6, 5)
+            hg.setSpacing(4)
+            h.addWidget(g)
+            return hg
+
+        def boton(donde, texto, ayuda, al_pulsar, marcable=False):
+            b = QPushButton(texto)
+            b.setToolTip(ayuda)
+            b.setAccessibleName(ayuda)
+            b.setCheckable(marcable)
+            b.setCursor(Qt.PointingHandCursor)
+            b.setFocusPolicy(Qt.NoFocus)
+            b.setMinimumSize(38, 32)
+            b.setStyleSheet(MANDO)
+            b.clicked.connect(al_pulsar)
+            donde.addWidget(b)
+            return b
+
+        def etiqueta(donde, texto, ancho=0):
+            e = QLabel(texto)
+            e.setAlignment(Qt.AlignCenter)
+            e.setStyleSheet("color:rgba(255,255,255,0.82);font-size:13px;font-weight:700;background:transparent;")
+            if ancho:
+                e.setFixedWidth(ancho)
+            donde.addWidget(e)
+            return e
+        g = grupo()
+        self.bt_voces = {}
+        for clave, (nombre, _q) in karaoke_audio.VOCES.items():
+            self.bt_voces[clave] = boton(g, nombre, f"{nombre} (V para cambiar)",
+                                         lambda _m=False, c=clave: self.poner_voz(c), True)
+        g = grupo()
+        boton(g, "−", "Bajar el tono (flecha abajo)", lambda: self.poner_tono(self.tono - 1))
+        self.et_tono = etiqueta(g, "Tono 0", 66)
+        boton(g, "+", "Subir el tono (flecha arriba)", lambda: self.poner_tono(self.tono + 1))
+        g = grupo()
+        boton(g, "−", "Más lento", lambda: self.poner_velocidad(-0.05))
+        self.et_vel = etiqueta(g, "", 58)
+        boton(g, "+", "Más rápido", lambda: self.poner_velocidad(0.05))
+        g = grupo()
+        self.bt_micro = boton(g, "Micrófono", "Puntaje con tu micrófono (M). Solo mide el volumen: no se graba nada",
+                              lambda _m=False: self.poner_micro(self.bt_micro.isChecked()), True)
+        self.bt_vista = boton(g, "", "Cambiar de vista (L)", lambda: self.poner_vista(
+            "lista" if self.lienzo.modo == "escenario" else "escenario"))
+        h.addStretch(1)
+        self._t_sonido = QTimer(self)                 # varios toques seguidos, un solo cambio de filtros
+        self._t_sonido.setSingleShot(True)
+        self._t_sonido.setInterval(220)
+        self._t_sonido.timeout.connect(self._aplicar_sonido)
+        self._pintar_mandos()
+
+    def _voz(self):
+        v = self.ctx.ajustes.get("karaoke_voz", "original")
+        return v if v in karaoke_audio.VOCES else "original"
+
+    def _pintar_mandos(self):
+        corto = self.width() < 980                       # en ventanas estrechas, nombres cortos: no se salen
+        cortos = {"original": "Original", "baja": "Baja", "sin": "Sin voz"}
+        for c, b in self.bt_voces.items():
+            b.setText(cortos[c] if corto else karaoke_audio.VOCES[c][0])
+            b.setChecked(c == self._voz())
+        self.et_tono.setText(f"Tono {self.tono:+d}" if self.tono else "Tono 0")
+        vel = float(getattr(self.r, "velocidad", 1.0) or 1.0)
+        self.et_vel.setText(f"{vel:.2f}".rstrip("0").rstrip(".").replace(".", ",") + "×")
+        self.bt_micro.setChecked(self.lienzo.micro.encendido)
+        self.bt_micro.setText("Micro" if corto else "Micrófono")
+        if self.lienzo.modo == "escenario":
+            self.bt_vista.setText("Letra" if corto else "Ver la letra entera")
+        else:
+            self.bt_vista.setText("Escenario" if corto else "Ver el escenario")
+
+    def _guardar(self, clave, valor):
+        self.ctx.ajustes[clave] = valor
+        try:
+            self.ctx.ajustes.guardar()
+        except Exception:  # noqa: BLE001
+            pass
+
+    def poner_voz(self, clave):
+        self._guardar("karaoke_voz", clave if clave in karaoke_audio.VOCES else "original")
+        self._pintar_mandos()
+        self._t_sonido.start()
+
+    def poner_tono(self, n):
+        self.tono = karaoke_audio.tono_valido(n)
+        self._pintar_mandos()
+        self._t_sonido.start()
+
+    def poner_velocidad(self, cambio):
+        f = getattr(self.r, "fijar_velocidad", None)
+        if f is not None:
+            f(round(max(0.5, min(1.5, float(self.r.velocidad) + cambio)), 2), guardar=False)
+            self._tocada_vel = True
+        self._pintar_mandos()
+
+    def poner_micro(self, si):
+        self.lienzo.poner_micro(si)
+        self._pintar_mandos()
+
+    def poner_vista(self, modo):
+        self.lienzo.poner_modo(modo)
+        self._guardar("karaoke_vista", self.lienzo.modo)
+        self._colocar_mascota()
+        self._pintar_mandos()
+
+    def _aplicar_sonido(self):
+        f = getattr(self.r, "fijar_karaoke", None)
+        if f is not None:
+            f(self._voz() if self.isVisible() else "original", self.tono if self.isVisible() else 0)
+
+    def mostrar_controles(self):
+        super().mostrar_controles()
+        if hasattr(self, "mandos"):
+            self.mandos.show()
+            self.lienzo.mandos_a_la_vista = True
+
+    def _esconder(self):
+        if self.mandos.underMouse():
+            self._t_esconder.start()
+            return
+        super()._esconder()
+        if not self._controles_a_la_vista:
+            self.mandos.hide()
+            self.lienzo.mandos_a_la_vista = False          # la letra aprovecha todo el alto
+
+    def showEvent(self, e):
+        super().showEvent(e)
+        self._vel_antes = float(getattr(self.r, "velocidad", 1.0) or 1.0)
+        self._tocada_vel = False
+        f = getattr(self.r, "activar_espectro", None)
+        if f is not None:
+            f(True)                                   # las luces se mueven con el nivel real
+        self._pintar_mandos()
+        self._aplicar_sonido()
+
+    def hideEvent(self, e):
+        super().hideEvent(e)
+        # al salir, la música vuelve a sonar como siempre y el micrófono se apaga
+        self.lienzo.poner_micro(False)
+        self._t_sonido.stop()
+        self.tono = 0
+        f = getattr(self.r, "fijar_karaoke", None)
+        if f is not None:
+            f("original", 0)
+        if getattr(self, "_tocada_vel", False):
+            self.r.fijar_velocidad(self._vel_antes, guardar=False)
+        f = getattr(self.r, "activar_espectro", None)
+        if f is not None:
+            f(False)
+
+    def keyPressEvent(self, e):
+        t = e.key()
+        if t == Qt.Key_V:
+            claves = list(karaoke_audio.VOCES)
+            self.poner_voz(claves[(claves.index(self._voz()) + 1) % len(claves)])
+        elif t in (Qt.Key_Up, Qt.Key_Down):
+            self.poner_tono(self.tono + (1 if t == Qt.Key_Up else -1))
+        elif t == Qt.Key_M:
+            self.poner_micro(not self.lienzo.micro.encendido)
+        elif t == Qt.Key_L:
+            self.poner_vista("lista" if self.lienzo.modo == "escenario" else "escenario")
+        else:
+            super().keyPressEvent(e)
+            return
+        self.mostrar_controles()
 
     def _al_posicion(self, _s=None):
         if not shiboken6.isValid(self) or not shiboken6.isValid(self.mascota):
@@ -239,10 +433,17 @@ class PaginaKaraoke(VistaGrande):
         super().resizeEvent(e)
         self.lienzo.setGeometry(0, 0, self.width(), self.height())
         self.lienzo.lower()
-        self.mascota.move(self.width() - LADO_MASCOTA - 18, self.height() - LADO_MASCOTA - 96)
+        self._colocar_mascota()
         self.mascota.raise_()
+        self._pintar_mandos()
+        self.mandos.setGeometry(0, self.height() - 168, self.width(), 46)
+        self.mandos.raise_()
         self.cabecera.raise_()
         self.pie.raise_()
+
+    def _colocar_mascota(self):
+        abajo = 8 if self.lienzo.modo == "escenario" else 96       # en el escenario, en su esquina: no pisa la letra
+        self.mascota.move(self.width() - LADO_MASCOTA - 18, self.height() - LADO_MASCOTA - abajo)
 
     def _abrir_diseno(self):
         from .selector_letra import abrir_selector

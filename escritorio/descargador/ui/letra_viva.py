@@ -40,6 +40,7 @@ from .componentes import a_la_vista
 from .vista_grande import _Elidida as Elidida
 from .sincronia_auto import clave_pista as sincronia_clave, en_duda, sin_tiempos, sincronia_de
 
+SIN_LETRA = ("No hay letra para esta canción.\nA veces aparece buscándola desde el álbum oficial.")
 # letras ya pedidas (clave de la pista -> datos de catalogo.letras), las 300 últimas
 CACHE_LETRAS = DiccionarioLimitado(300)
 
@@ -419,13 +420,18 @@ class LienzoLetra(QWidget):
         self.datos = datos
         lineas, sinc = preparar_lineas(datos)
         if not lineas:
-            self._poner_lineas([], False, "No hay letra para esta canción.\nA veces aparece "
-                                          "buscándola desde el álbum oficial.")
+            if sincronia_de(self.ctx).pedir_tiempos(self.pista, datos):
+                self._poner_lineas([], False, "Nadie tiene la letra de esta canción:\nCaudal la está escuchando "
+                                              "para escribirla…", esperando=True)
+            else:
+                self._poner_lineas([], False, SIN_LETRA)
             return
         self._poner_lineas(lineas, sinc, "")
         self.pedir_traduccion()
         if (sinc or self._en_duda) and not self._desfase_ms():
             sincronia_de(self.ctx).pedir(self.pista, self._en_duda or datos)
+        elif not sinc and not self._en_duda:
+            sincronia_de(self.ctx).pedir_tiempos(self.pista, datos)     # solo texto: se le ponen tiempos
 
     def pedir_traduccion(self):
         self.traducciones = []
@@ -552,8 +558,19 @@ class LienzoLetra(QWidget):
             return
         accion = (res or {}).get("accion")
         duda = getattr(self, "_en_duda", None)
+        if accion == "letra":
+            self._llegaron(self.clave, res["datos"])
+            return
+        if accion == "sin_letra":
+            if not self.lineas:
+                self._poner_lineas([], False, SIN_LETRA)
+            return
         if duda is not None and accion in ("bien", "corregir"):
             self._llegaron(self.clave, duda)
+            return
+        if duda is not None and accion in ("nada", "otra"):
+            # sus tiempos son de otra grabación: se le ponen los de esta escuchándola entera
+            sincronia_de(self.ctx).pedir_tiempos(self.pista, sin_tiempos(duda))
             return
         if accion == "cambiar":
             nueva = sincronia_de(self.ctx).letra_nueva(self.pista, (duda or self.datos).get("lineas"))
@@ -944,7 +961,7 @@ class LienzoLetra(QWidget):
         f.setPixelSize(11)
         p.setFont(f)
         p.setPen(QColor(255, 255, 255))
-        texto = f"Letra de {self.datos['fuente']}"
+        texto = f"Letra de {str(self.datos['fuente']).replace('Source:', '').strip()}"
         if not self.sincronizada:
             texto = "Letra sin sincronizar · " + texto
         p.drawText(QRectF(0, self.height() - 22, self.width() - 14, 18),

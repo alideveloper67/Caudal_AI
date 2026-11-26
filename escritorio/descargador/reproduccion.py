@@ -19,10 +19,12 @@ import random
 import re
 import threading
 import time
+from collections import deque
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
-from . import catalogo, eq_avanzado, mezcla_dj, mpv_carga, sonoridad
+from . import karaoke_audio
+from . import catalogo, eq_avanzado, mezcla_dj, mpv_carga, sonoridad, soundcloud
 from .hilos import en_segundo_plano
 
 FRECUENCIAS_EQ = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]
@@ -217,8 +219,74 @@ def _edl(video_url, audio_url):
             + ";!new_stream;!no_clip;!no_chapters;" + esc(audio_url))
 
 
+class _Ordenes:
+    """Las órdenes a un mpv, en un hilo suyo y en el orden en que se dieron.
+
+    Hablarle a mpv es esperar a que su núcleo atienda: mientras abre un video o arma la pantalla tarda hasta
+    segundo y medio (medido el 25/11/2026: 1,4 s para fijar el volumen al pasar a video), y esa espera era en
+    el hilo que pinta. Ahora la interfaz deja la orden y sigue. Las que se repiten (volumen, velocidad) se
+    juntan: solo va la última."""
+
+    def __init__(self, nombre):
+        self._cola = deque()         # (clave o None, función)
+        self._hay = threading.Condition()
+        self._trabajando = False
+        self._fin = False
+        self._hilo = threading.Thread(target=self._trabajar, name=f"mpv-{nombre}", daemon=True)
+        self._hilo.start()
+
+    def dar(self, funcion, clave=None):
+        with self._hay:
+            if self._fin:
+                return
+            if clave is not None and self._cola and self._cola[-1][0] == clave:
+                self._cola[-1] = (clave, funcion)
+            else:
+                self._cola.append((clave, funcion))
+            self._hay.notify_all()
+
+    def _trabajar(self):
+        while True:
+            with self._hay:
+                while not self._cola and not self._fin:
+                    self._hay.wait()
+                if not self._cola:
+                    return
+                _clave, funcion = self._cola.popleft()
+                self._trabajando = True
+            try:
+                funcion()
+            except Exception:  # noqa: BLE001 - una orden que mpv rechaza no para las demás
+                pass
+            with self._hay:
+                self._trabajando = False
+                self._hay.notify_all()
+
+    def esperar(self, segundos=2.0):
+        """Hasta que no quede nada por mandar (solo pruebas y cierre). True si terminó."""
+        fin = time.monotonic() + segundos
+        with self._hay:
+            while self._cola or self._trabajando:
+                resto = fin - time.monotonic()
+                if resto <= 0:
+                    return False
+                self._hay.wait(resto)
+        return True
+
+    def acabar(self, ultima):
+        """Nada más entra: se tira lo pendiente y se hace lo último."""
+        with self._hay:
+            self._cola.clear()
+            self._cola.append((None, ultima))
+            self._fin = True
+            self._hay.notify_all()
+
+
 class Motor(QObject):
-    """Una instancia de mpv con sus avisos convertidos en senales de Qt."""
+    """Una instancia de mpv con sus avisos convertidos en senales de Qt.
+
+    Nada de lo que llama la interfaz espera a mpv: las órdenes van por `_Ordenes` y lo que se pregunta
+    (posición, duración, pausa, códec) sale de lo último que mpv avisó."""
 
     posicion = Signal(object)
     duracion = Signal(object)
@@ -284,16 +352,31 @@ class Motor(QObject):
         self._cerrado = False
         self._ignorar_fin = 0
         self._cargando = False
+        self._ordenes = _Ordenes(nombre)
+        # cargas y saltos: el número del último pedido y el del último que mpv ya recibió (lo primero solo
+        # lo escribe la interfaz y lo segundo, el hilo de este motor)
+        self._carga_pedida = self._carga_hecha = 0
+        self._salto_pedido = self._salto_hecho = 0
+        self._pos = None                   # (segundo, instante en que lo dijo) de lo que suena
+        self._dur = 0.0
+        self._pausado = False
+        self._vel = 1.0
+        self._pos_aviso = 0.0              # cuándo se pasó la última posición a la interfaz
+        self._audio_real = {"codec": None, "params": None, "bitrate": None}
+        self._video_real = {}
         self.fuente = None
         self._af_base = ""
         self._espectro = False
         self._nivel = None                 # (RMS, pico) en dB: lo deja mpv por su aviso, nunca se lee a mano
 
-        self.mpv.observe_property("time-pos", lambda _n, v: self._emitir(self.posicion, v))
-        self.mpv.observe_property("duration", lambda _n, v: self._emitir(self.duracion, v))
-        self.mpv.observe_property("pause", lambda _n, v: self._emitir(self.pausa, bool(v)))
+        self.mpv.observe_property("time-pos", self._llego_posicion)
+        self.mpv.observe_property("duration", self._llego_duracion)
+        self.mpv.observe_property("pause", self._llego_pausa)
         self.mpv.observe_property("paused-for-cache",
-                                  lambda _n, v: self._emitir(self.esperando, bool(v)))
+                                  lambda _n, v: self._cargas or self._emitir(self.esperando, bool(v)))
+        for prop, clave in (("audio-codec-name", "codec"), ("audio-params", "params"),
+                            ("audio-bitrate", "bitrate")):
+            self.mpv.observe_property(prop, lambda _n, v, c=clave: self._audio_real.__setitem__(c, v))
         if self.es_video:
             self.mpv.observe_property("video-params",
                                       lambda _n, v: self._emitir(self.params_video, v or {}))
@@ -303,6 +386,8 @@ class Motor(QObject):
             datos = evento.as_dict() if hasattr(evento, "as_dict") else {}
             razon = datos.get("reason", b"")
             razon = razon.decode() if isinstance(razon, bytes) else str(razon)
+            if self._cargas:
+                return                    # el final de lo anterior: ya se pidió otra cosa
             if razon == "eof":
                 self._emitir(self.termino, "eof", "")
             elif razon == "error":
@@ -312,17 +397,61 @@ class Motor(QObject):
 
         @self.mpv.event_callback("file-loaded")
         def _cargado(_evento):
-            self._emitir(self.cargado)
+            if not self._cargas:
+                self._emitir(self.cargado)
 
         # teclas multimedia que llegan por los controles de Windows (SMTC) y
         # clics sobre el video
         for t in ("PLAY", "PAUSE", "PLAYPAUSE", "STOP", "NEXT", "PREV",
                   "MBTN_LEFT", "MBTN_LEFT_DBL", "WHEEL_UP", "WHEEL_DOWN",
                   "MBTN_RIGHT"):
-            try:
-                self.mpv.register_key_binding(t, self._hacer_tecla(t))
-            except Exception:
-                pass
+            self._ordenes.dar(lambda t=t: self.mpv.register_key_binding(t, self._hacer_tecla(t)))
+
+    # ---- lo que avisa mpv (en su hilo: solo se guarda y se pasa)
+
+    @property
+    def _cargas(self):
+        """¿Hay una carga pedida que mpv aún no recibió? (lo que avise mientras es de lo anterior)."""
+        return self._carga_pedida != self._carga_hecha
+
+    def _llego_posicion(self, _n, v):
+        if self._cargas or self._salto_pedido != self._salto_hecho:
+            return                        # posiciones de antes de lo que se acaba de pedir
+        ahora = time.monotonic()
+        if v is None:
+            self._pos = None
+        else:
+            self._pos = (float(v), ahora)
+            # ~25 por segundo le bastan a la interfaz (mpv avisa en cada trozo de audio o cuadro)
+            if ahora - self._pos_aviso < 0.036:
+                return
+            self._pos_aviso = ahora
+        self._emitir(self.posicion, v)
+
+    def _llego_duracion(self, _n, v):
+        if self._cargas:
+            return
+        self._dur = float(v or 0.0)
+        self._emitir(self.duracion, v)
+
+    def _llego_pausa(self, _n, v):
+        if self._cargas:
+            return
+        self._pausado = bool(v)
+        self._emitir(self.pausa, bool(v))
+
+    def orden(self, funcion, clave=None):
+        """Le da una orden a mpv sin esperarlo: `funcion(mpv)` corre en el hilo de este motor."""
+        self._ordenes.dar(lambda: funcion(self.mpv), clave)
+
+    def esperar_ordenes(self, segundos=2.0):
+        """Hasta que mpv haya recibido todo lo pedido (para las pruebas)."""
+        return self._ordenes.esperar(segundos)
+
+    def _poner(self, propiedad, valor, clave=None):
+        def hacer(m):
+            m[propiedad] = valor
+        self.orden(hacer, clave)
 
     def _emitir(self, senal, *args):
         """Los avisos de mpv llegan desde su hilo; si Caudal ya se esta
@@ -346,102 +475,111 @@ class Motor(QObject):
     def cargar(self, fuente, inicio=0.0, pausado=False):
         """fuente: {"archivo"} o {"url", "audio_url", "cabeceras", "titulo"}."""
         self.fuente = fuente
-        opciones = {}
-        if inicio and inicio > 1:
-            opciones["start"] = f"{inicio:.2f}"
-        # el titulo va como propiedad y no como opcion de loadfile: las opciones
-        # viajan separadas por comas y "KAROL G, Nicki Minaj" las rompia
-        try:
-            self.mpv["force-media-title"] = fuente.get("titulo") or ""
-        except Exception:
-            pass
-        try:
-            self.mpv.pause = bool(pausado)
-        except Exception:
-            pass
-        if fuente.get("archivo"):
-            destino = fuente["archivo"]
-        else:
-            cab = fuente.get("cabeceras") or {}
-            campos = [f"{k}: {v}" for k, v in cab.items()
-                      if k.lower() not in ("user-agent", "accept-encoding") and v]
-            try:
-                self.mpv["http-header-fields"] = campos
-            except Exception:
-                pass
-            if cab.get("User-Agent"):
-                try:
-                    self.mpv["user-agent"] = cab["User-Agent"]
-                except Exception:
-                    pass
-            if fuente.get("audio_url") and self.es_video:
-                destino = _edl(fuente["url"], fuente["audio_url"])
-            else:
-                destino = fuente["url"]
-        if opciones:
-            self.mpv.loadfile(destino, "replace", **opciones)
-        else:
-            self.mpv.loadfile(destino, "replace")
+        self._carga_pedida += 1
+        num = self._carga_pedida
+        self._pos = None
+        self._dur = 0.0
+        self._pausado = bool(pausado)
+        self._audio_real = {"codec": None, "params": None, "bitrate": None}
+        self._ordenes.dar(lambda: self._cargar_ya(num, dict(fuente), inicio, pausado))
         if fuente.get("subtitulo_url") and self.es_video:
             QTimer.singleShot(800, lambda: self.poner_subtitulo(fuente.get("subtitulo_url")))
 
-    def poner_subtitulo(self, url):
+    def _cargar_ya(self, num, fuente, inicio, pausado):
+        """En el hilo de este motor."""
         try:
-            if url:
-                self.mpv.command("sub-add", url, "select")
+            if num != self._carga_pedida:
+                return                       # ya se pidió otra cosa encima: esta ni se abre
+            opciones = {}
+            if inicio and inicio > 1:
+                opciones["start"] = f"{inicio:.2f}"
+            # el titulo va como propiedad y no como opcion de loadfile: las opciones
+            # viajan separadas por comas y "KAROL G, Nicki Minaj" las rompia
+            try:
+                self.mpv["force-media-title"] = fuente.get("titulo") or ""
+            except Exception:
+                pass
+            try:
+                self.mpv.pause = bool(pausado)
+            except Exception:
+                pass
+            if fuente.get("archivo"):
+                destino = fuente["archivo"]
             else:
-                self.mpv["sid"] = "no"
-        except Exception:
-            pass
+                cab = fuente.get("cabeceras") or {}
+                campos = [f"{k}: {v}" for k, v in cab.items()
+                          if k.lower() not in ("user-agent", "accept-encoding") and v]
+                try:
+                    self.mpv["http-header-fields"] = campos
+                except Exception:
+                    pass
+                if cab.get("User-Agent"):
+                    try:
+                        self.mpv["user-agent"] = cab["User-Agent"]
+                    except Exception:
+                        pass
+                if fuente.get("audio_url") and self.es_video:
+                    destino = _edl(fuente["url"], fuente["audio_url"])
+                else:
+                    destino = fuente["url"]
+            self.mpv.loadfile(destino, "replace", **opciones)
+        finally:
+            self._carga_hecha = num
+
+    def poner_subtitulo(self, url):
+        def hacer(m):
+            if url:
+                m.command("sub-add", url, "select")
+            else:
+                m["sid"] = "no"
+        self.orden(hacer)
 
     def detener(self):
-        try:
-            self.mpv.command("stop")
-        except Exception:
-            pass
+        self.orden(lambda m: m.command("stop"))
+        self._pos = None
         self.fuente = None
 
     def pausar(self, si=True):
-        try:
-            self.mpv.pause = bool(si)
-        except Exception:
-            pass
+        self._pausado = bool(si)
+
+        def hacer(m):
+            m.pause = bool(si)
+        self.orden(hacer, "pausa")
 
     def en_pausa(self):
-        try:
-            return bool(self.mpv.pause)
-        except Exception:
-            return True
+        return bool(self._pausado)
 
     def buscar(self, segundos):
-        try:
-            self.mpv.command("seek", max(0.0, float(segundos)), "absolute+exact")
-        except Exception:
-            pass
+        s = max(0.0, float(segundos))
+        if self._pos is not None:
+            self._pos = (s, time.monotonic())
+        self._salto_pedido += 1
+        num = self._salto_pedido
+
+        def saltar(m):
+            try:
+                m.command("seek", s, "absolute+exact")
+            finally:
+                self._salto_hecho = num
+        self.orden(saltar, "buscar")
 
     def posicion_actual(self):
-        try:
-            return float(self.mpv.time_pos or 0.0)
-        except Exception:
+        """Dónde va ahora mismo: lo último que dijo mpv más lo que pasó desde entonces."""
+        p = self._pos
+        if p is None:
             return 0.0
+        pasado = 0.0 if self._pausado else min(0.5, max(0.0, time.monotonic() - p[1]))
+        return p[0] + pasado * self._vel
 
     def duracion_actual(self):
-        try:
-            return float(self.mpv.duration or 0.0)
-        except Exception:
-            return 0.0
+        return float(self._dur or 0.0)
 
     def fijar_volumen(self, v):
-        try:
-            self.mpv.volume = max(0.0, min(100.0, float(v)))
-        except Exception:
-            pass
+        self._poner("volume", max(0.0, min(100.0, float(v))), "volumen")
 
     def fijar_velocidad(self, v):
-        try:
-            self.mpv.speed = float(v)
-        except Exception:
-            pass
+        self._vel = float(v)
+        self._poner("speed", float(v), "velocidad")
 
     def fijar_filtros(self, af):
         self._af_base = af or ""
@@ -453,20 +591,21 @@ class Motor(QObject):
                "measure_overall=RMS_level+Peak_level]")
 
     def _poner_cadena(self):
-        af = self._af_base
+        base = self._af_base
+        af = base
         if self._espectro and not self.es_video:
             af = f"{af},{self.MEDIDOR}" if af else self.MEDIDOR
-        try:
-            self.mpv.af = af
-        except Exception:
-            self._espectro = False
+
+        def hacer(m):
             try:
-                self.mpv.af = self._af_base
+                m.af = af
             except Exception:
+                self._espectro = False
                 try:
-                    self.mpv.af = ""
+                    m.af = base
                 except Exception:
-                    pass
+                    m.af = ""
+        self.orden(hacer, "filtros")
 
     def fijar_espectro(self, si):
         si = bool(si)
@@ -477,13 +616,13 @@ class Motor(QObject):
         # El nivel llega por el aviso de mpv (una copia hecha por el propio mpv). Leer
         # "af-metadata" a mano mientras se rehace la cadena de filtros (al tocar el ecualizador o el
         # volumen) lee memoria ya liberada y tumba la app.
-        try:
+
+        def mirar(m):
             if si:
-                self.mpv.observe_property("af-metadata/vis", self._al_medir)
+                m.observe_property("af-metadata/vis", self._al_medir)
             else:
-                self.mpv.unobserve_property("af-metadata/vis", self._al_medir)
-        except Exception:
-            pass
+                m.unobserve_property("af-metadata/vis", self._al_medir)
+        self.orden(mirar)
         self._poner_cadena()
 
     def _al_medir(self, _nombre, md):
@@ -503,42 +642,31 @@ class Motor(QObject):
         return self._nivel
 
     def info_audio(self):
-        """Lo que mpv sabe del audio que suena: códec, tasa, formato y tasa de bits (o {})."""
-        if self._cerrado:
-            return {}
-        datos = {}
-        for clave, prop in (("codec", "audio-codec-name"), ("params", "audio-params"),
-                            ("bitrate", "audio-bitrate")):
-            try:
-                datos[clave] = self.mpv._get_property(prop)
-            except Exception:
-                datos[clave] = None
-        return datos
+        """Lo que mpv avisó del audio que suena: códec, tasa, formato y tasa de bits (o {})."""
+        return {} if self._cerrado else dict(self._audio_real)
 
     def fijar_aceleracion(self, si):
         if self.es_video:
-            try:
-                self.mpv["hwdec"] = "auto-safe" if si else "no"
-            except Exception:
-                pass
+            self._poner("hwdec", "auto-safe" if si else "no")
 
     def info_video(self):
-        if not self.es_video:
-            return {}
-        try:
-            vp = self.mpv.video_params or {}
-            return {"ancho": vp.get("w"), "alto": vp.get("h"),
-                    "hwdec": self.mpv.hwdec_current or "no",
-                    "fps": self.mpv.container_fps or 0,
-                    "caidos": self.mpv.frame_drop_count or 0}
-        except Exception:
+        """Lo último leído del video (tamaño, decodificador, cuadros perdidos); la lectura siguiente queda
+        pedida: quien pregunta cada 2 s siempre tiene un dato fresco y nunca espera."""
+        if not self.es_video or self._cerrado:
             return {}
 
-    def cerrar(self):
-        """Apaga mpv sin colgar la salida: si tarda mas de 1,5 s se deja atras
-        (el proceso termina igual)."""
+        def leer(m):
+            vp = m.video_params or {}
+            self._video_real = {"ancho": vp.get("w"), "alto": vp.get("h"), "hwdec": m.hwdec_current or "no",
+                                "fps": m.container_fps or 0, "caidos": m.frame_drop_count or 0}
+        self.orden(leer, "leer-video")
+        return dict(self._video_real)
+
+    def cerrar(self, al_terminar=None, esperar=True):
+        """Apaga mpv sin colgar la salida. `esperar`: hasta 1,5 s (al salir de Caudal; si tarda más se deja
+        atrás). Sin esperar, `al_terminar` se llama cuando ya está apagado, DESDE SU HILO."""
         self._cerrado = True
-        import threading
+        self._apagado = listo = threading.Event()
 
         def apagar():
             try:
@@ -549,9 +677,15 @@ class Motor(QObject):
                 self.mpv.terminate()
             except Exception:
                 pass
-        hilo = threading.Thread(target=apagar, daemon=True)
-        hilo.start()
-        hilo.join(1.5)
+            listo.set()
+            if al_terminar is not None:
+                try:
+                    al_terminar()
+                except Exception:  # noqa: BLE001
+                    pass
+        self._ordenes.acabar(apagar)
+        if esperar:
+            listo.wait(1.5)
 
 
 class EstadoSesion:
@@ -598,6 +732,7 @@ class Reproductor(QObject):
     posicion_cambio = Signal(float)
     duracion_cambio = Signal(float)
     cola_cambio = Signal()
+    mix_cambio = Signal()                  # la ficha de lo que sigue solo («Populares», «Descubrir»)
     modo_cambio = Signal(str)              # audio | video
     calidad_cambio = Signal(object)        # datos del stream que suena
     audio_real_cambio = Signal(object)     # códec y tasa del audio que mpv decodifica de verdad
@@ -633,6 +768,8 @@ class Reproductor(QObject):
         self._segmentos = []
         self._escucha_registrada = False
         self._buscando_radio = False
+        self.tipo_mix = "todo"
+        self._mix_pendiente = ""
         self._fundido = None
         self._ultimo_guardado = 0.0
         self._sesion_estado = EstadoSesion()
@@ -715,15 +852,21 @@ class Reproductor(QObject):
         self.aplicar_sonido()
         return m
 
-    def soltar_video(self, nombre):
-        """Una pantalla que se cierra (p. ej. la escena de escritorio) suelta su motor."""
+    def soltar_video(self, nombre, al_terminar=None):
+        """Una pantalla que se cierra (p. ej. la escena de escritorio) suelta su motor. Con `al_terminar` no
+        se espera: se avisa (desde otro hilo) cuando mpv ya dejó la ventana."""
         m = self.videos.pop(nombre, None)
         if self.destino_video == nombre:
             self.destino_video = "principal"
         if m is not None:
             if self._traspaso and self._traspaso.get("saliente") is m:
                 self._traspaso = None
-            m.cerrar()
+            if al_terminar is None:
+                m.cerrar()
+            else:
+                m.cerrar(al_terminar=al_terminar, esperar=False)
+        elif al_terminar is not None:
+            al_terminar()
 
     def motor_actual(self):
         if self.modo == "video":
@@ -810,12 +953,24 @@ class Reproductor(QObject):
         previa = -max(bandas) * 0.6 if any(g > 0 for g in bandas) else 0.0
         return previa, partes
 
+    def fijar_karaoke(self, voz="original", tono=0):
+        """Voz de la canción y tono del karaoke (no se guarda: al salir del karaoke todo vuelve a sonar normal)."""
+        nuevo = (voz, karaoke_audio.tono_valido(tono))
+        nuevo = None if nuevo == ("original", 0) else nuevo
+        if nuevo == getattr(self, "_karaoke", None):
+            return
+        self._karaoke = nuevo
+        self.aplicar_sonido()
+
     def cadena_filtros(self, pista=None, extra=(), fuente=None):
         """Los filtros de sonido de una canción: preamplificador/margen, ecualizador (el normal o el
         avanzado), `extra` (el de 3 bandas del Mezclador), modo noche, envolvente y, al final, el
         limitador de picos verdaderos que deja subir la ganancia de «Volumen máximo» sin recortar."""
         previa, partes = self._previa()
         partes = list(partes) + list(extra)
+        k = getattr(self, "_karaoke", None)
+        if k:
+            partes = karaoke_audio.partes(*k) + partes
         nivel = sonoridad.nivel_efectivo(self.ajustes)
         # Igualar el volumen entre canciones SIN tocar el de dentro de cada una: una ganancia fija
         # por canción (lo medido con ebur128). Nada de loudnorm/dynaudnorm, que suben y bajan
@@ -1093,6 +1248,78 @@ class Reproductor(QObject):
             self.proximas.insert(destino, p)
             self.cola_cambio.emit()
 
+    def mover_en_secuencia(self, origen, destino):
+        """Cambia de sitio una canción de las que faltan (posiciones absolutas en la secuencia)."""
+        n = len(self.secuencia)
+        if not (self.pos < origen < n and self.pos < destino < n) or origen == destino:
+            return
+        p = self.secuencia.pop(origen)
+        self.secuencia.insert(destino, p)
+        if not self.aleatorio:
+            # sin aleatorio, el orden de la lista es el que se ve: que no se deshaga al conmutarlo
+            lugar = {id(x): i for i, x in enumerate(self.secuencia)}
+            sitios = [i for i, x in enumerate(self.original) if lugar.get(id(x), -1) > self.pos]
+            faltan = sorted((self.original[i] for i in sitios), key=lambda x: lugar[id(x)])
+            for i, x in zip(sitios, faltan):
+                self.original[i] = x
+        self.cola_cambio.emit()
+
+    def elegir_mix(self, tipo):
+        """Qué canciones siguen solas («todo», «populares», «descubrir»): cambia las automáticas que
+        faltan; lo que pusiste tú no se toca."""
+        from . import mix_continuo
+        tipo = mix_continuo.valido(tipo)
+        if tipo == self.tipo_mix and not self._mix_pendiente:
+            return
+        antes, self.tipo_mix = self.tipo_mix, tipo
+        pista, contexto = self.actual, self.contexto
+        if not pista or not pista.get("video_id"):
+            return
+        self._mix_pendiente = tipo
+        self.mix_cambio.emit()
+
+        def listo(datos):
+            if self._mix_pendiente != tipo:
+                return                       # entretanto se eligió otra ficha
+            self._mix_pendiente = ""
+            # si entretanto se puso otra cosa, la ficha queda elegida para cuando haga falta
+            if self.contexto is contexto and not self._renovar_automaticas(datos.get("pistas") or []):
+                self.tipo_mix = antes
+            self.mix_cambio.emit()
+
+        def fallo(_e):
+            if self._mix_pendiente == tipo:
+                self._mix_pendiente = ""
+                self.tipo_mix = antes
+                self.mix_cambio.emit()
+                self.aviso.emit("No se pudieron traer esas canciones. Revisa tu internet.")
+
+        en_segundo_plano(mix_continuo.candidatas, self.coleccion, pista, tipo, ok=listo, error=fallo,
+                         dueno=self)
+
+    def _renovar_automaticas(self, pistas):
+        quedan = self.secuencia[:self.pos + 1] + [p for p in self.secuencia[self.pos + 1:]
+                                                  if not p.get("_auto")]
+        vistos = {p.get("video_id") for p in quedan} | {p.get("video_id") for p in self.proximas}
+        nuevas = []
+        for p in pistas:
+            v = p.get("video_id")
+            if v and v not in vistos:
+                vistos.add(v)
+                nuevas.append(dict(p, _auto=True))
+        if not nuevas:
+            self.aviso.emit("No hay canciones de ese tipo para esta canción.")
+            return False
+        fuera = {id(p) for p in self.secuencia} - {id(p) for p in quedan}
+        self.secuencia = quedan + nuevas
+        self.original = [p for p in self.original if id(p) not in fuera] + nuevas
+        self.cola_cambio.emit()
+        return True
+
+    @property
+    def mix_cargando(self):
+        return bool(self._mix_pendiente)
+
     def vaciar_proximas(self):
         self.proximas.clear()
         self.cola_cambio.emit()
@@ -1224,7 +1451,7 @@ class Reproductor(QObject):
             return
         objetivo = self._avanzar()
         if objetivo is None:
-            if self.ajustes["autoplay"] and self.actual.get("video_id"):
+            if self.ajustes["autoplay"] and (self.actual.get("video_id") or soundcloud.es(self.actual)):
                 self._pedir_radio(self.actual, reemplazar_contexto=False, y_seguir=True)
             else:
                 self.detener()
@@ -1281,20 +1508,16 @@ class Reproductor(QObject):
         def listo(datos):
             self._buscando_radio = False
             nuevas = []
-            vistos = {p.get("video_id") for p in self.secuencia}
+            vistos = {p.get("video_id") or p.get("clave") for p in self.secuencia}
             candidatas = datos.get("pistas") or []
-            # sin lo que sueles saltar ni lo que ya sonó estos días
-            try:
-                from . import recomendador
-                self._gusto = recomendador.gusto(self.coleccion)     # al día: lo saltado hoy cuenta
-                candidatas = recomendador.limpiar_radio(candidatas, self._gusto)
-            except Exception:  # noqa: BLE001
-                pass
+            if datos.get("gusto") is not None:
+                self._gusto = datos["gusto"]
             for p in candidatas:
-                if p.get("video_id") and p["video_id"] not in vistos:
+                quien = p.get("video_id") or (soundcloud.es(p) and p.get("clave"))
+                if quien and quien not in vistos:
                     p["_auto"] = True
                     nuevas.append(p)
-                    vistos.add(p["video_id"])
+                    vistos.add(quien)
             if not nuevas:
                 if y_seguir:
                     self.detener()
@@ -1310,10 +1533,29 @@ class Reproductor(QObject):
             if y_seguir:
                 self.detener()
 
-        def pedir(video_id):
-            # las «siguientes» de YouTube Music + artista, parecidos, historial y gustos
-            from . import recomendador
+        tipo = self.tipo_mix
+
+        def candidatas_de(video_id):
+            # las «siguientes» de YouTube Music + artista, parecidos, historial y gustos (o la ficha elegida)
+            from . import mix_continuo, recomendador
+            if tipo != "todo":
+                datos = mix_continuo.candidatas(self.coleccion, pista, tipo)
+                if datos.get("pistas"):
+                    return datos
             return recomendador.radio_inteligente(self.coleccion, pista)
+
+        def pedir(video_id):
+            if soundcloud.es(pista):
+                return {"pistas": soundcloud.parecidas(pista.get("url"))}     # la radio de SoundCloud
+            datos = dict(candidatas_de(video_id) or {})
+            # sin lo que sueles saltar ni lo que ya sonó estos días (aquí, que repasar el historial cuesta)
+            try:
+                from . import recomendador
+                datos["gusto"] = recomendador.gusto(self.coleccion)     # al día: lo saltado hoy cuenta
+                datos["pistas"] = recomendador.limpiar_radio(datos.get("pistas") or [], datos["gusto"])
+            except Exception:  # noqa: BLE001
+                datos["gusto"] = None
+            return datos
 
         en_segundo_plano(pedir, pista.get("video_id"), ok=listo, error=fallo, dueno=self)
 
@@ -1338,11 +1580,15 @@ class Reproductor(QObject):
         posicion = self._posicion
         pausado = self.estado == "pausa"
         anterior = self.motor_actual()
-        sonando = self.estado == "sonando" and anterior is not None and not anterior.es_video
+        sonando = self.estado == "sonando" and anterior is not None
         self._terminar_traspaso(False)
-        self._poner_modo(modo)
-        if modo == "video" and sonando and self.actual:
+        traspaso = bool(sonando and self.actual and anterior.es_video != (modo == "video"))
+        if traspaso:
+            # en los dos sentidos: lo de antes sigue sonando hasta que lo nuevo llega al mismo punto (sin silencio).
+            # Antes de avisar del modo: la vista del video tiene que saber ya que aún no hay imagen
             self._traspaso = {"saliente": anterior, "objetivo": None}
+        self._poner_modo(modo)
+        if traspaso:
             self._vigilar_traspaso()
         elif anterior:
             anterior.detener()
@@ -1602,6 +1848,15 @@ class Reproductor(QObject):
                 and getattr(self, "_video_en_sesion", False)):
             QTimer.singleShot(2500, lambda: gen == self._gen and self._preparar_video(vid))
 
+    def adelantar_video(self):
+        """El ratón está sobre «Ver el video»: se va resolviendo ya (medio segundo o más que no se espera)."""
+        p = self.actual
+        if (self.modo != "audio" or not p or p.get("archivo") or not p.get("video_id")
+                or getattr(self, "_adelantado", None) == p.get("video_id")):
+            return
+        self._adelantado = p.get("video_id")
+        self._preparar_video(p["video_id"])
+
     def _preparar_video(self, vid):
         en_segundo_plano(catalogo.resolver, vid, "video", self.calidad_video_efectiva(),
                          self.ajustes["codec_video"], self.ajustes,
@@ -1699,7 +1954,7 @@ class Reproductor(QObject):
         # si quedan pocas, pedir mas canciones parecidas por adelantado
         if (self.ajustes["autoplay"] and self.repetir == "no"
                 and len(self.secuencia) - self.pos <= 3 and not self.proximas
-                and self.actual and self.actual.get("video_id")):
+                and self.actual and (self.actual.get("video_id") or soundcloud.es(self.actual))):
             self._pedir_radio(self.actual)
 
     # ------------------------------------------------------------ avisos de mpv
@@ -2398,11 +2653,33 @@ class Reproductor(QObject):
         self.cola_cambio.emit()
         return True
 
+    def adelantar_actual(self):
+        """Con la app recién abierta: deja lista la canción donde te quedaste, para que pulsar ▶ suene ya
+        (la primera vez YouTube tarda más: hay que cargar el extractor)."""
+        p = self.actual
+        if not p or self.estado != "parado" or self.modo != "audio" or not self.disponible:
+            return False
+        if (p.get("archivo") and os.path.exists(p["archivo"])) or (
+                self.ajustes["preferir_descargado"] and p.get("video_id")
+                and self.coleccion.copia_local(p["video_id"], False)):
+            return False
+        objetivo = p.get("video_id") or p.get("url")
+        if not objetivo:
+            return False
+        en_segundo_plano(catalogo.resolver, objetivo, "audio", self.ajustes["calidad_audio"],
+                         self.ajustes["codec_video"], self.ajustes, ok=lambda _d: None, error=lambda _e: None,
+                         dueno=self)
+        return True
+
     def cerrar(self):
         try:
             self.guardar_sesion()
         except Exception:
             pass
         self.cast.cerrar()
+        # todos a la vez: 1,5 s como mucho entre todos, no cada uno
         for m in self._todos():
-            m.cerrar()
+            m.cerrar(esperar=False)
+        fin = time.monotonic() + 1.5
+        for m in self._todos():
+            m._apagado.wait(max(0.0, fin - time.monotonic()))

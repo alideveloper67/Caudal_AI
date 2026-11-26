@@ -818,7 +818,7 @@ def ventana(app, ctx, monkeypatch):
 
 def test_la_ventana_trae_el_modo_gamer_en_la_navegacion(app, ventana, ctx):
     from descargador.ui.panel_lateral import PanelLateral
-    assert any(c == "gamer" for c, _t, _i in PanelLateral.NAV)
+    assert any(c == "gamer" for c, _t, _i in PanelLateral.NAV + PanelLateral.NAV_MAS)
     assert ctx.gamer is ventana.gamer
     assert not ventana.gamer.activo and not ventana.gamer._registrados   # apagado de fábrica
     ventana.show()
@@ -827,7 +827,7 @@ def test_la_ventana_trae_el_modo_gamer_en_la_navegacion(app, ventana, ctx):
     from descargador.ui.paginas.modo_gamer import PaginaModoGamer
     pag = ventana.pila.currentWidget()
     assert isinstance(pag, PaginaModoGamer)
-    assert ventana.lateral.botones["gamer"].isChecked()
+    assert ventana.lateral.botones["gamer"]._activo
     ventana.hide()
 
 

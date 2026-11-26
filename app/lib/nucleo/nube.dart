@@ -287,6 +287,10 @@ class Sesion {
   final Map<String, dynamic> metadatos;
   Future<void>? _renovando;
 
+  /// Guardar el token nuevo en cuanto se renueva (lo pone [Cuenta]). El viejo deja de valer: si la app se
+  /// cierra antes de guardarlo, la próxima vez pediría iniciar sesión.
+  Future<void> Function()? alRenovar;
+
   factory Sesion.desde(Map<String, dynamic> d) {
     final u = (d['user'] as Map?) ?? {};
     return Sesion(
@@ -307,6 +311,9 @@ class Sesion {
           acceso = nueva.acceso;
           refresh = nueva.refresh;
           expira = nueva.expira;
+          try {
+            await alRenovar?.call();
+          } catch (_) {}
         } finally {
           _renovando = null;
         }
@@ -408,7 +415,8 @@ class Sesion {
 
   Future<void> salir() async {
     try {
-      await Nube._peticion('POST', '/auth/v1/logout', token: acceso);
+      // solo este equipo: sin «scope=local», Supabase cierra la cuenta en todos (la PC incluida)
+      await Nube._peticion('POST', '/auth/v1/logout?scope=local', token: acceso);
     } catch (_) {}
   }
 }

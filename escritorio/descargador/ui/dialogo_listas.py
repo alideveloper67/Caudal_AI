@@ -104,11 +104,17 @@ class DialogoListas(QDialog):
         raiz.addWidget(self.canciones, 1)
 
         self.bt_me_gusta_externos = QPushButton(
-            "Pasar tus me gusta de Spotify, YouTube Music o SoundCloud…")
+            "Vincular Spotify, YouTube y SoundCloud (tus me gusta)…")
         self.bt_me_gusta_externos.setObjectName("enlace")
         self.bt_me_gusta_externos.setCursor(Qt.PointingHandCursor)
         self.bt_me_gusta_externos.clicked.connect(self._abrir_me_gusta)
         raiz.addWidget(self.bt_me_gusta_externos, 0, Qt.AlignLeft)
+
+        self.casilla_original = QCheckBox("Dejarlas tal cual están en SoundCloud (remixes y subidas propias; suenan en esta PC)")
+        self.casilla_original.setToolTip("Sin marcar, Caudal busca cada una en YouTube Music para que suene también en tu "
+                                         "teléfono, y deja la de SoundCloud solo cuando no está allí.")
+        self.casilla_original.hide()
+        raiz.addWidget(self.casilla_original)
 
         fila2 = QHBoxLayout()
         self.casilla_todas = QCheckBox("Marcar todas")
@@ -154,8 +160,11 @@ class DialogoListas(QDialog):
     def _pegar(self):
         texto = QApplication.clipboard().text().strip()
         if texto:
-            self.campo.setText(texto)
-            self._leer()
+            self.abrir_enlace(texto)
+
+    def abrir_enlace(self, url):
+        self.campo.setText(url)
+        self._leer()
 
     def _leer(self):
         url = self.campo.text().strip()
@@ -204,6 +213,7 @@ class DialogoListas(QDialog):
         self.canciones.blockSignals(False)
         self._marcadas = self.canciones.count()
 
+        self.casilla_original.setVisible(any(c.get("sc_url") for c in datos["canciones"]))
         hay = datos["total"] > 0
         self.bt_descargar.setEnabled(hay)
         self.bt_guardar.setEnabled(hay)
@@ -243,6 +253,8 @@ class DialogoListas(QDialog):
         for i in range(self.canciones.count()):
             if self.canciones.item(i).checkState() == Qt.Checked:
                 salida.append(self.lista["canciones"][i])
+        if not self.casilla_original.isHidden() and self.casilla_original.isChecked():
+            salida = [dict(c, directa=True) if c.get("sc_url") else c for c in salida]
         return salida
 
     def _actualizar_boton(self, *_):

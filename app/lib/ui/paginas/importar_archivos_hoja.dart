@@ -8,6 +8,7 @@ import '../comunes.dart';
 import '../servicios.dart';
 import '../tema.dart';
 import 'importar_pagina.dart';
+import 'me_gusta_externos_pagina.dart';
 
 /// El botón "Traer" de Tu biblioteca: una lista de otra app o canciones que
 /// ya tienes en el teléfono.
@@ -20,6 +21,12 @@ Future<void> hojaTraer(BuildContext context) async {
         const Padding(
           padding: EdgeInsets.fromLTRB(20, 4, 20, 8),
           child: Align(alignment: Alignment.centerLeft, child: Text('Traer música', style: estiloTituloSeccion)),
+        ),
+        ListTile(
+          leading: CircleAvatar(backgroundColor: C.superficie3, child: Icon(Icons.link_rounded, color: C.acento)),
+          title: const Text('Tus me gusta de otra app', style: TextStyle(fontWeight: FontWeight.w700)),
+          subtitle: const Text('Vincula Spotify, YouTube Music o SoundCloud', style: estiloSecundario),
+          onTap: () => Navigator.pop(ctx, 'vincular'),
         ),
         ListTile(
           leading: CircleAvatar(backgroundColor: C.superficie3, child: Icon(Icons.playlist_add_rounded, color: C.acento)),
@@ -38,6 +45,10 @@ Future<void> hojaTraer(BuildContext context) async {
     ),
   );
   if (!context.mounted || eleccion == null) return;
+  if (eleccion == 'vincular') {
+    await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MeGustaExternosPagina()));
+    return;
+  }
   if (eleccion == 'lista') {
     await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const ImportarPagina()));
     return;

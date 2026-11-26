@@ -43,10 +43,15 @@ def resolver_una(cancion, buscar, reintentos=3, espera=1.0, dormir=time.sleep):
                 or " ".join(x for x in (cancion.get("artista"), cancion.get("titulo")) if x)).strip()
     if not consulta:
         return None
+    return con_reintentos(lambda: elegir(cancion, buscar(consulta)), reintentos, espera, dormir)
+
+
+def con_reintentos(funcion, reintentos=3, espera=1.0, dormir=time.sleep):
+    """El resultado de `funcion`, o None si falla todas las veces (red o limite del buscador)."""
     for intento in range(reintentos):
         try:
-            return elegir(cancion, buscar(consulta))
-        except Exception:  # noqa: BLE001 - red o limite del buscador: se espera y se repite
+            return funcion()
+        except Exception:  # noqa: BLE001 - se espera y se repite
             if intento + 1 < reintentos:
                 dormir(espera * (2 ** intento))
     return None
@@ -95,7 +100,7 @@ def emparejar(canciones, buscar_pista, *, desde=0, lote=50, hilos=4,
 def nombre_de(cancion):
     t = cancion.get("titulo") or ""
     a = cancion.get("artista") or ""
-    return f"{a} - {t}" if a and t else (t or a or "Sin nombre")
+    return f"{a} - {t}" if a and t else (t or a or cancion.get("url") or "Sin nombre")
 
 
 def miles(n):

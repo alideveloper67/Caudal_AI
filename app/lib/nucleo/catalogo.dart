@@ -1986,6 +1986,15 @@ class Catalogo {
     return _Cola(pistas, letrasId, relacionadosId, _texto(panel['title']));
   }
 
+  /// Una canción de la que solo se sabe su id de YouTube (null si ya no existe).
+  static Future<Map<String, dynamic>?> pistaDe(String videoId) async {
+    final c = await _cola(videoId: videoId, limite: 1);
+    for (final p in c.pistas) {
+      if (p['video_id'] == videoId) return p;
+    }
+    return null;
+  }
+
   /// playlistPanelVideoRenderer -> pista (las de radio nunca son video).
   static Map<String, dynamic>? _pistaCola(Map v) {
     final vid = _cadena(v['videoId']).isNotEmpty

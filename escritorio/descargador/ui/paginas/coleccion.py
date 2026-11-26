@@ -309,17 +309,22 @@ class PaginaColeccion(Pagina):
         if self.tipo == "mi_lista":
             acciones.boton("compartir", "Compartir esta lista con un código", self._compartir, 24, 40)
             acciones.boton("editar", "Editar nombre y descripción", self._editar, 22, 40)
+        if self.tipo == "me_gusta":
+            self.bt_vincular = acciones.boton(
+                "enlace", "Vincular Spotify, YouTube y SoundCloud: trae aquí tus me gusta",
+                lambda: ctx.ventana._pasar_me_gusta(), 24, 40)
         self.bt_mas = acciones.boton("puntos", "Más opciones", self._menu_mas, 24, 40)
         acciones.h.addStretch(1)
         self.e_filtro = QLineEdit()
         self.e_filtro.setObjectName("filtro_lista")
         self.e_filtro.setPlaceholderText("Buscar en la lista")
-        self.e_filtro.setFixedWidth(220)
+        self.e_filtro.setMinimumWidth(110)         # con la ventana estrecha encoge: no ensancha la página
+        self.e_filtro.setMaximumWidth(220)
         self.e_filtro.setClearButtonEnabled(True)
         self.e_filtro.addAction(iconos.icono("lupa", 16, C["texto2"]), QLineEdit.LeadingPosition)
         self.e_filtro.setText(self.filtro)
         self.e_filtro.textChanged.connect(self._filtrar)
-        acciones.widget(self.e_filtro)
+        acciones.h.addWidget(self.e_filtro, 2)
         self.bt_orden = QPushButton(dict(ORDENES)[self.orden] + "  ")
         self.bt_orden.setObjectName("enlace")
         self.bt_orden.setCursor(Qt.PointingHandCursor)
@@ -358,6 +363,13 @@ class PaginaColeccion(Pagina):
         icono, t, s = textos.get(self.tipo, ("musica", "No hay canciones", ""))
         self._w_vacia = SinResultados(icono, t, s)
         self.cuerpo.addWidget(self._w_vacia)
+        if self.tipo == "me_gusta":
+            b = QPushButton("  Vincular Spotify, YouTube y SoundCloud")
+            b.setObjectName("contorno")
+            b.setIcon(iconos.icono("enlace", 15, C["texto"]))
+            b.setCursor(Qt.PointingHandCursor)
+            b.clicked.connect(lambda: self.ctx.ventana._pasar_me_gusta())
+            self.cuerpo.addWidget(b, 0, Qt.AlignHCenter)
 
     def _ordenadas(self):
         pistas = list(self.pistas)

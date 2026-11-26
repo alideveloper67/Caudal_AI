@@ -279,7 +279,7 @@ def test_sesion_guardada_sin_internet_entra_igual(datos_aislados, monkeypatch):
     assert cuenta["usuario"] == "kevin" and cuenta["sin_conexion"] is True
 
     def caducada(_t):
-        raise nube.ErrorNube("caduco")
+        raise nube.SesionCaducada("caduco")
     monkeypatch.setattr(nube, "renovar", caducada)
     assert c.recordada() is None                      # sesion caducada: se olvida
 

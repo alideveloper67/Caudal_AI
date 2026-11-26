@@ -12,12 +12,14 @@ from PySide6.QtGui import (QBrush, QColor, QFont, QFontMetrics, QFontMetricsF, Q
                            QPainter, QPainterPath, QPen)
 from PySide6.QtWidgets import QWidget
 
+from .. import epica
 from .. import estilo_letra as estilos
 from .. import tipografia_letra
 from ..componentes import a_la_vista
 from .estilo import (BRILLO, DOMINANTE, SEGUNDO, TEXTO, TEXTO_2, TEXTO_3, acento_legible, fuente,
                      fuente_impacto, preparar_transparente)
 
+ADELANTO_ESCENA_MS = 220      # lo que la escena adelanta la letra (ventana.ADELANTO_LETRA_MS)
 CANTO_POR_DEFECTO = 1800      # ms que dura cantar una línea si no lo dice
 DURACION_ENTRADA = 0.28       # s que tarda una palabra en asentarse
 DURACION_CAMBIO = 0.42        # s de la transición entre líneas
@@ -237,11 +239,21 @@ class _Disposicion:
 
 
 class LetraCinetica(QWidget):
-    """Letra de la canción en grande, translúcida, sincronizada con el ms de reproducción."""
+    """Letra de la canción en grande, translúcida, sincronizada con el ms de reproducción.
 
-    def __init__(self, parent=None):
+    Con `con_epica` (la escena), si hay una letra épica elegida la pinta ella (ui/epica): planos montados como
+    un edit, movidos por el instante de la canción y el golpe de la música."""
+
+    def __init__(self, parent=None, con_epica=False):
         super().__init__(parent)
         preparar_transparente(self)
+        self._con_epica = bool(con_epica)
+        self._epica = epica.actual() if con_epica else epica.NINGUNA
+        self._montaje = None          # la letra cortada en planos (se hace al pedirla)
+        self._energia = self._golpe = 0.0
+        self._vivo = False            # en el último cuadro había algo pintado
+        self._mascara_borde = None
+        self._lienzo_epica = None
         self._lineas = []
         self._sincronizada = False
         self._ms = 0
@@ -258,9 +270,10 @@ class LetraCinetica(QWidget):
         self._ef_clave = None         # tamaño con el que se construyeron
         self._cache = {}              # índice efectivo -> disposición (válida para _ef_clave)
         self._timer = QTimer(self)
+        self._timer.setTimerType(Qt.PreciseTimer)
         self._timer.setInterval(33)     # 30 fps: de sobra para la entrada de las palabras
         self._timer.timeout.connect(self._tic)
-        self._estilo = estilos.actual()
+        self._estilo = estilos.efectivo()
         self._colores_estilo = None   # colores con que están pintadas las palabras guardadas
         self._t_colores = QTimer(self)
         self._t_colores.setSingleShot(True)
@@ -268,6 +281,12 @@ class LetraCinetica(QWidget):
         self._t_colores.timeout.connect(self._asentar_colores)
         estilos.suscribir(self)
         tipografia_letra.suscribir(self)
+        if con_epica:
+            epica.suscribir(self)
+        self._t_adelanto = QTimer(self)      # prepara el plano que viene, entre cuadro y cuadro
+        self._t_adelanto.setSingleShot(True)
+        self._t_adelanto.setInterval(0)
+        self._t_adelanto.timeout.connect(self._adelantar_epica)
 
     def sizeHint(self):
         return QSize(620, 420)
@@ -280,6 +299,7 @@ class LetraCinetica(QWidget):
         self._sincronizada = bool(sincronizada) and any(
             linea.get("ms") is not None for linea in self._lineas)
         self._trad = []               # una letra nueva borra las traducciones de la anterior
+        self._montaje = None
         self._ef = None
         self._cache.clear()
         self._indice = -1
@@ -298,9 +318,38 @@ class LetraCinetica(QWidget):
         self._ms = int(ms)
         if not self._sincronizada:
             return
-        if self._avanzar(time.monotonic()):
+        cambio = self._avanzar(time.monotonic())
+        if self._con_planos():
+            # todo sale del instante de la canción: cada aviso es un cuadro (y uno más para limpiar al acabar)
+            viva = self._montaje_epico().viva(self._t_epica())
+            if viva or self._vivo or cambio:
+                self.update()
+            if not viva and cambio:
+                self._arrancar()
+            return
+        if cambio:
             self._arrancar()
             self.update()
+
+    def fijar_audio(self, energia, golpe):
+        """Energía y golpe de la música (0..1): las letras épicas laten con ellos."""
+        self._energia, self._golpe = float(energia or 0.0), float(golpe or 0.0)
+
+    def poner_epica(self, clave):
+        """Una de epica.NOMBRES, o «» para la letra normal."""
+        clave = epica.normalizar(clave)
+        if clave == self._epica:
+            return
+        self._epica = clave
+        self._montaje = None
+        self._arrancar()
+        self.update()
+
+    def epica_puesta(self):
+        return self._epica
+
+    def al_cambiar_letra_epica(self):
+        self.poner_epica(epica.actual())
 
     def poner_mensaje(self, texto):
         """Muestra un mensaje centrado en lugar de la letra. Cadena vacía lo quita."""
@@ -338,11 +387,13 @@ class LetraCinetica(QWidget):
 
     def al_cambiar_estilo_letra(self):
         """Se eligió otro estilo (en el selector o en Ajustes)."""
-        self.poner_estilo(estilos.actual())
+        self.poner_estilo(estilos.efectivo())
 
     def al_cambiar_tipografia(self):
         """Otra tipografía mide distinto: se rehace la disposición (y los trozos si cambian)."""
         self._cache.clear()
+        if self._montaje is not None:
+            self._montaje.olvidar()
         self._prev = None
         if self._sincronizada:
             antes = self._ef
@@ -426,6 +477,10 @@ class LetraCinetica(QWidget):
         """True mientras haya algo que mover: palabras entrando, transición o puntos latiendo."""
         if self._mensaje or not self._sincronizada:
             return False
+        if self._con_planos():
+            # los planos los mueve el reloj de la escena (fijar_ms); aquí solo laten los puntos de una pausa
+            return (self._indice >= 0 and self._efectivas()[self._indice]["pausa"]
+                    and not self._montaje_epico().viva(self._t_epica()))
         if self._prev is not None and ahora - self._prev[1] < DURACION_CAMBIO:
             return True
         if any(ahora - t0 < DURACION_ENTRADA for t0 in self._entradas.values()):
@@ -557,14 +612,19 @@ class LetraCinetica(QWidget):
     def _medir(self, palabras, fuerte, tam):
         """(texto mostrado, es_fuerte, fuente, ascenso, descenso, ancho) de cada palabra."""
         medidas = []
-        caligrafia = tipografia_letra.actual() in tipografia_letra.SIN_MAYUSCULAS
+        original = estilos.original()             # la de siempre: su letra propia, no la elegida
+        caligrafia = not original and tipografia_letra.actual() in tipografia_letra.SIN_MAYUSCULAS
         for k, palabra in enumerate(palabras):
             es = (k == fuerte)
-            f = tipografia_letra.adaptar(
-                fuente_impacto(int(round(tam * FACTOR_FUERTE)) if es else int(round(tam))))
+            f = fuente_impacto(int(round(tam * FACTOR_FUERTE)) if es else int(round(tam)))
+            if not original:
+                f = tipografia_letra.adaptar(f)
             m = QFontMetricsF(f)
             texto = palabra.upper() if es and not caligrafia else palabra
-            subida, bajada = tipografia_letra.subida_bajada(f)
+            if original:
+                subida, bajada = m.ascent(), m.descent()
+            else:
+                subida, bajada = tipografia_letra.subida_bajada(f)
             medidas.append((texto, es, f, subida, bajada, m.horizontalAdvance(texto)))
         return medidas
 
@@ -695,14 +755,38 @@ class LetraCinetica(QWidget):
     def _pintar_items(self, p, disp, entradas, ahora, dy, opacidad, color_fuerte):
         """Dibuja las palabras de una línea. entradas=None significa línea ya completa."""
         estilo = self._estilo
+        mov = estilos.movimiento()
+        if mov == "latido" and entradas is not None and disp.items:
+            # la línea entera late un poco con el golpe de la música (desde su centro)
+            caja = disp.items[0].rect
+            for it in disp.items[1:]:
+                caja = caja.united(it.rect)
+            s = 1.0 + 0.022 * min(1.0, self._golpe) + 0.008 * math.sin(ahora * 2.4)
+            p.save()
+            p.translate(caja.center().x(), caja.center().y() + dy)
+            p.scale(s, s)
+            p.translate(-caja.center().x(), -caja.center().y() - dy)
+            try:
+                self._pintar_items_movidos(p, disp, entradas, ahora, dy, opacidad, color_fuerte, estilo, mov)
+            finally:
+                p.restore()
+            return
+        self._pintar_items_movidos(p, disp, entradas, ahora, dy, opacidad, color_fuerte, estilo, mov)
+
+    def _pintar_items_movidos(self, p, disp, entradas, ahora, dy, opacidad, color_fuerte, estilo, mov):
+        ultima = None                             # la que acaba de entrar (para el brillo)
+        if entradas is not None and mov == "brillo":
+            llegadas = [(t, i) for i, t in entradas.items() if t is not None]
+            if llegadas:
+                ultima = max(llegadas)[1]
         # la palabra que suena: la última que ha entrado de la línea actual (neón y simple)
         sonando = None
-        con_capas = estilo in estilos.ESTILOS_CAPAS
         if entradas is not None and estilo in ("neon", "simple", "marcador"):
             llegadas = [(entradas[it.indice], it.indice) for it in disp.items
                         if entradas.get(it.indice) is not None]
             if llegadas:
                 sonando = max(llegadas)[1]
+        self._sonando_ahora = sonando
         if estilo == "marcador" and sonando is not None:
             # el resaltador va detrás de TODAS las palabras: no puede tapar la fila de arriba
             for it in disp.items:
@@ -729,8 +813,54 @@ class LetraCinetica(QWidget):
                         escala, dx, alfa = 1.0 + 0.07 * math.sin(math.pi * max(0.0, t)), 0.0, 1.0
                     elif estilo == "marcador":    # el resaltador llega por la izquierda; la palabra, quieta
                         escala, dx = 1.0, 0.0
+            sube = 0.0
+            eco = None
+            if entradas is not None and entradas.get(it.indice) is not None and estilo not in ("contorno", "marcador"):
+                tt = ahora - entradas[it.indice]
+                if mov in ("suave", "ola"):
+                    dur = 0.42 if mov == "suave" else 0.55
+                    e = _ease_out_cubic(tt / dur) if tt < dur else 1.0
+                    escala, dx, alfa = 1.0, 0.0, e
+                    sube = (1.0 - e) * disp.tam * (0.22 if mov == "suave" else 0.45)
+                elif mov == "eco" and tt < 0.7:
+                    eco = 1.0 - tt / 0.7
+                elif mov in ("brillo", "latido") and tt < DURACION_ENTRADA:
+                    e = _ease_out_cubic(tt / DURACION_ENTRADA)        # entra sin el rebote de la clásica
+                    escala, dx = 1.08 - 0.08 * e, 14.0 * (1.0 - e)
+            if mov == "ola" and entradas is not None:
+                sube += math.sin(ahora * 2.0 + it.indice * 0.8) * disp.tam * 0.025
             if alfa <= 0.0:
                 continue
+            if eco:
+                # dos copias que se quedan atrás y se apagan: el eco de la palabra
+                for paso in (2, 1):
+                    self._pintar_una(p, disp, it, entradas, ahora, escala, dx - paso * disp.tam * 0.16 * eco, dy,
+                                     opacidad * alfa * 0.22 * eco * (3 - paso) / 2, color_fuerte, estilo, None)
+            if ultima == it.indice:
+                self._pintar_halo_palabra(p, it, dy, opacidad * alfa, color_fuerte, ahora - entradas[it.indice])
+            self._pintar_una(p, disp, it, entradas, ahora, escala, dx, dy - sube, opacidad * alfa, color_fuerte,
+                             estilo, None)
+
+    def _pintar_halo_palabra(self, p, it, dy, opacidad, color, desde):
+        """Brillo suave detrás de la palabra que suena: crece al entrar y se queda respirando."""
+        k = max(0.5, it.tam / 60.0) if it.tam else 1.0
+        fuerza = min(1.0, desde / 0.25) * (0.75 + 0.25 * math.sin(desde * 3.0))
+        p.save()
+        p.translate(0, dy)
+        p.setBrush(Qt.NoBrush)
+        col = QColor(color)
+        for ancho, a in ((26, 22), (14, 40)):
+            col.setAlpha(int(a * fuerza * opacidad))
+            p.setPen(QPen(col, ancho * k, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+            p.drawPath(it.trazo)
+        p.restore()
+
+    def _pintar_una(self, p, disp, it, entradas, ahora, escala, dx, dy, opacidad_total, color_fuerte, estilo, _x):
+        """Una palabra con su escala y desplazamiento (lo de siempre de cada estilo)."""
+        sonando = getattr(self, "_sonando_ahora", None)
+        alfa = 1.0
+        opacidad = opacidad_total
+        if True:
             # destello al entrar (nítida): la palabra nace con un brillo que se apaga en la transición
             destello = 0.0
             if estilo == "nitida" and entradas is not None:
@@ -738,10 +868,10 @@ class LetraCinetica(QWidget):
                 if t0 is not None:
                     destello = max(0.0, 1.0 - (ahora - t0) / (DURACION_ENTRADA * 1.6))
             es_sonando = it.indice == sonando
-            if con_capas:
+            if estilo in estilos.ESTILOS_CAPAS:
                 desde = None if entradas is None else ahora - entradas[it.indice]
                 self._pintar_con_capas(p, disp, it, es_sonando, desde, escala, dx, dy, opacidad * alfa)
-                continue
+                return
             tenue = 1.0
             if estilo == "neon" and not es_sonando:
                 tenue = OPACIDAD_TENUE_NEON
@@ -967,6 +1097,106 @@ class LetraCinetica(QWidget):
             p.drawText(rect, Qt.AlignLeft | Qt.AlignVCenter, texto)
         p.restore()
 
+    # ----------------------------------------------------------------- letra épica
+
+    def _con_planos(self):
+        return bool(self._epica) and self._sincronizada and bool(self._lineas)
+
+    def _t_epica(self):
+        """El segundo de la canción con que se montan los planos (la escena adelanta la letra normal para que
+        sus transiciones lleguen a tiempo; aquí el golpe es más corto)."""
+        return (self._ms - ADELANTO_ESCENA_MS) / 1000.0 + epica.ADELANTO_S
+
+    def _montaje_epico(self):
+        if self._montaje is None:
+            versos = []
+            con_ms = [(i, l) for i, l in enumerate(self._lineas) if l.get("ms") is not None]
+            for k, (i, l) in enumerate(con_ms):
+                texto = str(l.get("texto") or "").strip()
+                if l.get("pausa") or not texto:
+                    continue
+                sig = con_ms[k + 1][1]["ms"] if k + 1 < len(con_ms) else None
+                canto = l.get("canto")
+                versos.append((i, texto, int(l["ms"]), canto if canto and canto > 0 else CANTO_POR_DEFECTO, sig))
+            self._montaje = epica.Montaje(self._epica, versos, repartir_palabras)
+        return self._montaje
+
+    def _lienzo(self):
+        alto = self.height() - (34.0 if self._traduccion_actual() else 0.0)
+        return epica.Lienzo(self.width(), max(60.0, alto), self.devicePixelRatioF() or 1.0, self._colores_letra(),
+                            self._energia, self._golpe)
+
+    def _adelantar_epica(self):
+        if self._con_planos() and a_la_vista(self):
+            try:
+                if self._montaje_epico().adelantar(self._t_epica(), self._lienzo()):
+                    self._t_adelanto.start()
+            except Exception:  # noqa: BLE001 - un plano raro se verá (o no) a su hora; no tumba la escena
+                pass
+
+    def _borde_suave(self, w, h, dpr):
+        """Máscara que apaga los bordes: lo que entra enorme no se corta contra el filo de la ventanita."""
+        clave = (w, h, dpr)
+        if self._mascara_borde is None or self._mascara_borde[0] != clave:
+            img = QImage(max(1, int(w * dpr)), max(1, int(h * dpr)), QImage.Format_ARGB32_Premultiplied)
+            img.setDevicePixelRatio(dpr)
+            img.fill(QColor(0, 0, 0, 255))
+            q = QPainter(img)
+            q.setCompositionMode(QPainter.CompositionMode_DestinationIn)
+            m = max(10.0, min(w, h) * 0.075)
+            for a, b, largo in (((0, 0), (w, 0), w), ((0, 0), (0, h), h)):
+                g = QLinearGradient(QPointF(*a), QPointF(*b))
+                f = min(0.49, m / max(1.0, largo))
+                for u, al in ((0.0, 0), (f * 0.5, 120), (f, 255), (1 - f, 255), (1 - f * 0.5, 120), (1.0, 0)):
+                    g.setColorAt(u, QColor(0, 0, 0, al))
+                q.fillRect(QRectF(0, 0, w, h), QBrush(g))
+            q.end()
+            self._mascara_borde = (clave, img)
+        return self._mascara_borde[1]
+
+    def _pintar_epica(self, p):
+        w, h = self.width(), self.height()
+        cx = self._lienzo()
+        montaje, t = self._montaje_epico(), self._t_epica()
+        if not montaje.viva(t):
+            if montaje.indice(t) + 1 < len(montaje.planos):
+                self._t_adelanto.start()
+            return False
+        dpr = cx.dpr
+        tam = (max(1, int(w * dpr)), max(1, int(h * dpr)))
+        if self._lienzo_epica is None or (self._lienzo_epica.width(), self._lienzo_epica.height()) != tam:
+            self._lienzo_epica = QImage(tam[0], tam[1], QImage.Format_ARGB32_Premultiplied)
+            self._lienzo_epica.setDevicePixelRatio(dpr)
+        img = self._lienzo_epica
+        img.fill(Qt.transparent)
+        q = QPainter(img)
+        try:
+            q.translate(w / 2.0, cx.h / 2.0)
+            algo = montaje.pintar(q, t, cx)
+            q.resetTransform()
+            q.setOpacity(1.0)
+            q.setClipping(False)
+            q.setCompositionMode(QPainter.CompositionMode_DestinationIn)
+            q.drawImage(0, 0, self._borde_suave(w, h, dpr))
+        finally:
+            q.end()
+        p.drawImage(0, 0, img)
+        self._t_adelanto.start()
+        return algo
+
+    def _pintar_traduccion_epica(self, p, ahora):
+        texto = self._traduccion_actual()
+        if not texto:
+            return
+        f = fuente_impacto(max(TAM_MIN_TRADUCCION, min(26, int(self.height() * 0.075))))
+        p.save()
+        p.setFont(f)
+        p.setOpacity(ALFA_TRADUCCION / 255.0 * min(1.0, max(0.0, (ahora - self._t_linea) / DURACION_TRADUCCION)))
+        rect = QRectF(PAD, self.height() - 42, max(1.0, self.width() - 2 * PAD), 36)
+        texto = QFontMetrics(f).elidedText(texto, Qt.ElideRight, int(rect.width()))
+        _texto_legible(p, rect, Qt.AlignCenter, texto, QColor(255, 240, 210), f.pixelSize() or 18)
+        p.restore()
+
     def _pintar_mensaje(self, p):
         p.setFont(fuente(16))
         p.setPen(TEXTO_2)
@@ -1003,6 +1233,15 @@ class LetraCinetica(QWidget):
             ahora = time.monotonic()
             color_fuerte = acento_legible(self._brillo)
             ef = self._efectivas()
+            if self._con_planos():
+                self._vivo = self._pintar_epica(p)
+                if self._vivo:
+                    self._pintar_traduccion_epica(p, ahora)
+                elif 0 <= self._indice < len(ef) and ef[self._indice]["pausa"]:
+                    disp = self._disposicion(self._indice)
+                    p.translate((self.width() - disp.radio * 7.2) / 2.0 - PAD, 0)
+                    self._pintar_pausa(p, disp, ahora, 0.0, 1.0, color_fuerte)
+                return
 
             # línea siguiente, en pequeño; si es pausa o vacía, no se muestra nada
             sig = self._indice + 1
